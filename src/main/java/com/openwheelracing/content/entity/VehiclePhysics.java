@@ -13,9 +13,9 @@ public final class VehiclePhysics {
     public static final double PIT_LANE_DRAG = ASPHALT_DRAG;
 
     private static final double REVERSE_TOP_SPEED_KMH = 60.0;
-    private static final double[] GEAR_TOP_SPEEDS_KMH = {0.0, 100.0, 135.0, 165.0, 200.0, 240.0, 280.0, 320.0, 360.0};
+    private static final double[] GEAR_TOP_SPEEDS_KMH = {0.0, 100.0, 135.0, 170.0, 205.0, 245.0, 280.0, 320.0, 360.0};
 
-    private static final double CAR_MASS_KG = 805.0;
+    private static final double CAR_MASS_KG = 769.0;
     private static final double GRAVITY = 9.81;
     private static final double ASPHALT_MU_LONGITUDINAL = 2.30;
     private static final double MAX_BRAKE_FORCE = 40_000.0;

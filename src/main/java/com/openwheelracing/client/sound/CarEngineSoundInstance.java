@@ -29,6 +29,8 @@ final class CarEngineSoundInstance extends AbstractTickableSoundInstance {
         new Sample(11_360f, OWRSoundEvents.CAR_ENGINE_RPM_11360)
     };
 
+    private static final float SAMPLE_KEEPALIVE_GAIN = 0.015f;
+
     private final int sampleIndex;
     private final float sampleRpm;
     private OpenwheelCarEntity car;
@@ -64,51 +66,6 @@ final class CarEngineSoundInstance extends AbstractTickableSoundInstance {
 
     static int sampleCount() {
         return SAMPLES.length;
-    }
-
-    static int firstAudibleSample(float rpm) {
-        if (rpm <= SAMPLES[0].rpm || rpm >= SAMPLES[SAMPLES.length - 1].rpm) {
-            return nearestSample(rpm);
-        }
-        for (int i = 0; i < SAMPLES.length - 1; i++) {
-            if (rpm >= SAMPLES[i].rpm && rpm <= SAMPLES[i + 1].rpm) {
-                return i;
-            }
-        }
-        return nearestSample(rpm);
-    }
-
-    static int secondAudibleSample(float rpm) {
-        if (rpm <= SAMPLES[0].rpm || rpm >= SAMPLES[SAMPLES.length - 1].rpm) {
-            return -1;
-        }
-        for (int i = 0; i < SAMPLES.length - 1; i++) {
-            if (rpm >= SAMPLES[i].rpm && rpm <= SAMPLES[i + 1].rpm) {
-                return i + 1;
-            }
-        }
-        return -1;
-    }
-
-    static float displayedRpm(OpenwheelCarEntity car) {
-        return Mth.clamp(car.getRpm(), IDLE_RPM, REDLINE_RPM);
-    }
-
-    int sampleIndex() {
-        return sampleIndex;
-    }
-
-    private static int nearestSample(float rpm) {
-        int closest = 0;
-        float closestDistance = Math.abs(rpm - SAMPLES[0].rpm);
-        for (int i = 1; i < SAMPLES.length; i++) {
-            float distance = Math.abs(rpm - SAMPLES[i].rpm);
-            if (distance < closestDistance) {
-                closest = i;
-                closestDistance = distance;
-            }
-        }
-        return closest;
     }
 
     void replaceCar(OpenwheelCarEntity car) {
@@ -216,22 +173,19 @@ final class CarEngineSoundInstance extends AbstractTickableSoundInstance {
     }
 
     private static float crossfadeGain(float rpm, int index) {
+        float gain = SAMPLE_KEEPALIVE_GAIN;
         if (index == 0 && rpm <= SAMPLES[0].rpm) {
-            return 1.0f;
-        }
-        if (index == SAMPLES.length - 1 && rpm >= SAMPLES[SAMPLES.length - 1].rpm) {
-            return 1.0f;
-        }
-
-        if (index > 0 && rpm >= SAMPLES[index - 1].rpm && rpm <= SAMPLES[index].rpm) {
+            gain = 1.0f;
+        } else if (index == SAMPLES.length - 1 && rpm >= SAMPLES[SAMPLES.length - 1].rpm) {
+            gain = 1.0f;
+        } else if (index > 0 && rpm >= SAMPLES[index - 1].rpm && rpm <= SAMPLES[index].rpm) {
             float t = smoothstep(Mth.clamp((rpm - SAMPLES[index - 1].rpm) / (SAMPLES[index].rpm - SAMPLES[index - 1].rpm), 0.0f, 1.0f));
-            return index == 0 ? 1.0f - t : t;
-        }
-        if (index < SAMPLES.length - 1 && rpm >= SAMPLES[index].rpm && rpm <= SAMPLES[index + 1].rpm) {
+            gain = t;
+        } else if (index < SAMPLES.length - 1 && rpm >= SAMPLES[index].rpm && rpm <= SAMPLES[index + 1].rpm) {
             float t = smoothstep(Mth.clamp((rpm - SAMPLES[index].rpm) / (SAMPLES[index + 1].rpm - SAMPLES[index].rpm), 0.0f, 1.0f));
-            return 1.0f - t;
+            gain = 1.0f - t;
         }
-        return 0.0f;
+        return Math.max(SAMPLE_KEEPALIVE_GAIN, gain);
     }
 
     private static float samplePitch(float rpm, float sampleRpm) {

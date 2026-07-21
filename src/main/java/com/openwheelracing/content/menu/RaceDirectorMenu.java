@@ -3,6 +3,8 @@ package com.openwheelracing.content.menu;
 import com.openwheelracing.content.block.entity.RaceDirectorBlockEntity;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.OWRRaceControlState;
+import com.openwheelracing.content.race.RaceDirectorLapRow;
+import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRBlocks;
 import com.openwheelracing.registry.OWRMenus;
@@ -24,7 +26,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private int page;
     private int lastRaceControlRevision = Integer.MIN_VALUE;
     private int lastLapRecordsRevision = Integer.MIN_VALUE;
-    private OWRNetwork.RaceDirectorSnapshot snapshot = OWRNetwork.RaceDirectorSnapshot.empty();
+    private RaceDirectorSnapshot snapshot = RaceDirectorSnapshot.empty();
 
     public RaceDirectorMenu(int containerId, Inventory playerInventory, FriendlyByteBuf extraData) {
         super(OWRMenus.RACE_DIRECTOR.get(), containerId);
@@ -48,11 +50,11 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         this.page = Math.max(0, page);
     }
 
-    public OWRNetwork.RaceDirectorSnapshot getSnapshot() {
+    public RaceDirectorSnapshot getSnapshot() {
         return snapshot;
     }
 
-    public void applySnapshot(OWRNetwork.RaceDirectorSnapshot snapshot) {
+    public void applySnapshot(RaceDirectorSnapshot snapshot) {
         this.snapshot = snapshot;
         this.page = snapshot.page();
     }
@@ -73,16 +75,16 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         OWRNetwork.sendRaceDirectorSnapshot(serverPlayer, createSnapshot(serverLevel));
     }
 
-    public OWRNetwork.RaceDirectorSnapshot createSnapshot(ServerLevel level) {
+    public RaceDirectorSnapshot createSnapshot(ServerLevel level) {
         OWRRaceControlState controlState = OWRRaceControlState.get(level);
         OWRLapRecords records = OWRLapRecords.get(level);
         int totalLaps = records.getLapCount();
         int maxPage = Math.max(0, (totalLaps - 1) / LAPS_PER_PAGE);
         page = Math.min(page, maxPage);
-        List<OWRNetwork.RaceDirectorLapRow> laps = records.getRecentLaps(page, LAPS_PER_PAGE).stream()
-            .map(OWRNetwork.RaceDirectorLapRow::fromRecord)
+        List<RaceDirectorLapRow> laps = records.getRecentLaps(page, LAPS_PER_PAGE).stream()
+            .map(RaceDirectorLapRow::fromRecord)
             .toList();
-        return new OWRNetwork.RaceDirectorSnapshot(
+        return new RaceDirectorSnapshot(
             controlState.isCheckpointCheckEnabled(),
             controlState.isOffTrackCheckEnabled(),
             controlState.getMinimumValidLapTicks(),

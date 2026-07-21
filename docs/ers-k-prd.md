@@ -21,7 +21,7 @@ The target experience is strategic but forgiving: a good lap feels faster when t
 
 **Current Situation**: The car currently has engine power, setup modes, DRS, braking, traction, tyre wear, damage, and HUD feedback, but no hybrid energy layer. Power delivery is mostly immediate and setup-driven, so there is little lap-to-lap energy strategy beyond gearing, DRS use, and driving line.
 
-**Proposed Solution**: Add an ERS-K-only energy system. Braking converts part of deceleration work into stored energy through a clear energy-transfer formula. Throttle converts stored energy into electric power in Balanced and Attack modes, while Harvest mode performs zero deploy and can apply negative power above 300 km/h to emphasize energy recovery. Player-selected modes control the harvest/deploy bias, with optional tuning for clip thresholds in a setup UI.
+**Proposed Solution**: Add an ERS-K-only energy system. Braking converts part of deceleration work into stored energy through a clear energy-transfer formula. Throttle converts stored energy into electric power in Balanced and Attack modes, while Harvest mode performs zero deploy and can apply negative power above 260 km/h to emphasize energy recovery. Player-selected modes control the harvest/deploy bias, with optional tuning for clip thresholds in a setup UI.
 
 **Business Impact**: This feature deepens the driving loop, makes braking zones tactically meaningful, and gives the prototype car a more modern 2026-inspired identity while preserving the mod's controllable, fun handling direction.
 
@@ -78,7 +78,7 @@ The target experience is strategic but forgiving: a good lap feels faster when t
 **Acceptance Criteria:**
 - [ ] ERS-K deployment occurs only when throttle is active, the car is in a forward gear, and stored energy is above zero.
 - [ ] ERS-K replaces part of the current total output power budget rather than adding unlimited extra power.
-- [ ] Deploy power follows mode-specific behavior: Harvest has 0 positive deploy, Balanced targets about 200 kW nominal deploy and clips after roughly 290 km/h, and Attack provides up to 350 kW without aggressive high-speed super-clipping.
+- [ ] Deploy power follows mode-specific behavior: Harvest has 0 positive deploy, Balanced targets about 200 kW nominal deploy and clips after roughly 260 km/h, and Attack provides up to 350 kW without aggressive high-speed super-clipping.
 - [ ] Deployment drains energy at a rate proportional to actual electric power delivered.
 
 ### Story 3: Change ERS-K Mode With Right-Hand Keys
@@ -150,8 +150,8 @@ storedEnergyJ -= max(0, actualDeployW) * PHYSICS_DT
 ```
 
 - Mode-specific power behavior:
-  - **Harvest**: `modeDeployPowerW = 0`; no positive deployment under throttle. Above 300 km/h, apply a rising negative power curve to simulate high-speed harvesting/drag assistance while still storing energy only within capacity.
-  - **Balanced**: nominal deployment target is about 200 kW. Deployment starts clipping down after roughly 290 km/h. Clip start/end should be tunable either through the car setup GUI or Openwheel setup if exposing it does not clutter the MVP.
+  - **Harvest**: `modeDeployPowerW = 0`; no positive deployment under throttle. Above 260 km/h, apply a rising negative power curve to simulate high-speed harvesting/drag assistance, reaching full negative power around 320 km/h while still storing energy only within capacity.
+  - **Balanced**: `modeDeployPowerW = 200 kW` nominal. Deployment starts clipping down after roughly 260 km/h and reaches its minimum by roughly 315 km/h. Clip start/end should be tunable either through the car setup GUI or Openwheel setup if exposing it does not clutter the MVP.
   - **Attack**: maximum deployment target is 350 kW. Attack should provide full deploy whenever throttle and energy are available, without Harvest-style negative power or aggressive super-clipping.
 - Power-budget rule: existing `PEAK_POWER_WATTS` should be split conceptually into combustion output plus ERS-K output; total peak should remain close to the intended car power envelope until balance testing says otherwise.
 - Speed clip target: Balanced should taper at high speed to mimic 2026-style energy behavior; Attack should feel direct and powerful rather than fading out too early.
@@ -161,13 +161,13 @@ storedEnergyJ -= max(0, actualDeployW) * PHYSICS_DT
 
 | Mode | Intent | Deploy | Harvest | Player Use |
 | --- | --- | --- | --- | --- |
-| Harvest | Recover energy and reduce high-speed energy loss | 0 positive deploy; above 300 km/h can curve into negative power | High | Out lap, recovery laps, recharge after battery depletion, high-speed lift/recovery sections |
-| Balanced | Default race mode | About 200 kW nominal, clipping down after ~290 km/h | Medium | Normal laps without micromanagement |
+| Harvest | Recover energy and reduce high-speed energy loss | 0 positive deploy; above 260 km/h can curve into negative power, full by ~320 km/h | High | Out lap, recovery laps, recharge after battery depletion, high-speed lift/recovery sections |
+| Balanced | Default race mode | About 200 kW nominal, clipping down after ~260 km/h, minimum by ~315 km/h | Medium | Normal laps without micromanagement |
 | Attack | Spend charge aggressively | Full 350 kW whenever throttle and energy are available; no Harvest-style negative power | Braking only | Exits, overtakes, lap push windows |
 
 - Mode behavior should be deterministic, not random or rubber-banded.
 - Balanced mode should be strong enough that casual players can leave it selected for most driving.
-- Harvest mode should never give forward electric boost; its identity is recovery and optional high-speed negative power above 300 km/h.
+- Harvest mode should never give forward electric boost; its identity is recovery and optional high-speed negative power above 260 km/h.
 - Attack mode should feel like the clear push mode: 350 kW maximum deploy, energy-limited, and only normal braking harvest.
 
 **Feature 5: Controls And Networking**
@@ -209,7 +209,7 @@ storedEnergyJ -= max(0, actualDeployW) * PHYSICS_DT
 - **Vehicle physics**: Integrate deploy as part of the existing drive-force/power calculation in `OpenwheelCarEntity`, respecting traction limits and combined-slip behavior.
 - **Persistence**: Save ERS-K energy and selected mode on the car entity; persist to the car item if car state is already written back when dismounted/picked up.
 - **HUD**: Extend existing car HUD with ERS-K state using a custom XP-style bar; do not rely on or modify the vanilla XP bar.
-- **Setup UI**: If implemented in the same pass, expose Balanced clip start/end as an advanced setup value in the car setup GUI or Openwheel setup, defaulting to ~290 km/h clip start.
+- **Setup UI**: If implemented in the same pass, expose Balanced clip start/end as an advanced setup value in the car setup GUI or Openwheel setup, defaulting to ~260 km/h clip start.
 - **Localization**: Update `en_us.json` and `zh_cn.json` with keybind and HUD strings.
 - **Controls**: Add keyboard controls first; wheel/gamepad binding can follow the existing `WheelInputSettings.ButtonRole` pattern.
 
@@ -299,17 +299,17 @@ ERS_HARVEST_DEPLOY_W = 0
 ERS_HARVEST_NEGATIVE_POWER_MAX_W = 80_000 to 140_000
 ERS_MAX_HARVEST_PER_TICK_J = 18_000 to 35_000
 ERS_RECOVERY_EFFICIENCY = 0.35 to 0.45
-BALANCED_DEPLOY_CLIP_START_KMH = 290
-BALANCED_DEPLOY_CLIP_END_KMH = 330 to 350
-HARVEST_NEGATIVE_POWER_START_KMH = 300
-HARVEST_NEGATIVE_POWER_FULL_KMH = 340 to 360
+BALANCED_DEPLOY_CLIP_START_KMH = 260
+BALANCED_DEPLOY_CLIP_END_KMH = 315
+HARVEST_NEGATIVE_POWER_START_KMH = 260
+HARVEST_NEGATIVE_POWER_FULL_KMH = 320
 ```
 
 ### Suggested Mode Targets
 
 ```text
-Harvest:  deploy 0 kW, high harvest, negative power ramps in above 300 km/h
-Balanced: deploy ~200 kW nominal, medium harvest, deploy clips after ~290 km/h
+Harvest:  deploy 0 kW, high harvest, negative power ramps in above 260 km/h
+Balanced: deploy ~200 kW nominal, medium harvest, deploy clips after ~260 km/h
 Attack:   deploy 350 kW max, braking harvest only, no negative power behavior
 ```
 

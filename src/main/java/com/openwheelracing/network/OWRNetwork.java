@@ -10,6 +10,8 @@ import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.OWRRaceControlState;
+import com.openwheelracing.content.race.RaceDirectorLapRow;
+import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.client.hud.LapRankingClient;
 import com.openwheelracing.content.track.TrackEditorMaterial;
 import com.openwheelracing.content.track.TrackEditorMode;
@@ -101,6 +103,11 @@ public final class OWRNetwork {
             .encoder(CycleErsModeMessage::encode)
             .decoder(CycleErsModeMessage::decode)
             .consumerMainThread(CycleErsModeMessage::handle)
+            .add();
+        CHANNEL.messageBuilder(SetErsThresholdsMessage.class)
+            .encoder(SetErsThresholdsMessage::encode)
+            .decoder(SetErsThresholdsMessage::decode)
+            .consumerMainThread(SetErsThresholdsMessage::handle)
             .add();
         CHANNEL.messageBuilder(MountCarMessage.class)
             .encoder(MountCarMessage::encode)
@@ -467,6 +474,56 @@ public final class OWRNetwork {
         }
     }
 
+    public record SetErsThresholdsMessage(int balancedClipStartKmh, int balancedClipEndKmh, int harvestNegativeStartKmh, int harvestNegativeFullKmh,
+            int balancedStartPowerKw, int balancedEndPowerKw, int harvestStartPowerKw, int harvestEndPowerKw, double capacityMj) {
+        private static void encode(SetErsThresholdsMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.balancedClipStartKmh);
+            buffer.writeInt(message.balancedClipEndKmh);
+            buffer.writeInt(message.harvestNegativeStartKmh);
+            buffer.writeInt(message.harvestNegativeFullKmh);
+            buffer.writeInt(message.balancedStartPowerKw);
+            buffer.writeInt(message.balancedEndPowerKw);
+            buffer.writeInt(message.harvestStartPowerKw);
+            buffer.writeInt(message.harvestEndPowerKw);
+            buffer.writeDouble(message.capacityMj);
+        }
+
+        private static SetErsThresholdsMessage decode(FriendlyByteBuf buffer) {
+            return new SetErsThresholdsMessage(
+                buffer.readInt(),
+                buffer.readInt(),
+                buffer.readInt(),
+                buffer.readInt(),
+                buffer.readInt(),
+                buffer.readInt(),
+                buffer.readInt(),
+                buffer.readInt(),
+                buffer.readDouble()
+            );
+        }
+
+        private static void handle(SetErsThresholdsMessage message, CustomPayloadEvent.Context context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
+                    return;
+                }
+                car.setErsTuning(
+                    message.balancedClipStartKmh,
+                    message.balancedClipEndKmh,
+                    message.harvestNegativeStartKmh,
+                    message.harvestNegativeFullKmh,
+                    message.balancedStartPowerKw,
+                    message.balancedEndPowerKw,
+                    message.harvestStartPowerKw,
+                    message.harvestEndPowerKw,
+                    message.capacityMj * 1_000_000.0
+                );
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
     public record MountCarMessage() {
         private static void encode(MountCarMessage message, FriendlyByteBuf buffer) {
         }
@@ -588,40 +645,6 @@ public final class OWRNetwork {
         RankingBoardMessage msg = new RankingBoardMessage(sorted);
         for (net.minecraft.server.level.ServerPlayer p : server.getPlayerList().getPlayers()) {
             CHANNEL.send(msg, net.minecraftforge.network.PacketDistributor.PLAYER.with(p));
-        }
-    }
-
-    public record RaceDirectorSnapshot(boolean checkpointCheckEnabled, boolean offTrackCheckEnabled, int minimumValidLapTicks, int page, int maxPage, int raceControlRevision, int lapRecordsRevision, List<RaceDirectorLapRow> laps) {
-        public static RaceDirectorSnapshot empty() {
-            return new RaceDirectorSnapshot(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, 0, 0, 0, 0, List.of());
-        }
-    }
-
-    public record RaceDirectorLapRow(long id, String driverName, int lapTicks, int checkpointCount, boolean invalidated, String invalidationReason, long startFinishPos, int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled) {
-        public static RaceDirectorLapRow fromRecord(OWRLapRecords.LapRecord record) {
-            OWRLapRecords.CarSnapshot car = record.car();
-            return new RaceDirectorLapRow(record.id(), record.driverName(), record.lapTicks(), record.checkpointCount(), record.invalidated(), record.invalidationReason(), record.startFinishPos(), car.power(), car.grip(), car.aero(), car.gearing(), car.damagePercent(), car.tyreWearPercent(), car.absEnabled());
-        }
-
-        private static void encode(RaceDirectorLapRow row, FriendlyByteBuf buffer) {
-            buffer.writeLong(row.id);
-            buffer.writeUtf(row.driverName);
-            buffer.writeInt(row.lapTicks);
-            buffer.writeInt(row.checkpointCount);
-            buffer.writeBoolean(row.invalidated);
-            buffer.writeUtf(row.invalidationReason);
-            buffer.writeLong(row.startFinishPos);
-            buffer.writeInt(row.power);
-            buffer.writeInt(row.grip);
-            buffer.writeInt(row.aero);
-            buffer.writeInt(row.gearing);
-            buffer.writeInt(row.damagePercent);
-            buffer.writeInt(row.tyreWearPercent);
-            buffer.writeBoolean(row.absEnabled);
-        }
-
-        private static RaceDirectorLapRow decode(FriendlyByteBuf buffer) {
-            return new RaceDirectorLapRow(buffer.readLong(), buffer.readUtf(), buffer.readInt(), buffer.readInt(), buffer.readBoolean(), buffer.readUtf(), buffer.readLong(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readBoolean());
         }
     }
 

@@ -1,6 +1,8 @@
 package com.openwheelracing.client.screen;
 
 import com.openwheelracing.content.menu.RaceDirectorMenu;
+import com.openwheelracing.content.race.RaceDirectorLapRow;
+import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.network.OWRNetwork;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -26,7 +28,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         inventoryLabelY = 1000;
     }
 
-    public static void applySnapshot(OWRNetwork.RaceDirectorSnapshot snapshot) {
+    public static void applySnapshot(RaceDirectorSnapshot snapshot) {
         if (Minecraft.getInstance().screen instanceof RaceDirectorScreen screen) {
             screen.menu.applySnapshot(snapshot);
             if (screen.selectedLapId != -1L && screen.selectedRow() == null) {
@@ -76,7 +78,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     @Override
     protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
-        OWRNetwork.RaceDirectorSnapshot snapshot = menu.getSnapshot();
+        RaceDirectorSnapshot snapshot = menu.getSnapshot();
         graphics.drawString(font, title, 8, 6, 0xFFE8EDF2, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rules"), 8, 54, 0xFFE8EDF2, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.recent_laps"), 8, 66, 0xFFE8EDF2, false);
@@ -112,13 +114,13 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         return localX >= ROW_X && localX <= ROW_X + ROW_WIDTH && localY >= ROW_Y && localY <= ROW_Y + menu.getSnapshot().laps().size() * ROW_HEIGHT;
     }
 
-    private void drawLapRows(GuiGraphics graphics, OWRNetwork.RaceDirectorSnapshot snapshot) {
+    private void drawLapRows(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
         if (snapshot.laps().isEmpty()) {
             graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.no_laps"), ROW_X, ROW_Y, 0xFFC9D1D9, false);
             return;
         }
         for (int index = 0; index < snapshot.laps().size(); index++) {
-            OWRNetwork.RaceDirectorLapRow row = snapshot.laps().get(index);
+            RaceDirectorLapRow row = snapshot.laps().get(index);
             int y = ROW_Y + index * ROW_HEIGHT;
             if (row.id() == selectedLapId) {
                 graphics.fill(ROW_X - 2, y - 1, ROW_X + ROW_WIDTH, y + ROW_HEIGHT - 1, 0xFF3F5F7F);
@@ -129,7 +131,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     }
 
     private void drawSelectedLap(GuiGraphics graphics) {
-        OWRNetwork.RaceDirectorLapRow row = selectedRow();
+        RaceDirectorLapRow row = selectedRow();
         if (row == null) {
             graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.select_lap"), 198, 82, 0xFFC9D1D9, false);
             return;
@@ -144,7 +146,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.abs", row.absEnabled() ? "ON" : "OFF"), 198, y + 64, 0xFFC9D1D9, false);
     }
 
-    private OWRNetwork.RaceDirectorLapRow selectedRow() {
+    private RaceDirectorLapRow selectedRow() {
         return menu.getSnapshot().laps().stream().filter(row -> row.id() == selectedLapId).findFirst().orElse(null);
     }
 

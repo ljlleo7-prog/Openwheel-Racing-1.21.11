@@ -14,6 +14,15 @@ public final class OWRClientInputHandler {
     private static boolean shiftUpWasDown;
     private static boolean shiftDownWasDown;
     private static boolean sentIdleDriveInput;
+    private static int sentBalancedClipStart = Integer.MIN_VALUE;
+    private static int sentBalancedClipEnd = Integer.MIN_VALUE;
+    private static int sentHarvestNegativeStart = Integer.MIN_VALUE;
+    private static int sentHarvestNegativeFull = Integer.MIN_VALUE;
+    private static int sentBalancedStartPower = Integer.MIN_VALUE;
+    private static int sentBalancedEndPower = Integer.MIN_VALUE;
+    private static int sentHarvestStartPower = Integer.MIN_VALUE;
+    private static int sentHarvestEndPower = Integer.MIN_VALUE;
+    private static double sentCapacityMj = Double.NaN;
 
     private OWRClientInputHandler() {
     }
@@ -44,6 +53,7 @@ public final class OWRClientInputHandler {
         }
 
         OpenwheelCarEntity car = (OpenwheelCarEntity) mc.player.getVehicle();
+        syncErsThresholdsIfNeeded(WheelInputSettings.get());
         float keyboardThrottle = isDown(OWRKeyMappings.THROTTLE)    ? 1.0f : 0.0f;
         float keyboardBrake    = isDown(OWRKeyMappings.BRAKE)        ? 1.0f : 0.0f;
         float keyboardSteering = (isDown(OWRKeyMappings.STEER_RIGHT) ? 1.0f : 0.0f)
@@ -111,6 +121,40 @@ public final class OWRClientInputHandler {
             OWRNetwork.CHANNEL.send(new OWRNetwork.CycleErsModeMessage(1), PacketDistributor.SERVER.noArg());
             mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, 1.15f);
         }
+    }
+
+    private static void syncErsThresholdsIfNeeded(WheelInputSettings settings) {
+        if (settings.ersBalancedClipStartKmh == sentBalancedClipStart
+                && settings.ersBalancedClipEndKmh == sentBalancedClipEnd
+                && settings.ersHarvestNegativeStartKmh == sentHarvestNegativeStart
+                && settings.ersHarvestNegativeFullKmh == sentHarvestNegativeFull
+                && settings.ersBalancedStartPowerKw == sentBalancedStartPower
+                && settings.ersBalancedEndPowerKw == sentBalancedEndPower
+                && settings.ersHarvestStartPowerKw == sentHarvestStartPower
+                && settings.ersHarvestEndPowerKw == sentHarvestEndPower
+                && settings.ersCapacityMj == sentCapacityMj) {
+            return;
+        }
+        sentBalancedClipStart = settings.ersBalancedClipStartKmh;
+        sentBalancedClipEnd = settings.ersBalancedClipEndKmh;
+        sentHarvestNegativeStart = settings.ersHarvestNegativeStartKmh;
+        sentHarvestNegativeFull = settings.ersHarvestNegativeFullKmh;
+        sentBalancedStartPower = settings.ersBalancedStartPowerKw;
+        sentBalancedEndPower = settings.ersBalancedEndPowerKw;
+        sentHarvestStartPower = settings.ersHarvestStartPowerKw;
+        sentHarvestEndPower = settings.ersHarvestEndPowerKw;
+        sentCapacityMj = settings.ersCapacityMj;
+        OWRNetwork.CHANNEL.send(new OWRNetwork.SetErsThresholdsMessage(
+            sentBalancedClipStart,
+            sentBalancedClipEnd,
+            sentHarvestNegativeStart,
+            sentHarvestNegativeFull,
+            sentBalancedStartPower,
+            sentBalancedEndPower,
+            sentHarvestStartPower,
+            sentHarvestEndPower,
+            sentCapacityMj
+        ), PacketDistributor.SERVER.noArg());
     }
 
     private static void sendDriveInputIfNeeded(float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering) {

@@ -26,6 +26,15 @@ public class WheelInputSettings {
     public Boolean showSetupHud;
     public Boolean showRankingHud;
     public Boolean showPhysicsDebugHud;
+    public Integer ersBalancedClipStartKmh;
+    public Integer ersBalancedClipEndKmh;
+    public Integer ersHarvestNegativeStartKmh;
+    public Integer ersHarvestNegativeFullKmh;
+    public Integer ersBalancedStartPowerKw;
+    public Integer ersBalancedEndPowerKw;
+    public Integer ersHarvestStartPowerKw;
+    public Integer ersHarvestEndPowerKw;
+    public Double ersCapacityMj;
     public AxisBinding steering = new AxisBinding(-1, false, -1.0f, 1.0f, 0.0f, 0.08f, 1.0f, 1.0f);
     public AxisBinding throttle = new AxisBinding(-1, true, -1.0f, 1.0f, 1.0f, 0.03f, 1.0f, 1.0f);
     public AxisBinding brake = new AxisBinding(-1, true, -1.0f, 1.0f, 1.0f, 0.03f, 1.0f, 1.0f);
@@ -133,6 +142,21 @@ public class WheelInputSettings {
         if (showPhysicsDebugHud == null) {
             showPhysicsDebugHud = true;
         }
+        ersBalancedClipStartKmh = clampInt(ersBalancedClipStartKmh == null ? 260 : ersBalancedClipStartKmh, 220, 350);
+        ersBalancedClipEndKmh = clampInt(ersBalancedClipEndKmh == null ? 315 : ersBalancedClipEndKmh, 230, 360);
+        if (ersBalancedClipEndKmh < ersBalancedClipStartKmh + 10) {
+            ersBalancedClipEndKmh = Math.min(360, ersBalancedClipStartKmh + 10);
+        }
+        ersHarvestNegativeStartKmh = clampInt(ersHarvestNegativeStartKmh == null ? 260 : ersHarvestNegativeStartKmh, 220, 360);
+        ersHarvestNegativeFullKmh = clampInt(ersHarvestNegativeFullKmh == null ? 320 : ersHarvestNegativeFullKmh, 230, 370);
+        if (ersHarvestNegativeFullKmh < ersHarvestNegativeStartKmh + 10) {
+            ersHarvestNegativeFullKmh = Math.min(370, ersHarvestNegativeStartKmh + 10);
+        }
+        ersBalancedStartPowerKw = clampInt(ersBalancedStartPowerKw == null ? 200 : ersBalancedStartPowerKw, 0, 350);
+        ersBalancedEndPowerKw = clampInt(ersBalancedEndPowerKw == null ? 0 : ersBalancedEndPowerKw, 0, 350);
+        ersHarvestStartPowerKw = clampInt(ersHarvestStartPowerKw == null ? 0 : ersHarvestStartPowerKw, -250, 0);
+        ersHarvestEndPowerKw = clampInt(ersHarvestEndPowerKw == null ? -110 : ersHarvestEndPowerKw, -250, 0);
+        ersCapacityMj = clampDouble(ersCapacityMj == null ? 4.0 : ersCapacityMj, 2.0, 12.0);
         EnumMap<ButtonRole, Integer> sanitizedButtons = new EnumMap<>(ButtonRole.class);
         if (buttons != null) {
             for (ButtonRole role : ButtonRole.values()) {
@@ -157,6 +181,15 @@ public class WheelInputSettings {
         settings.showSetupHud = true;
         settings.showRankingHud = true;
         settings.showPhysicsDebugHud = true;
+        settings.ersBalancedClipStartKmh = 260;
+        settings.ersBalancedClipEndKmh = 315;
+        settings.ersHarvestNegativeStartKmh = 260;
+        settings.ersHarvestNegativeFullKmh = 320;
+        settings.ersBalancedStartPowerKw = 200;
+        settings.ersBalancedEndPowerKw = 0;
+        settings.ersHarvestStartPowerKw = 0;
+        settings.ersHarvestEndPowerKw = -110;
+        settings.ersCapacityMj = 4.0;
         settings.buttons = new EnumMap<>(ButtonRole.class);
         return settings;
     }
@@ -243,6 +276,14 @@ public class WheelInputSettings {
     }
 
     public static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static double clampDouble(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
 }

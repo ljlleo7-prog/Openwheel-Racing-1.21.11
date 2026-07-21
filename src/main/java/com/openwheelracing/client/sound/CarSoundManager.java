@@ -65,7 +65,7 @@ public final class CarSoundManager {
                 return true;
             }
             soundSet.updateListener(listenerPosition);
-            soundSet.updateEngines(soundManager);
+            soundSet.updateEngine(soundManager);
             return false;
         });
         selectedCarIds = stillActive;
