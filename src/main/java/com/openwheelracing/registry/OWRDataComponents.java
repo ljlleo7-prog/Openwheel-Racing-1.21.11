@@ -48,6 +48,20 @@ public final class OWRDataComponents {
             .build()
     );
 
+    public static final RegistryObject<DataComponentType<Integer>> ERS_MODE = DATA_COMPONENTS.register("ers_mode",
+        () -> DataComponentType.<Integer>builder()
+            .persistent(Codec.intRange(0, 2))
+            .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.VAR_INT)
+            .build()
+    );
+
+    public static final RegistryObject<DataComponentType<Integer>> ERS_ENERGY_PERCENT = DATA_COMPONENTS.register("ers_energy_percent",
+        () -> DataComponentType.<Integer>builder()
+            .persistent(Codec.intRange(0, 100))
+            .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.VAR_INT)
+            .build()
+    );
+
     public static final RegistryObject<DataComponentType<Integer>> TYRE_COMPOUND = DATA_COMPONENTS.register("tyre_compound",
         () -> DataComponentType.<Integer>builder()
             .persistent(Codec.intRange(0, 4))

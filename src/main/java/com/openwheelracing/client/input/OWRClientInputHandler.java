@@ -101,6 +101,16 @@ public final class OWRClientInputHandler {
             OWRNetwork.CHANNEL.send(new OWRNetwork.ToggleDrsMessage(), PacketDistributor.SERVER.noArg());
             mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 1.0f, 1.0f);
         }
+        while (OWRKeyMappings.ERS_MODE_PREVIOUS.consumeClick()) {
+            car.cycleErsModeLocal(-1);
+            OWRNetwork.CHANNEL.send(new OWRNetwork.CycleErsModeMessage(-1), PacketDistributor.SERVER.noArg());
+            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, 0.85f);
+        }
+        while (OWRKeyMappings.ERS_MODE_NEXT.consumeClick()) {
+            car.cycleErsModeLocal(1);
+            OWRNetwork.CHANNEL.send(new OWRNetwork.CycleErsModeMessage(1), PacketDistributor.SERVER.noArg());
+            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, 1.15f);
+        }
     }
 
     private static void sendDriveInputIfNeeded(float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering) {

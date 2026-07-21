@@ -97,6 +97,11 @@ public final class OWRNetwork {
             .decoder(ToggleDrsMessage::decode)
             .consumerMainThread(ToggleDrsMessage::handle)
             .add();
+        CHANNEL.messageBuilder(CycleErsModeMessage.class)
+            .encoder(CycleErsModeMessage::encode)
+            .decoder(CycleErsModeMessage::decode)
+            .consumerMainThread(CycleErsModeMessage::handle)
+            .add();
         CHANNEL.messageBuilder(MountCarMessage.class)
             .encoder(MountCarMessage::encode)
             .decoder(MountCarMessage::decode)
@@ -436,6 +441,27 @@ public final class OWRNetwork {
                     return;
                 }
                 car.toggleDrs();
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    public record CycleErsModeMessage(int direction) {
+        private static void encode(CycleErsModeMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.direction);
+        }
+
+        private static CycleErsModeMessage decode(FriendlyByteBuf buffer) {
+            return new CycleErsModeMessage(buffer.readInt());
+        }
+
+        private static void handle(CycleErsModeMessage message, CustomPayloadEvent.Context context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
+                    return;
+                }
+                car.cycleErsMode(message.direction);
             });
             context.setPacketHandled(true);
         }

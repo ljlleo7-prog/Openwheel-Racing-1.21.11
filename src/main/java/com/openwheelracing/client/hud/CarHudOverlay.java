@@ -29,6 +29,8 @@ public final class CarHudOverlay {
         int y = graphics.guiHeight() - PANEL_HEIGHT - 8;
 
         if (settings.showDrivingHud) {
+            renderErsMeter(graphics, font, car);
+
             int outlineColor = car.isDrsActive() ? 0xFF00DD44 : 0xFFDA1A20;
             graphics.fill(x, y, x + PANEL_WIDTH, y + PANEL_HEIGHT, 0x99000000);
             graphics.renderOutline(x, y, PANEL_WIDTH, PANEL_HEIGHT, outlineColor);
@@ -79,6 +81,57 @@ public final class CarHudOverlay {
         if (settings.showRankingHud) {
             renderRankingBoard(graphics, font);
         }
+    }
+
+    private static void renderErsMeter(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {
+        int width = 182;
+        int height = 7;
+        int x = (graphics.guiWidth() - width) / 2;
+        int y = graphics.guiHeight() - 31;
+        float energyPercent = Math.max(0.0f, Math.min(100.0f, car.getErsEnergyPercent()));
+        int fillWidth = Math.round((width - 2) * energyPercent / 100.0f);
+        int fillColor = ersEnergyColor(energyPercent);
+        graphics.fill(x - 1, y - 1, x + width + 1, y + height + 1, 0xCC000000);
+        graphics.fill(x, y, x + width, y + height, 0xFF2B2118);
+        if (fillWidth > 0) {
+            graphics.fill(x + 1, y + 1, x + 1 + fillWidth, y + height - 1, fillColor);
+            graphics.fill(x + 1, y + 1, x + 1 + fillWidth, y + 2, 0x66FFFFFF);
+        }
+        graphics.renderOutline(x - 1, y - 1, width + 2, height + 2, 0xFF3F3F3F);
+
+        String left = "ERS " + car.getErsModeLabel();
+        String right = ersActivityLabel(car);
+        int labelY = y - 10;
+        graphics.drawString(font, left, x, labelY, 0xFFE8E8E8, true);
+        graphics.drawString(font, right, x + width - font.width(right), labelY, ersActivityColor(car.getErsActivity()), true);
+    }
+
+    private static int ersEnergyColor(float energyPercent) {
+        if (energyPercent <= 25.0f) {
+            return 0xFFDA1A20;
+        }
+        if (energyPercent <= 65.0f) {
+            return 0xFFFFD044;
+        }
+        return 0xFF34D058;
+    }
+
+    private static String ersActivityLabel(OpenwheelCarEntity car) {
+        return switch (car.getErsActivity()) {
+            case OpenwheelCarEntity.ERS_ACTIVITY_HARVESTING -> String.format("CHG %.0fkW", Math.abs(car.getErsPowerKw()));
+            case OpenwheelCarEntity.ERS_ACTIVITY_DEPLOYING -> String.format("DEP %.0fkW", car.getErsPowerKw());
+            case OpenwheelCarEntity.ERS_ACTIVITY_NEGATIVE -> String.format("NEG %.0fkW", Math.abs(car.getErsPowerKw()));
+            default -> String.format("%3.0f%%", car.getErsEnergyPercent());
+        };
+    }
+
+    private static int ersActivityColor(int activity) {
+        return switch (activity) {
+            case OpenwheelCarEntity.ERS_ACTIVITY_HARVESTING -> 0xFF34D058;
+            case OpenwheelCarEntity.ERS_ACTIVITY_DEPLOYING -> 0xFF99DDFF;
+            case OpenwheelCarEntity.ERS_ACTIVITY_NEGATIVE -> 0xFFFFD044;
+            default -> 0xFFE8E8E8;
+        };
     }
 
     private static void renderRankingBoard(GuiGraphics graphics, Font font) {

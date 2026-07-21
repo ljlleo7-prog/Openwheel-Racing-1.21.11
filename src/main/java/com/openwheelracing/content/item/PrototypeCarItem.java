@@ -33,7 +33,7 @@ public class PrototypeCarItem extends Item {
     }
 
     public static ItemStack createWithDefaultSetup() {
-        return create(PrototypeCarSetup.DEFAULT, 0.0f, 0.0f, 0);
+        return create(PrototypeCarSetup.DEFAULT, 0.0f, 0.0f, 0, OpenwheelCarEntity.ERS_MODE_BALANCED, 100);
     }
 
     public static ItemStack create(PrototypeCarSetup setup, float damage, float tyreWear) {
@@ -41,10 +41,16 @@ public class PrototypeCarItem extends Item {
     }
 
     public static ItemStack create(PrototypeCarSetup setup, float damage, float tyreWear, int livery) {
+        return create(setup, damage, tyreWear, livery, OpenwheelCarEntity.ERS_MODE_BALANCED, 100);
+    }
+
+    public static ItemStack create(PrototypeCarSetup setup, float damage, float tyreWear, int livery, int ersMode, int ersEnergyPercent) {
         ItemStack stack = new ItemStack(com.openwheelracing.registry.OWRItems.PROTOTYPE_CAR_SPAWN.get());
         stack.set(OWRDataComponents.CAR_SETUP.get(), setup);
         stack.set(OWRDataComponents.CAR_DAMAGE.get(), Math.max(0, Math.min(100, Math.round(damage))));
         stack.set(OWRDataComponents.TYRE_WEAR.get(), Math.max(0, Math.min(100, Math.round(tyreWear))));
+        stack.set(OWRDataComponents.ERS_MODE.get(), Math.max(OpenwheelCarEntity.ERS_MODE_HARVEST, Math.min(OpenwheelCarEntity.ERS_MODE_ATTACK, ersMode)));
+        stack.set(OWRDataComponents.ERS_ENERGY_PERCENT.get(), Math.max(0, Math.min(100, ersEnergyPercent)));
         int clampedLivery = Math.max(0, Math.min(CarLivery.count() - 1, livery));
         CarLiveryColors colors = CarLiveryColors.fromPreset(CarLivery.fromIndex(clampedLivery));
         stack.set(OWRDataComponents.CAR_LIVERY.get(), clampedLivery);
@@ -61,6 +67,16 @@ public class PrototypeCarItem extends Item {
     public static int getTyreWear(ItemStack stack) {
         Integer tyreWear = stack.get(OWRDataComponents.TYRE_WEAR.get());
         return tyreWear == null ? 0 : tyreWear;
+    }
+
+    public static int getErsMode(ItemStack stack) {
+        Integer mode = stack.get(OWRDataComponents.ERS_MODE.get());
+        return mode == null ? OpenwheelCarEntity.ERS_MODE_BALANCED : Math.max(OpenwheelCarEntity.ERS_MODE_HARVEST, Math.min(OpenwheelCarEntity.ERS_MODE_ATTACK, mode));
+    }
+
+    public static int getErsEnergyPercent(ItemStack stack) {
+        Integer energy = stack.get(OWRDataComponents.ERS_ENERGY_PERCENT.get());
+        return energy == null ? 100 : Math.max(0, Math.min(100, energy));
     }
 
     public static int getLivery(ItemStack stack) {
@@ -101,6 +117,8 @@ public class PrototypeCarItem extends Item {
             car.setTyreWearPercent(getTyreWear(stack));
             car.setLivery(getLivery(stack));
             car.setLiveryColors(getLiveryColors(stack));
+            car.setErsMode(getErsMode(stack));
+            car.setErsEnergyJoules(OpenwheelCarEntity.ersCapacityJoules() * getErsEnergyPercent(stack) / 100.0);
             level.addFreshEntity(car);
 
             if (!player.getAbilities().instabuild) {

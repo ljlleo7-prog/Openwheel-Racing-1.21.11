@@ -75,6 +75,10 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Integer> LIVERY_ACCENT_2 = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> TYRE_COMPOUND = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> DRS_ACTIVE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Integer> ERS_MODE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Float> ERS_ENERGY = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Integer> ERS_ACTIVITY = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Float> ERS_POWER_KW = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
 
     private static final int PIT_STOP_DURATION = 60; // 3 seconds
     private static final int PIT_RUBBER_COST = 2;    // rubber items consumed per stop
@@ -83,6 +87,14 @@ public class OpenwheelCarEntity extends Entity {
     public static final int LAP_RESULT_SLOWER = 1;
     public static final int LAP_RESULT_PERSONAL_BEST = 2;
     public static final int LAP_RESULT_OVERALL_BEST = 3;
+
+    public static final int ERS_MODE_HARVEST = 0;
+    public static final int ERS_MODE_BALANCED = 1;
+    public static final int ERS_MODE_ATTACK = 2;
+    public static final int ERS_ACTIVITY_NEUTRAL = 0;
+    public static final int ERS_ACTIVITY_HARVESTING = 1;
+    public static final int ERS_ACTIVITY_DEPLOYING = 2;
+    public static final int ERS_ACTIVITY_NEGATIVE = 3;
 
     // Seat offset: eye height = car Y + (-0.62) + player eye height (1.62) ≈ 1.0 above ground
     private static final Vec3 SEAT_OFFSET = new Vec3(0.0, -0.76, 0.05);
@@ -141,6 +153,17 @@ public class OpenwheelCarEntity extends Entity {
     private static final double BRAKE_FRONT_BIAS = 0.58;
     private static final double MIN_POWER_SPEED = 5.0;
     private static final double PEAK_POWER_WATTS = 780_000.0;
+    private static final double ERS_POWER_SHARE_WATTS = 350_000.0;
+    private static final double ERS_CAPACITY_J = 4_000_000.0;
+    private static final double ERS_BALANCED_DEPLOY_WATTS = 200_000.0;
+    private static final double ERS_ATTACK_DEPLOY_WATTS = 350_000.0;
+    private static final double ERS_MAX_HARVEST_PER_TICK_J = 30_000.0;
+    private static final double ERS_RECOVERY_EFFICIENCY = 0.40;
+    private static final double ERS_BALANCED_CLIP_START_KMH = 290.0;
+    private static final double ERS_BALANCED_CLIP_END_KMH = 340.0;
+    private static final double ERS_HARVEST_NEGATIVE_START_KMH = 300.0;
+    private static final double ERS_HARVEST_NEGATIVE_FULL_KMH = 350.0;
+    private static final double ERS_HARVEST_NEGATIVE_POWER_WATTS = 110_000.0;
     private static final double IDLE_RPM = 900.0;
     private static final double LAUNCH_RPM = 4000.0;
     private static final double LAUNCH_CLUTCH_SPEED = 0.42;
@@ -284,6 +307,10 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(LIVERY_ACCENT_2, CarLiveryColors.DEFAULT.accent2());
         builder.define(TYRE_COMPOUND, PrototypeCarSetup.DEFAULT.grip());
         builder.define(DRS_ACTIVE, false);
+        builder.define(ERS_MODE, ERS_MODE_BALANCED);
+        builder.define(ERS_ENERGY, (float) ERS_CAPACITY_J);
+        builder.define(ERS_ACTIVITY, ERS_ACTIVITY_NEUTRAL);
+        builder.define(ERS_POWER_KW, 0.0f);
     }
 
     @Override
@@ -419,6 +446,62 @@ public class OpenwheelCarEntity extends Entity {
 
     public void toggleDrs() {
         setDrsActive(!isDrsActive());
+    }
+
+    public int getErsMode() {
+        return entityData.get(ERS_MODE);
+    }
+
+    public String getErsModeLabel() {
+        return switch (getErsMode()) {
+            case ERS_MODE_HARVEST -> "HARVEST";
+            case ERS_MODE_ATTACK -> "ATTACK";
+            default -> "BALANCED";
+        };
+    }
+
+    public float getErsEnergyPercent() {
+        return (float) (entityData.get(ERS_ENERGY) / ERS_CAPACITY_J * 100.0);
+    }
+
+    public int getErsActivity() {
+        return entityData.get(ERS_ACTIVITY);
+    }
+
+    public float getErsPowerKw() {
+        return entityData.get(ERS_POWER_KW);
+    }
+
+    public static double ersCapacityJoules() {
+        return ERS_CAPACITY_J;
+    }
+
+    public void setErsEnergyJoules(double energyJoules) {
+        entityData.set(ERS_ENERGY, (float) clamp(energyJoules, 0.0, ERS_CAPACITY_J));
+    }
+
+    public void setErsMode(int mode) {
+        entityData.set(ERS_MODE, clampErsMode(mode));
+    }
+
+    public void cycleErsMode(int direction) {
+        if (direction == 0) {
+            return;
+        }
+        int mode = Math.floorMod(getErsMode() + (direction > 0 ? 1 : -1), 3);
+        setErsMode(mode);
+        playShiftFeedback(mode == ERS_MODE_ATTACK ? 1.25f : mode == ERS_MODE_HARVEST ? 0.75f : 1.0f);
+        messageDriver(Component.literal("ERS " + getErsModeLabel()));
+    }
+
+    public void cycleErsModeLocal(int direction) {
+        if (direction != 0) {
+            setErsMode(Math.floorMod(getErsMode() + (direction > 0 ? 1 : -1), 3));
+        }
+    }
+
+    private static int clampErsMode(int mode) {
+        return Math.max(ERS_MODE_HARVEST, Math.min(ERS_MODE_ATTACK, mode));
     }
 
     public float getFrontWheelSteerDegrees() {
@@ -751,7 +834,7 @@ public class OpenwheelCarEntity extends Entity {
 
         // Sneak + empty hand on empty car → pick up as item
         if (getPassengers().isEmpty() && player.isShiftKeyDown() && heldStack.isEmpty()) {
-            ItemStack item = PrototypeCarItem.create(setup, getDamagePercent(), getTyreWearPercent(), getLivery());
+            ItemStack item = PrototypeCarItem.create(setup, getDamagePercent(), getTyreWearPercent(), getLivery(), getErsMode(), Math.round(getErsEnergyPercent()));
             PrototypeCarItem.setLiveryColors(item, getLiveryColors());
             if (!player.addItem(item)) {
                 player.drop(item, false);
@@ -843,6 +926,8 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(CHECKPOINT_ARMED, input.getBooleanOr("CheckpointArmed", false));
         setAbsEnabled(input.getBooleanOr("AbsEnabled", false));
         setTractionControlEnabled(input.getBooleanOr("TractionControlEnabled", false));
+        setErsMode(input.getIntOr("ErsMode", ERS_MODE_BALANCED));
+        setErsEnergyJoules(input.getDoubleOr("ErsEnergy", ERS_CAPACITY_J));
         steeringAngle = input.getDoubleOr("SteeringAngle", 0.0);
         yawRate = input.getDoubleOr("YawRate", 0.0);
         lapStartedAt = input.getLongOr("LapStartedAt", -1L);
@@ -870,6 +955,8 @@ public class OpenwheelCarEntity extends Entity {
         output.putBoolean("CheckpointArmed", hasCheckpoint());
         output.putBoolean("AbsEnabled", isAbsEnabled());
         output.putBoolean("TractionControlEnabled", isTractionControlEnabled());
+        output.putInt("ErsMode", getErsMode());
+        output.putDouble("ErsEnergy", entityData.get(ERS_ENERGY));
         output.putDouble("SteeringAngle", steeringAngle);
         output.putDouble("YawRate", yawRate);
         output.putLong("LapStartedAt", lapStartedAt);
@@ -1234,7 +1321,7 @@ public class OpenwheelCarEntity extends Entity {
         boolean launchClutch = throttle > 0.0 && (gear == 1 || gear == REVERSE_GEAR) && horizontalSpeed < LAUNCH_CLUTCH_SPEED;
         boolean clutchReleasing = clutchReleaseTicks > 0 && gear != NEUTRAL_GEAR;
         int engineRpm = updateEngineRpm(horizontalSpeed, gear, gearTopSpeed, throttle, launchClutch, clutchReleasing);
-        double power = enginePowerWatts(engineRpm) * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
+        double power = combustionPowerWatts(engineRpm) * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
         double tyreSlip = 0.0;
 
         double steerInput = Math.abs(steering) > STEERING_DEADZONE ? steering : 0.0;
@@ -1320,11 +1407,17 @@ public class OpenwheelCarEntity extends Entity {
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
                     && subSpeedBlocksPerTick < pitSpeedLimit) {
                 double releaseT = clutchReleaseTicks / (double) CLUTCH_RELEASE_TICKS;
-                double storedPower = enginePowerWatts(Math.max(engineRpm, clutchReleaseRpm)) * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
+                double storedPower = combustionPowerWatts(Math.max(engineRpm, clutchReleaseRpm)) * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
                 double clutchForce = driveDirection * storedPower * releaseT / MIN_POWER_SPEED;
                 subDriveForceRequest = driveDirection > 0.0
                     ? Math.max(subDriveForceRequest, clutchForce)
                     : Math.min(subDriveForceRequest, clutchForce);
+            }
+            ErsPowerResult ersPower = calculateErsPower(throttle, gear, subSpeedBlocksPerTick, velocityLong, subDt, surface);
+            if (driveDirection > 0.0 && ersPower.powerWatts() != 0.0
+                    && Math.abs(velocityLong) / 20.0 < gearTopSpeed
+                    && subSpeedBlocksPerTick < pitSpeedLimit) {
+                subDriveForceRequest += ersPower.powerWatts() / Math.max(MIN_POWER_SPEED, Math.abs(velocityLong));
             }
             double subForwardRollingFraction = Math.abs(velocityLong) / Math.max(1.0, subSpeed);
             if (subSpeed > 3.0 && subForwardRollingFraction < 0.45 && !clutchReleasing) {
@@ -1671,6 +1764,7 @@ public class OpenwheelCarEntity extends Entity {
         }
         entityData.set(SPEED, (float)(newSpeed * 72.0));
         entityData.set(RPM, rpm);
+        harvestErsFromBraking(horizontalSpeed, newSpeed, brake, surface);
         entityData.set(TYRE_SLIP, (float) Math.max(0.0, Math.min(1.0, tyreSlip)));
         previousHorizontalSpeed = horizontalSpeed;
     }
@@ -2285,6 +2379,74 @@ public class OpenwheelCarEntity extends Entity {
         }
         return PEAK_POWER_WATTS * ENGINE_POWER_POINTS[ENGINE_POWER_POINTS.length - 1];
     }
+
+    private static double combustionPowerWatts(int rpm) {
+        return enginePowerWatts(rpm) * (PEAK_POWER_WATTS - ERS_POWER_SHARE_WATTS) / PEAK_POWER_WATTS;
+    }
+
+    private ErsPowerResult calculateErsPower(double throttle, int gear, double speedBlocksPerTick, double velocityLong, double dt, SurfaceProfile surface) {
+        if (level().isClientSide()) {
+            return new ErsPowerResult(0.0);
+        }
+
+        int mode = getErsMode();
+        double speedKmh = speedBlocksPerTick * VehiclePhysics.KMH_PER_BLOCK_PER_TICK;
+        double storedEnergy = entityData.get(ERS_ENERGY);
+        double powerWatts = 0.0;
+        int activity = ERS_ACTIVITY_NEUTRAL;
+
+        if (mode == ERS_MODE_HARVEST && gear > NEUTRAL_GEAR && velocityLong > 0.0 && speedKmh > ERS_HARVEST_NEGATIVE_START_KMH && surface.countsAsTrack) {
+            double t = smoothstep((speedKmh - ERS_HARVEST_NEGATIVE_START_KMH) / (ERS_HARVEST_NEGATIVE_FULL_KMH - ERS_HARVEST_NEGATIVE_START_KMH));
+            powerWatts = -ERS_HARVEST_NEGATIVE_POWER_WATTS * t;
+            activity = ERS_ACTIVITY_NEGATIVE;
+            storedEnergy = Math.min(ERS_CAPACITY_J, storedEnergy + (-powerWatts) * dt * ERS_RECOVERY_EFFICIENCY);
+        } else if (throttle > 0.0 && gear > NEUTRAL_GEAR && storedEnergy > 1.0 && surface.countsAsTrack) {
+            double requestedPower = switch (mode) {
+                case ERS_MODE_ATTACK -> ERS_ATTACK_DEPLOY_WATTS;
+                case ERS_MODE_BALANCED -> ERS_BALANCED_DEPLOY_WATTS * (1.0 - smoothstep((speedKmh - ERS_BALANCED_CLIP_START_KMH) / (ERS_BALANCED_CLIP_END_KMH - ERS_BALANCED_CLIP_START_KMH)));
+                default -> 0.0;
+            };
+            requestedPower *= throttle;
+            powerWatts = Math.min(requestedPower, storedEnergy / Math.max(1.0E-6, dt));
+            if (powerWatts > 0.0) {
+                storedEnergy -= powerWatts * dt;
+                activity = ERS_ACTIVITY_DEPLOYING;
+            }
+        }
+
+        entityData.set(ERS_ENERGY, (float) clamp(storedEnergy, 0.0, ERS_CAPACITY_J));
+        entityData.set(ERS_ACTIVITY, activity);
+        entityData.set(ERS_POWER_KW, (float) (powerWatts / 1000.0));
+        return new ErsPowerResult(powerWatts);
+    }
+
+    private void harvestErsFromBraking(double previousSpeedBlocksPerTick, double currentSpeedBlocksPerTick, double brake, SurfaceProfile surface) {
+        if (level().isClientSide() || brake <= 0.0 || !onGround() || !surface.countsAsTrack || horizontalCollision) {
+            return;
+        }
+        if (getGear() <= NEUTRAL_GEAR || previousSpeedBlocksPerTick <= currentSpeedBlocksPerTick || previousSpeedBlocksPerTick < 0.04) {
+            return;
+        }
+        double beforeMps = previousSpeedBlocksPerTick * 20.0;
+        double afterMps = currentSpeedBlocksPerTick * 20.0;
+        double kineticDeltaJ = 0.5 * CAR_MASS_KG * Math.max(0.0, beforeMps * beforeMps - afterMps * afterMps);
+        double modeFactor = switch (getErsMode()) {
+            case ERS_MODE_HARVEST -> 1.35;
+            case ERS_MODE_ATTACK -> 0.65;
+            default -> 1.0;
+        };
+        double harvested = Math.min(ERS_MAX_HARVEST_PER_TICK_J, kineticDeltaJ * clamp(brake, 0.0, 1.0) * modeFactor * ERS_RECOVERY_EFFICIENCY);
+        if (harvested <= 1.0) {
+            return;
+        }
+        setErsEnergyJoules(entityData.get(ERS_ENERGY) + harvested);
+        if (entityData.get(ERS_ACTIVITY) == ERS_ACTIVITY_NEUTRAL) {
+            entityData.set(ERS_ACTIVITY, ERS_ACTIVITY_HARVESTING);
+            entityData.set(ERS_POWER_KW, (float) (-harvested / PHYSICS_DT / 1000.0));
+        }
+    }
+
+    private record ErsPowerResult(double powerWatts) {}
 
     private void resetTyreRelaxation() {
         relaxedFlLatForce = 0.0;

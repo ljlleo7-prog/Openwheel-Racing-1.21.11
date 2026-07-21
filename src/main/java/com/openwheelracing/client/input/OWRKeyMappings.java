@@ -20,6 +20,8 @@ public final class OWRKeyMappings {
     public static final KeyMapping TOGGLE_ABS  = new KeyMapping("key.openwheelracing.toggle_abs",  InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V,            CATEGORY);
     public static final KeyMapping TOGGLE_TC   = new KeyMapping("key.openwheelracing.toggle_tc",   InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_C,            CATEGORY);
     public static final KeyMapping TOGGLE_DRS  = new KeyMapping("key.openwheelracing.toggle_drs",  InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_0,            CATEGORY);
+    public static final KeyMapping ERS_MODE_PREVIOUS = new KeyMapping("key.openwheelracing.ers_mode_previous", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_J, CATEGORY);
+    public static final KeyMapping ERS_MODE_NEXT = new KeyMapping("key.openwheelracing.ers_mode_next", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_L, CATEGORY);
     public static final KeyMapping MOUNT_CAR   = new KeyMapping("key.openwheelracing.mount_car",   InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G,            CATEGORY);
     public static final KeyMapping TRACK_EDITOR = new KeyMapping("key.openwheelracing.track_editor", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B,            CATEGORY);
 
@@ -37,6 +39,8 @@ public final class OWRKeyMappings {
         event.register(TOGGLE_ABS);
         event.register(TOGGLE_TC);
         event.register(TOGGLE_DRS);
+        event.register(ERS_MODE_PREVIOUS);
+        event.register(ERS_MODE_NEXT);
         event.register(MOUNT_CAR);
         event.register(TRACK_EDITOR);
     }
