@@ -134,6 +134,11 @@ public final class OWRNetwork {
             .decoder(RaceDirectorSetMinLapTicksMessage::decode)
             .consumerMainThread(RaceDirectorSetMinLapTicksMessage::handle)
             .add();
+        CHANNEL.messageBuilder(RaceDirectorSetErsLimitMessage.class)
+            .encoder(RaceDirectorSetErsLimitMessage::encode)
+            .decoder(RaceDirectorSetErsLimitMessage::decode)
+            .consumerMainThread(RaceDirectorSetErsLimitMessage::handle)
+            .add();
         CHANNEL.messageBuilder(RaceDirectorSetPageMessage.class)
             .encoder(RaceDirectorSetPageMessage::encode)
             .decoder(RaceDirectorSetPageMessage::decode)
@@ -508,16 +513,18 @@ public final class OWRNetwork {
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
+                OWRRaceControlState raceControl = OWRRaceControlState.get(player.level());
                 car.setErsTuning(
                     message.balancedClipStartKmh,
                     message.balancedClipEndKmh,
                     message.harvestNegativeStartKmh,
                     message.harvestNegativeFullKmh,
-                    message.balancedStartPowerKw,
-                    message.balancedEndPowerKw,
-                    message.harvestStartPowerKw,
-                    message.harvestEndPowerKw,
-                    message.capacityMj * 1_000_000.0
+                    Math.min(message.balancedStartPowerKw, raceControl.getMaxBalancedDeployKw()),
+                    Math.min(message.balancedEndPowerKw, raceControl.getMaxBalancedDeployKw()),
+                    -Math.min(Math.abs(message.harvestStartPowerKw), raceControl.getMaxHarvestNegativeKw()),
+                    -Math.min(Math.abs(message.harvestEndPowerKw), raceControl.getMaxHarvestNegativeKw()),
+                    Math.min(message.capacityMj, raceControl.getMaxErsCapacityMj()) * 1_000_000.0,
+                    raceControl.getMaxAttackDeployKw()
                 );
             });
             context.setPacketHandled(true);
@@ -658,6 +665,10 @@ public final class OWRNetwork {
             buffer.writeInt(snapshot.maxPage());
             buffer.writeInt(snapshot.raceControlRevision());
             buffer.writeInt(snapshot.lapRecordsRevision());
+            buffer.writeInt(snapshot.maxErsCapacityMj());
+            buffer.writeInt(snapshot.maxBalancedDeployKw());
+            buffer.writeInt(snapshot.maxAttackDeployKw());
+            buffer.writeInt(snapshot.maxHarvestNegativeKw());
             buffer.writeVarInt(snapshot.laps().size());
             for (RaceDirectorLapRow row : snapshot.laps()) {
                 RaceDirectorLapRow.encode(row, buffer);
@@ -672,12 +683,16 @@ public final class OWRNetwork {
             int maxPage = buffer.readInt();
             int raceControlRevision = buffer.readInt();
             int lapRecordsRevision = buffer.readInt();
+            int maxErsCapacityMj = buffer.readInt();
+            int maxBalancedDeployKw = buffer.readInt();
+            int maxAttackDeployKw = buffer.readInt();
+            int maxHarvestNegativeKw = buffer.readInt();
             int lapCount = buffer.readVarInt();
             java.util.ArrayList<RaceDirectorLapRow> laps = new java.util.ArrayList<>(lapCount);
             for (int index = 0; index < lapCount; index++) {
                 laps.add(RaceDirectorLapRow.decode(buffer));
             }
-            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, laps));
+            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, laps));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, CustomPayloadEvent.Context context) {
@@ -731,6 +746,45 @@ public final class OWRNetwork {
                     return;
                 }
                 OWRRaceControlState.get(player.level()).setMinimumValidLapTicks(message.ticks);
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    public record RaceDirectorSetErsLimitMessage(int limit, int delta) {
+        public static final int CAPACITY = 0;
+        public static final int BALANCED_DEPLOY = 1;
+        public static final int ATTACK_DEPLOY = 2;
+        public static final int HARVEST_NEGATIVE = 3;
+
+        private static void encode(RaceDirectorSetErsLimitMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.limit);
+            buffer.writeInt(message.delta);
+        }
+
+        private static RaceDirectorSetErsLimitMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorSetErsLimitMessage(buffer.readInt(), buffer.readInt());
+        }
+
+        private static void handle(RaceDirectorSetErsLimitMessage message, CustomPayloadEvent.Context context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                    return;
+                }
+                OWRRaceControlState state = OWRRaceControlState.get(player.level());
+                switch (message.limit) {
+                    case CAPACITY -> state.setMaxErsCapacityMj(state.getMaxErsCapacityMj() + message.delta);
+                    case BALANCED_DEPLOY -> state.setMaxBalancedDeployKw(state.getMaxBalancedDeployKw() + message.delta);
+                    case ATTACK_DEPLOY -> state.setMaxAttackDeployKw(state.getMaxAttackDeployKw() + message.delta);
+                    case HARVEST_NEGATIVE -> state.setMaxHarvestNegativeKw(state.getMaxHarvestNegativeKw() + message.delta);
+                    default -> {
+                    }
+                }
+                if (player.getVehicle() instanceof OpenwheelCarEntity car) {
+                    car.applyErsLimits(state.getMaxErsCapacityMj(), state.getMaxBalancedDeployKw(), state.getMaxAttackDeployKw(), state.getMaxHarvestNegativeKw());
+                }
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });
             context.setPacketHandled(true);
         }

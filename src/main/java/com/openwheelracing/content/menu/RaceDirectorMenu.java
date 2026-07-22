@@ -92,6 +92,10 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             maxPage,
             controlState.getRevision(),
             records.getRevision(),
+            controlState.getMaxErsCapacityMj(),
+            controlState.getMaxBalancedDeployKw(),
+            controlState.getMaxAttackDeployKw(),
+            controlState.getMaxHarvestNegativeKw(),
             laps
         );
     }

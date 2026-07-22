@@ -9,7 +9,7 @@ plugins {
     id 'net.minecraftforge.gradle' version '[7.0.3,8)'
 }
 
-version = '1.8.0'
+version = '1.8.1'
 group = 'com.openwheelracing'
 
 // Mojang ships Java 21 to end users in 1.20.5+, so every Gradle Java task should use Java 21.
@@ -23,6 +23,22 @@ java {
 
 // Include generated resources
 sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+sourceSets {
+    liveryPrototype {
+        java.srcDir 'src/liveryPrototype/java'
+    }
+    liveryPrototypeTest {
+        java.srcDir 'src/liveryPrototypeTest/java'
+        compileClasspath += sourceSets.liveryPrototype.output + configurations.testRuntimeClasspath
+        runtimeClasspath += output + compileClasspath
+    }
+}
+
+configurations {
+    liveryPrototypeTestImplementation.extendsFrom testImplementation
+    liveryPrototypeTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
 
 minecraft {
     mappings channel: 'official', version: '1.21.11'
@@ -68,6 +84,25 @@ dependencies {
 
 test {
     useJUnitPlatform()
+}
+
+tasks.register('liveryPrototypeTest', Test) {
+    group = 'verification'
+    description = 'Runs tests for the isolated livery PNG prototype.'
+    testClassesDirs = sourceSets.liveryPrototypeTest.output.classesDirs
+    classpath = sourceSets.liveryPrototypeTest.runtimeClasspath
+    useJUnitPlatform()
+}
+
+check.dependsOn liveryPrototypeTest
+
+tasks.register('exportPrototypeCarLiveryMask', JavaExec) {
+    group = 'openwheelracing'
+    description = 'Exports the prototype car livery template mask PNG.'
+    dependsOn liveryPrototypeClasses
+    classpath = sourceSets.liveryPrototype.runtimeClasspath
+    mainClass = 'com.openwheelracing.livery.LiveryTemplateExporter'
+    args layout.buildDirectory.file('livery/prototype_car_livery_mask.png').get().asFile.absolutePath
 }
 
 tasks.withType(JavaCompile).configureEach {

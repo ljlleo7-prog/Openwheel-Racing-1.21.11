@@ -13,7 +13,11 @@ public class OWRRaceControlState extends SavedData {
         Codec.BOOL.optionalFieldOf("checkpoint_check_enabled", false).forGetter(OWRRaceControlState::isCheckpointCheckEnabled),
         Codec.BOOL.optionalFieldOf("off_track_check_enabled", true).forGetter(OWRRaceControlState::isOffTrackCheckEnabled),
         Codec.INT.optionalFieldOf("minimum_valid_lap_ticks", OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS).forGetter(OWRRaceControlState::getMinimumValidLapTicks),
-        Codec.BOOL.optionalFieldOf("wheel_input_allowed", true).forGetter(OWRRaceControlState::isWheelInputAllowed)
+        Codec.BOOL.optionalFieldOf("wheel_input_allowed", true).forGetter(OWRRaceControlState::isWheelInputAllowed),
+        Codec.INT.optionalFieldOf("max_ers_capacity_mj", 4).forGetter(OWRRaceControlState::getMaxErsCapacityMj),
+        Codec.INT.optionalFieldOf("max_balanced_deploy_kw", 200).forGetter(OWRRaceControlState::getMaxBalancedDeployKw),
+        Codec.INT.optionalFieldOf("max_attack_deploy_kw", 350).forGetter(OWRRaceControlState::getMaxAttackDeployKw),
+        Codec.INT.optionalFieldOf("max_harvest_negative_kw", 110).forGetter(OWRRaceControlState::getMaxHarvestNegativeKw)
     ).apply(instance, OWRRaceControlState::new));
 
     private static final SavedDataType<OWRRaceControlState> TYPE = new SavedDataType<>(
@@ -27,17 +31,26 @@ public class OWRRaceControlState extends SavedData {
     private boolean offTrackCheckEnabled;
     private int minimumValidLapTicks;
     private boolean wheelInputAllowed;
+    private int maxErsCapacityMj;
+    private int maxBalancedDeployKw;
+    private int maxAttackDeployKw;
+    private int maxHarvestNegativeKw;
     private int revision;
 
     public OWRRaceControlState() {
-        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true);
+        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true, 4, 200, 350, 110);
     }
 
-    private OWRRaceControlState(boolean checkpointCheckEnabled, boolean offTrackCheckEnabled, int minimumValidLapTicks, boolean wheelInputAllowed) {
+    private OWRRaceControlState(boolean checkpointCheckEnabled, boolean offTrackCheckEnabled, int minimumValidLapTicks, boolean wheelInputAllowed,
+            int maxErsCapacityMj, int maxBalancedDeployKw, int maxAttackDeployKw, int maxHarvestNegativeKw) {
         this.checkpointCheckEnabled = checkpointCheckEnabled;
         this.offTrackCheckEnabled = offTrackCheckEnabled;
         this.minimumValidLapTicks = Math.max(1, minimumValidLapTicks);
         this.wheelInputAllowed = wheelInputAllowed;
+        this.maxErsCapacityMj = clamp(maxErsCapacityMj, 2, 12);
+        this.maxBalancedDeployKw = clamp(maxBalancedDeployKw, 0, 350);
+        this.maxAttackDeployKw = clamp(maxAttackDeployKw, 0, 350);
+        this.maxHarvestNegativeKw = clamp(maxHarvestNegativeKw, 0, 250);
     }
 
     public static OWRRaceControlState get(ServerLevel level) {
@@ -62,6 +75,22 @@ public class OWRRaceControlState extends SavedData {
 
     public boolean isWheelInputAllowed() {
         return wheelInputAllowed;
+    }
+
+    public int getMaxErsCapacityMj() {
+        return maxErsCapacityMj;
+    }
+
+    public int getMaxBalancedDeployKw() {
+        return maxBalancedDeployKw;
+    }
+
+    public int getMaxAttackDeployKw() {
+        return maxAttackDeployKw;
+    }
+
+    public int getMaxHarvestNegativeKw() {
+        return maxHarvestNegativeKw;
     }
 
     public boolean toggleCheckpointCheck() {
@@ -91,6 +120,46 @@ public class OWRRaceControlState extends SavedData {
         }
         wheelInputAllowed = allowed;
         markChanged();
+    }
+
+    public void setMaxErsCapacityMj(int value) {
+        int clamped = clamp(value, 2, 12);
+        if (maxErsCapacityMj == clamped) {
+            return;
+        }
+        maxErsCapacityMj = clamped;
+        markChanged();
+    }
+
+    public void setMaxBalancedDeployKw(int value) {
+        int clamped = clamp(value, 0, 350);
+        if (maxBalancedDeployKw == clamped) {
+            return;
+        }
+        maxBalancedDeployKw = clamped;
+        markChanged();
+    }
+
+    public void setMaxAttackDeployKw(int value) {
+        int clamped = clamp(value, 0, 350);
+        if (maxAttackDeployKw == clamped) {
+            return;
+        }
+        maxAttackDeployKw = clamped;
+        markChanged();
+    }
+
+    public void setMaxHarvestNegativeKw(int value) {
+        int clamped = clamp(value, 0, 250);
+        if (maxHarvestNegativeKw == clamped) {
+            return;
+        }
+        maxHarvestNegativeKw = clamped;
+        markChanged();
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private void markChanged() {

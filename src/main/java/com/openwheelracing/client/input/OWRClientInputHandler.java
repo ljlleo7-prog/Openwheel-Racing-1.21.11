@@ -14,6 +14,7 @@ public final class OWRClientInputHandler {
     private static boolean shiftUpWasDown;
     private static boolean shiftDownWasDown;
     private static boolean sentIdleDriveInput;
+    private static int lastSyncedCarId = Integer.MIN_VALUE;
     private static int sentBalancedClipStart = Integer.MIN_VALUE;
     private static int sentBalancedClipEnd = Integer.MIN_VALUE;
     private static int sentHarvestNegativeStart = Integer.MIN_VALUE;
@@ -25,6 +26,10 @@ public final class OWRClientInputHandler {
     private static double sentCapacityMj = Double.NaN;
 
     private OWRClientInputHandler() {
+    }
+
+    public static void resetErsSync() {
+        lastSyncedCarId = Integer.MIN_VALUE;
     }
 
     public static void onClientTick(TickEvent.ClientTickEvent.Post event) {
@@ -49,11 +54,12 @@ public final class OWRClientInputHandler {
         }
 
         if (!(mc.player.getVehicle() instanceof OpenwheelCarEntity)) {
+            lastSyncedCarId = Integer.MIN_VALUE;
             return;
         }
 
         OpenwheelCarEntity car = (OpenwheelCarEntity) mc.player.getVehicle();
-        syncErsThresholdsIfNeeded(WheelInputSettings.get());
+        syncErsThresholdsIfNeeded(WheelInputSettings.get(), car);
         float keyboardThrottle = isDown(OWRKeyMappings.THROTTLE)    ? 1.0f : 0.0f;
         float keyboardBrake    = isDown(OWRKeyMappings.BRAKE)        ? 1.0f : 0.0f;
         float keyboardSteering = (isDown(OWRKeyMappings.STEER_RIGHT) ? 1.0f : 0.0f)
@@ -123,8 +129,10 @@ public final class OWRClientInputHandler {
         }
     }
 
-    private static void syncErsThresholdsIfNeeded(WheelInputSettings settings) {
-        if (settings.ersBalancedClipStartKmh == sentBalancedClipStart
+    private static void syncErsThresholdsIfNeeded(WheelInputSettings settings, OpenwheelCarEntity car) {
+        boolean sameCar = car.getId() == lastSyncedCarId;
+        if (sameCar
+                && settings.ersBalancedClipStartKmh == sentBalancedClipStart
                 && settings.ersBalancedClipEndKmh == sentBalancedClipEnd
                 && settings.ersHarvestNegativeStartKmh == sentHarvestNegativeStart
                 && settings.ersHarvestNegativeFullKmh == sentHarvestNegativeFull
@@ -135,6 +143,7 @@ public final class OWRClientInputHandler {
                 && settings.ersCapacityMj == sentCapacityMj) {
             return;
         }
+        lastSyncedCarId = car.getId();
         sentBalancedClipStart = settings.ersBalancedClipStartKmh;
         sentBalancedClipEnd = settings.ersBalancedClipEndKmh;
         sentHarvestNegativeStart = settings.ersHarvestNegativeStartKmh;

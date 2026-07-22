@@ -1,5 +1,6 @@
 package com.openwheelracing.client.screen;
 
+import com.openwheelracing.client.input.OWRClientInputHandler;
 import com.openwheelracing.client.input.WheelInputSettings;
 import java.util.Locale;
 import net.minecraft.client.Minecraft;
@@ -185,6 +186,7 @@ public class OpenwheelSetupScreen extends Screen {
     private void saveAndClose() {
         WheelInputSettings.set(settings);
         WheelInputSettings.save(Minecraft.getInstance());
+        OWRClientInputHandler.resetErsSync();
         closeToParent();
     }
 

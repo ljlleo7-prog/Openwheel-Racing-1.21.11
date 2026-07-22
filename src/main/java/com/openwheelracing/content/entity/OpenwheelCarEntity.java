@@ -88,6 +88,7 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Integer> ERS_HARVEST_START_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> ERS_HARVEST_END_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Float> ERS_CAPACITY = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Integer> ERS_ATTACK_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
 
     private static final int PIT_STOP_DURATION = 60; // 3 seconds
     private static final int PIT_RUBBER_COST = 2;    // rubber items consumed per stop
@@ -112,6 +113,7 @@ public class OpenwheelCarEntity extends Entity {
     public static final int ERS_BALANCED_END_POWER_DEFAULT_KW = 0;
     public static final int ERS_HARVEST_START_POWER_DEFAULT_KW = 0;
     public static final int ERS_HARVEST_END_POWER_DEFAULT_KW = -110;
+    public static final int ERS_ATTACK_POWER_DEFAULT_KW = 350;
     public static final double ERS_CAPACITY_DEFAULT_J = 4_000_000.0;
 
     // Seat offset: eye height = car Y + (-0.62) + player eye height (1.62) ≈ 1.0 above ground
@@ -172,7 +174,6 @@ public class OpenwheelCarEntity extends Entity {
     private static final double MIN_POWER_SPEED = 5.0;
     private static final double PEAK_POWER_WATTS = 780_000.0;
     private static final double ERS_POWER_SHARE_WATTS = 350_000.0;
-    private static final double ERS_ATTACK_DEPLOY_WATTS = 350_000.0;
     private static final double ERS_MAX_HARVEST_PER_TICK_J = 30_000.0;
     private static final double ERS_RECOVERY_EFFICIENCY = 0.40;
     private static final double IDLE_RPM = 900.0;
@@ -331,6 +332,7 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(ERS_HARVEST_START_POWER, ERS_HARVEST_START_POWER_DEFAULT_KW);
         builder.define(ERS_HARVEST_END_POWER, ERS_HARVEST_END_POWER_DEFAULT_KW);
         builder.define(ERS_CAPACITY, (float) ERS_CAPACITY_DEFAULT_J);
+        builder.define(ERS_ATTACK_POWER, ERS_ATTACK_POWER_DEFAULT_KW);
     }
 
     @Override
@@ -540,8 +542,17 @@ public class OpenwheelCarEntity extends Entity {
         return entityData.get(ERS_HARVEST_END_POWER);
     }
 
+    public int getErsAttackPowerKw() {
+        return entityData.get(ERS_ATTACK_POWER);
+    }
+
     public void setErsTuning(int balancedClipStartKmh, int balancedClipEndKmh, int harvestNegativeStartKmh, int harvestNegativeFullKmh,
             int balancedStartPowerKw, int balancedEndPowerKw, int harvestStartPowerKw, int harvestEndPowerKw, double capacityJoules) {
+        setErsTuning(balancedClipStartKmh, balancedClipEndKmh, harvestNegativeStartKmh, harvestNegativeFullKmh, balancedStartPowerKw, balancedEndPowerKw, harvestStartPowerKw, harvestEndPowerKw, capacityJoules, getErsAttackPowerKw());
+    }
+
+    public void setErsTuning(int balancedClipStartKmh, int balancedClipEndKmh, int harvestNegativeStartKmh, int harvestNegativeFullKmh,
+            int balancedStartPowerKw, int balancedEndPowerKw, int harvestStartPowerKw, int harvestEndPowerKw, double capacityJoules, int attackPowerKw) {
         int balancedStart = clampInt(balancedClipStartKmh, 220, 350);
         int balancedEnd = Math.max(balancedStart + 10, clampInt(balancedClipEndKmh, 230, 360));
         int harvestStart = clampInt(harvestNegativeStartKmh, 220, 360);
@@ -556,6 +567,7 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(ERS_BALANCED_END_POWER, clampInt(balancedEndPowerKw, 0, 350));
         entityData.set(ERS_HARVEST_START_POWER, clampInt(harvestStartPowerKw, -250, 0));
         entityData.set(ERS_HARVEST_END_POWER, clampInt(harvestEndPowerKw, -250, 0));
+        entityData.set(ERS_ATTACK_POWER, clampInt(attackPowerKw, 0, 350));
         entityData.set(ERS_CAPACITY, (float) newCapacity);
         if (currentCapacity > 0.0 && newCapacity != currentCapacity) {
             setErsEnergyJoules(entityData.get(ERS_ENERGY) * newCapacity / currentCapacity);
@@ -574,7 +586,23 @@ public class OpenwheelCarEntity extends Entity {
             getErsBalancedEndPowerKw(),
             getErsHarvestStartPowerKw(),
             getErsHarvestEndPowerKw(),
-            getErsCapacityJoules()
+            getErsCapacityJoules(),
+            getErsAttackPowerKw()
+        );
+    }
+
+    public void applyErsLimits(int maxCapacityMj, int maxBalancedDeployKw, int maxAttackDeployKw, int maxHarvestNegativeKw) {
+        setErsTuning(
+            getErsBalancedClipStartKmh(),
+            getErsBalancedClipEndKmh(),
+            getErsHarvestNegativeStartKmh(),
+            getErsHarvestNegativeFullKmh(),
+            Math.min(getErsBalancedStartPowerKw(), maxBalancedDeployKw),
+            Math.min(getErsBalancedEndPowerKw(), maxBalancedDeployKw),
+            -Math.min(Math.abs(getErsHarvestStartPowerKw()), maxHarvestNegativeKw),
+            -Math.min(Math.abs(getErsHarvestEndPowerKw()), maxHarvestNegativeKw),
+            Math.min(getErsCapacityJoules(), maxCapacityMj * 1_000_000.0),
+            Math.min(getErsAttackPowerKw(), maxAttackDeployKw)
         );
     }
 
@@ -1034,7 +1062,8 @@ public class OpenwheelCarEntity extends Entity {
             input.getIntOr("ErsBalancedEndPower", ERS_BALANCED_END_POWER_DEFAULT_KW),
             input.getIntOr("ErsHarvestStartPower", ERS_HARVEST_START_POWER_DEFAULT_KW),
             input.getIntOr("ErsHarvestEndPower", ERS_HARVEST_END_POWER_DEFAULT_KW),
-            input.getDoubleOr("ErsCapacity", ERS_CAPACITY_DEFAULT_J)
+            input.getDoubleOr("ErsCapacity", ERS_CAPACITY_DEFAULT_J),
+            input.getIntOr("ErsAttackPower", ERS_ATTACK_POWER_DEFAULT_KW)
         );
         setErsEnergyJoules(input.getDoubleOr("ErsEnergy", getErsCapacityJoules()));
         steeringAngle = input.getDoubleOr("SteeringAngle", 0.0);
@@ -1074,6 +1103,7 @@ public class OpenwheelCarEntity extends Entity {
         output.putInt("ErsBalancedEndPower", getErsBalancedEndPowerKw());
         output.putInt("ErsHarvestStartPower", getErsHarvestStartPowerKw());
         output.putInt("ErsHarvestEndPower", getErsHarvestEndPowerKw());
+        output.putInt("ErsAttackPower", getErsAttackPowerKw());
         output.putDouble("ErsCapacity", getErsCapacityJoules());
         output.putDouble("SteeringAngle", steeringAngle);
         output.putDouble("YawRate", yawRate);
@@ -2525,7 +2555,7 @@ public class OpenwheelCarEntity extends Entity {
             storedEnergy = Math.min(capacityJoules, storedEnergy + Math.max(0.0, -powerWatts) * dt * ERS_RECOVERY_EFFICIENCY);
         } else if (throttle > 0.0 && gear > NEUTRAL_GEAR && storedEnergy > 1.0 && surface.countsAsTrack) {
             double requestedPower = switch (mode) {
-                case ERS_MODE_ATTACK -> ERS_ATTACK_DEPLOY_WATTS;
+                case ERS_MODE_ATTACK -> getErsAttackPowerKw() * 1000.0;
                 case ERS_MODE_BALANCED -> interpolatePowerWatts(speedKmh, balancedClipStartKmh, balancedClipEndKmh, getErsBalancedStartPowerKw(), getErsBalancedEndPowerKw());
                 default -> 0.0;
             };

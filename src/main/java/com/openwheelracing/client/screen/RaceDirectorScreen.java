@@ -53,6 +53,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         addRenderableWidget(Button.builder(Component.literal("+"), button -> setMinimumLapTicks(menu.getSnapshot().minimumValidLapTicks() + 20))
             .bounds(leftPos + 268, topPos + 22, 18, 16)
             .build());
+        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.CAPACITY, leftPos + 204, topPos + 92, 1);
+        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.BALANCED_DEPLOY, leftPos + 204, topPos + 108, 10);
+        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.ATTACK_DEPLOY, leftPos + 204, topPos + 124, 10);
+        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.HARVEST_NEGATIVE, leftPos + 204, topPos + 140, 10);
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.previous"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorSetPageMessage(Math.max(0, menu.getPage() - 1)), PacketDistributor.SERVER.noArg()))
             .bounds(leftPos + 12, topPos + 166, 60, 16)
             .build());
@@ -84,6 +88,11 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.recent_laps"), 8, 66, 0xFFE8EDF2, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.details"), 198, 66, 0xFFE8EDF2, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rule_status", state(snapshot.checkpointCheckEnabled()), state(snapshot.offTrackCheckEnabled()), formatSeconds(snapshot.minimumValidLapTicks())), 12, 42, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_limits"), 198, 82, 0xFFE8EDF2, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_capacity", snapshot.maxErsCapacityMj()), 226, 94, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_balanced", snapshot.maxBalancedDeployKw()), 226, 110, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_attack", snapshot.maxAttackDeployKw()), 226, 126, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_harvest", snapshot.maxHarvestNegativeKw()), 226, 142, 0xFFC9D1D9, false);
         drawLapRows(graphics, snapshot);
         drawSelectedLap(graphics);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.page", snapshot.page() + 1, snapshot.maxPage() + 1), 146, 170, 0xFFC9D1D9, false);
@@ -133,10 +142,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     private void drawSelectedLap(GuiGraphics graphics) {
         RaceDirectorLapRow row = selectedRow();
         if (row == null) {
-            graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.select_lap"), 198, 82, 0xFFC9D1D9, false);
+            graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.select_lap"), 198, 154, 0xFFC9D1D9, false);
             return;
         }
-        int y = 82;
+        int y = 154;
         graphics.drawString(font, row.driverName(), 198, y, 0xFFE8EDF2, false);
         graphics.drawString(font, formatLapTime(row.lapTicks()) + " / CP " + row.checkpointCount(), 198, y + 12, row.invalidated() ? 0xFFFF7777 : 0xFF7EE787, false);
         BlockPos pos = BlockPos.of(row.startFinishPos());
@@ -152,6 +161,15 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     private void setMinimumLapTicks(int ticks) {
         OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorSetMinLapTicksMessage(Math.max(1, ticks)), PacketDistributor.SERVER.noArg());
+    }
+
+    private void addLimitButtons(int limit, int x, int y, int step) {
+        addRenderableWidget(Button.builder(Component.literal("-"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorSetErsLimitMessage(limit, -step), PacketDistributor.SERVER.noArg()))
+            .bounds(x, y, 18, 14)
+            .build());
+        addRenderableWidget(Button.builder(Component.literal("+"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorSetErsLimitMessage(limit, step), PacketDistributor.SERVER.noArg()))
+            .bounds(x + 74, y, 18, 14)
+            .build());
     }
 
     private static String state(boolean enabled) {
