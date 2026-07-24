@@ -13,6 +13,7 @@ public class ColoredObjModel {
         float x0, float y0, float z0,
         float x1, float y1, float z1,
         float x2, float y2, float z2,
+        float x3, float y3, float z3,
         float nx, float ny, float nz,
         int materialRgb,
         String group
@@ -56,14 +57,15 @@ public class ColoredObjModel {
                     materialRgb = parseMaterialColor(line.substring(7).trim());
                 } else if (line.startsWith("f ")) {
                     String[] tokens = line.split("\\s+");
-                    if (tokens.length != 4) {
+                    if (tokens.length != 4 && tokens.length != 5) {
                         continue;
                     }
                     float[] a = positions.get(vertexIndex(tokens[1]));
                     float[] b = positions.get(vertexIndex(tokens[2]));
                     float[] c = positions.get(vertexIndex(tokens[3]));
+                    float[] d = tokens.length == 5 ? positions.get(vertexIndex(tokens[4])) : c;
                     float[] n = normal(a, b, c);
-                    faces.add(new Face(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2], n[0], n[1], n[2], materialRgb, group));
+                    faces.add(new Face(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2], d[0], d[1], d[2], n[0], n[1], n[2], materialRgb, group));
                 }
             }
         } catch (Exception e) {

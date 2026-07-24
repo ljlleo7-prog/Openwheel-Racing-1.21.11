@@ -53,6 +53,7 @@
   "tooltip.openwheelracing.prototype_car.gearing": "Gearing Preset: %s/2",
   "tooltip.openwheelracing.prototype_car.livery": "Livery: %s",
   "tooltip.openwheelracing.prototype_car.livery_colors": "Colors: Body %s | A1 %s | A2 %s",
+  "tooltip.openwheelracing.prototype_car.livery_texture": "Custom livery: %s",
   "tooltip.openwheelracing.prototype_car.damage": "Damage: %s%%",
   "tooltip.openwheelracing.prototype_car.tyres": "Tyre Condition: %s%%",
   "tooltip.openwheelracing.tires.compound": "Tyre Compound: C%s",

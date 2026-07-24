@@ -53,6 +53,7 @@
   "tooltip.openwheelracing.prototype_car.gearing": "齿比预设：%s/2",
   "tooltip.openwheelracing.prototype_car.livery": "涂装：%s",
   "tooltip.openwheelracing.prototype_car.livery_colors": "配色：车身 %s | A1 %s | A2 %s",
+  "tooltip.openwheelracing.prototype_car.livery_texture": "自定义涂装：%s",
   "tooltip.openwheelracing.prototype_car.damage": "损伤：%s%%",
   "tooltip.openwheelracing.prototype_car.tyres": "轮胎状态：%s%%",
   "tooltip.openwheelracing.tires.compound": "轮胎配方：C%s",

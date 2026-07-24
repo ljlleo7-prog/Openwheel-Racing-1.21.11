@@ -5,6 +5,7 @@ import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.network.OWRNetwork;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractSliderButton;
@@ -40,7 +41,10 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
         addTuneButtons(2, 58);
         addTuneButtons(3, 73);
         addLiveryButtons(88);
-        addLiveryColorButtons(116);
+        addRenderableWidget(Button.builder(Component.literal("Edit Livery"), button -> openLiveryEditor())
+            .bounds(leftPos + 184, topPos + 112, 62, 14)
+            .build());
+        addLiveryColorButtons(132);
         addRenderableWidget(Button.builder(Component.literal("Repair"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RepairCarMessage(), PacketDistributor.SERVER.noArg()))
             .bounds(leftPos + 190, topPos + 98, 52, 14)
             .build());
@@ -86,9 +90,9 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
             String name = CarLivery.fromIndex(PrototypeCarItem.getLivery(menu.getOutputStack())).displayName();
             graphics.drawString(font, name, x + 190, y + 104, 0xFF404040, false);
             CarLiveryColors colors = PrototypeCarItem.getLiveryColors(menu.getOutputStack());
-            graphics.drawString(font, "B " + CarLiveryColors.colorName(colors.body()), x + 190, y + 128, colors.bodySide(), false);
-            graphics.drawString(font, "A1 " + CarLiveryColors.colorName(colors.accent1()), x + 190, y + 139, colors.accent1Side(), false);
-            graphics.drawString(font, "A2 " + CarLiveryColors.colorName(colors.accent2()), x + 190, y + 150, colors.accent2Side(), false);
+            graphics.drawString(font, "B " + CarLiveryColors.colorName(colors.body()), x + 190, y + 144, colors.bodySide(), false);
+            graphics.drawString(font, "A1 " + CarLiveryColors.colorName(colors.accent1()), x + 190, y + 155, colors.accent1Side(), false);
+            graphics.drawString(font, "A2 " + CarLiveryColors.colorName(colors.accent2()), x + 190, y + 166, colors.accent2Side(), false);
         }
         if (colorPickerChannel >= 0) {
             renderColorPicker(graphics);
@@ -141,6 +145,12 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
         addRenderableWidget(Button.builder(Component.literal("A2"), button -> openColorPicker(2))
             .bounds(leftPos + 232, topPos + yOffset, 14, 11)
             .build());
+    }
+
+    private void openLiveryEditor() {
+        if (!menu.getOutputStack().isEmpty()) {
+            Minecraft.getInstance().setScreen(new LiveryEditorScreen(this, menu.getOutputStack()));
+        }
     }
 
     private void openColorPicker(int channel) {

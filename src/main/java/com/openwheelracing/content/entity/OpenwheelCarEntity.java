@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import com.mojang.logging.LogUtils;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
+import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.item.TyreItem;
@@ -73,6 +74,7 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Integer> LIVERY_BODY = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> LIVERY_ACCENT_1 = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> LIVERY_ACCENT_2 = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<String> LIVERY_TEXTURE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<Integer> TYRE_COMPOUND = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> DRS_ACTIVE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Integer> ERS_MODE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
@@ -317,6 +319,7 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(LIVERY_BODY, CarLiveryColors.DEFAULT.body());
         builder.define(LIVERY_ACCENT_1, CarLiveryColors.DEFAULT.accent1());
         builder.define(LIVERY_ACCENT_2, CarLiveryColors.DEFAULT.accent2());
+        builder.define(LIVERY_TEXTURE, "");
         builder.define(TYRE_COMPOUND, PrototypeCarSetup.DEFAULT.grip());
         builder.define(DRS_ACTIVE, false);
         builder.define(ERS_MODE, ERS_MODE_BALANCED);
@@ -383,6 +386,14 @@ public class OpenwheelCarEntity extends Entity {
 
     public CarLiveryColors getLiveryColors() {
         return new CarLiveryColors(entityData.get(LIVERY_BODY), entityData.get(LIVERY_ACCENT_1), entityData.get(LIVERY_ACCENT_2));
+    }
+
+    public void setLiveryTexture(CarLiveryTexture texture) {
+        entityData.set(LIVERY_TEXTURE, texture == null ? "" : texture.id());
+    }
+
+    public CarLiveryTexture getLiveryTexture() {
+        return new CarLiveryTexture(entityData.get(LIVERY_TEXTURE));
     }
 
     public int getGear() {
@@ -962,6 +973,7 @@ public class OpenwheelCarEntity extends Entity {
         if (getPassengers().isEmpty() && player.isShiftKeyDown() && heldStack.isEmpty()) {
             ItemStack item = PrototypeCarItem.create(setup, getDamagePercent(), getTyreWearPercent(), getLivery(), getErsMode(), Math.round(getErsEnergyPercent()));
             PrototypeCarItem.setLiveryColors(item, getLiveryColors());
+            PrototypeCarItem.setLiveryTexture(item, getLiveryTexture());
             if (!player.addItem(item)) {
                 player.drop(item, false);
             }
@@ -1047,6 +1059,7 @@ public class OpenwheelCarEntity extends Entity {
             input.getIntOr("LiveryAccent1", getLiveryColors().accent1()),
             input.getIntOr("LiveryAccent2", getLiveryColors().accent2())
         ));
+        setLiveryTexture(new CarLiveryTexture(input.getStringOr("LiveryTexture", "")));
         entityData.set(CURRENT_LAP_TICKS, input.getIntOr("CurrentLapTicks", 0));
         entityData.set(BEST_LAP_TICKS, input.getIntOr("BestLapTicks", 0));
         entityData.set(CHECKPOINT_ARMED, input.getBooleanOr("CheckpointArmed", false));
@@ -1088,6 +1101,7 @@ public class OpenwheelCarEntity extends Entity {
         output.putInt("LiveryBody", liveryColors.body());
         output.putInt("LiveryAccent1", liveryColors.accent1());
         output.putInt("LiveryAccent2", liveryColors.accent2());
+        output.putString("LiveryTexture", getLiveryTexture().id());
         output.putInt("CurrentLapTicks", getCurrentLapTicks());
         output.putInt("BestLapTicks", getBestLapTicks());
         output.putBoolean("CheckpointArmed", hasCheckpoint());
@@ -2019,7 +2033,7 @@ public class OpenwheelCarEntity extends Entity {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState state = level().getBlockState(pos);
                     VoxelShape shape = state.getCollisionShape(level(), pos, CollisionContext.of(this));
-                    if (shape.isEmpty() && !state.isAir() && !state.canBeReplaced()) {
+                    if (shape.isEmpty() && !state.isAir() && !state.canBeReplaced() && !isSoftCollisionBlock(state)) {
                         return true;
                     }
                 }

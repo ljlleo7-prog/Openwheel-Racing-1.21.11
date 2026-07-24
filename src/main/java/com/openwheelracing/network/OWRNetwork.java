@@ -4,6 +4,7 @@ import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
+import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
@@ -68,6 +69,11 @@ public final class OWRNetwork {
             .encoder(SetLiveryColorMessage::encode)
             .decoder(SetLiveryColorMessage::decode)
             .consumerMainThread(SetLiveryColorMessage::handle)
+            .add();
+        CHANNEL.messageBuilder(SetLiveryTextureMessage.class)
+            .encoder(SetLiveryTextureMessage::encode)
+            .decoder(SetLiveryTextureMessage::decode)
+            .consumerMainThread(SetLiveryTextureMessage::handle)
             .add();
         CHANNEL.messageBuilder(ShiftMessage.class)
             .encoder(ShiftMessage::encode)
@@ -306,6 +312,32 @@ public final class OWRNetwork {
                     return;
                 }
                 PrototypeCarItem.setLiveryColors(stack, PrototypeCarItem.getLiveryColors(stack).withChannel(message.channel, message.color));
+                menu.slotsChanged(menu.getContainer());
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    public record SetLiveryTextureMessage(String textureId) {
+        private static void encode(SetLiveryTextureMessage message, FriendlyByteBuf buffer) {
+            buffer.writeUtf(CarLiveryTexture.sanitize(message.textureId));
+        }
+
+        private static SetLiveryTextureMessage decode(FriendlyByteBuf buffer) {
+            return new SetLiveryTextureMessage(buffer.readUtf(80));
+        }
+
+        private static void handle(SetLiveryTextureMessage message, CustomPayloadEvent.Context context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
+                    return;
+                }
+                ItemStack stack = menu.getOutputStack();
+                if (!stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get())) {
+                    return;
+                }
+                PrototypeCarItem.setLiveryTexture(stack, new CarLiveryTexture(message.textureId));
                 menu.slotsChanged(menu.getContainer());
             });
             context.setPacketHandled(true);

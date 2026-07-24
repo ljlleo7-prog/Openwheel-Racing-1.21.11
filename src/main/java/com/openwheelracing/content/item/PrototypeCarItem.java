@@ -2,6 +2,7 @@ package com.openwheelracing.content.item;
 
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
+import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.registry.OWRDataComponents;
@@ -55,6 +56,7 @@ public class PrototypeCarItem extends Item {
         CarLiveryColors colors = CarLiveryColors.fromPreset(CarLivery.fromIndex(clampedLivery));
         stack.set(OWRDataComponents.CAR_LIVERY.get(), clampedLivery);
         stack.set(OWRDataComponents.CAR_LIVERY_COLORS.get(), colors);
+        stack.set(OWRDataComponents.CAR_LIVERY_TEXTURE.get(), CarLiveryTexture.NONE);
         applyLiveryItemDisplay(stack, colors);
         return stack;
     }
@@ -89,6 +91,15 @@ public class PrototypeCarItem extends Item {
         return colors == null ? CarLiveryColors.fromPreset(CarLivery.fromIndex(getLivery(stack))) : colors;
     }
 
+    public static CarLiveryTexture getLiveryTexture(ItemStack stack) {
+        CarLiveryTexture texture = stack.get(OWRDataComponents.CAR_LIVERY_TEXTURE.get());
+        return texture == null ? CarLiveryTexture.NONE : texture;
+    }
+
+    public static void setLiveryTexture(ItemStack stack, CarLiveryTexture texture) {
+        stack.set(OWRDataComponents.CAR_LIVERY_TEXTURE.get(), texture == null ? CarLiveryTexture.NONE : texture);
+    }
+
     public static void setLiveryColors(ItemStack stack, CarLiveryColors colors) {
         stack.set(OWRDataComponents.CAR_LIVERY_COLORS.get(), colors);
         applyLiveryItemDisplay(stack, colors);
@@ -117,6 +128,7 @@ public class PrototypeCarItem extends Item {
             car.setTyreWearPercent(getTyreWear(stack));
             car.setLivery(getLivery(stack));
             car.setLiveryColors(getLiveryColors(stack));
+            car.setLiveryTexture(getLiveryTexture(stack));
             car.setErsMode(getErsMode(stack));
             car.setErsEnergyJoules(OpenwheelCarEntity.ersCapacityJoules() * getErsEnergyPercent(stack) / 100.0);
             level.addFreshEntity(car);
@@ -140,6 +152,10 @@ public class PrototypeCarItem extends Item {
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.livery", CarLivery.fromIndex(getLivery(stack)).displayName()).withStyle(ChatFormatting.BLUE));
         CarLiveryColors colors = getLiveryColors(stack);
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.livery_colors", CarLiveryColors.colorName(colors.body()), CarLiveryColors.colorName(colors.accent1()), CarLiveryColors.colorName(colors.accent2())).withStyle(ChatFormatting.BLUE));
+        CarLiveryTexture texture = getLiveryTexture(stack);
+        if (texture.isPresent()) {
+            tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.livery_texture", texture.id()).withStyle(ChatFormatting.BLUE));
+        }
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.damage", getDamage(stack)).withStyle(ChatFormatting.DARK_RED));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.tyres", Math.max(0, 100 - getTyreWear(stack))).withStyle(ChatFormatting.YELLOW));
     }

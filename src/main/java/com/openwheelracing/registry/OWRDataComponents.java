@@ -2,6 +2,7 @@ package com.openwheelracing.registry;
 
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.car.CarLiveryColors;
+import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.mojang.serialization.Codec;
 import net.minecraft.core.registries.Registries;
@@ -45,6 +46,13 @@ public final class OWRDataComponents {
         () -> DataComponentType.<CarLiveryColors>builder()
             .persistent(CarLiveryColors.CODEC)
             .networkSynchronized(CarLiveryColors.STREAM_CODEC)
+            .build()
+    );
+
+    public static final RegistryObject<DataComponentType<CarLiveryTexture>> CAR_LIVERY_TEXTURE = DATA_COMPONENTS.register("car_livery_texture",
+        () -> DataComponentType.<CarLiveryTexture>builder()
+            .persistent(CarLiveryTexture.CODEC)
+            .networkSynchronized(CarLiveryTexture.STREAM_CODEC)
             .build()
     );
 

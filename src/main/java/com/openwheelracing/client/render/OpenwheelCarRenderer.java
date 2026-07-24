@@ -1,9 +1,13 @@
 package com.openwheelracing.client.render;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
+import com.openwheelracing.client.livery.ClientLiveryTextures;
+import com.openwheelracing.client.livery.LiveryUvMapping;
 import com.openwheelracing.content.car.CarLiveryColors;
+import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import java.util.List;
 
@@ -29,25 +33,28 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
     private static final float SOURCE_MAX_Y = 0.639583f;
     private static final float SOURCE_MIN_Z = -5.237548f;
     private static final float SOURCE_MAX_Z = -0.467113f;
-    private static final float TARGET_WIDTH = 2.0f;
-    private static final float TARGET_HEIGHT = 1.2f;
-    private static final float TARGET_LENGTH = 5.5f;
-    private static final float MODEL_X_SCALE = TARGET_WIDTH / (SOURCE_MAX_X - SOURCE_MIN_X);
-    private static final float MODEL_Y_SCALE = TARGET_HEIGHT / (SOURCE_MAX_Y - SOURCE_MIN_Y);
-    private static final float MODEL_Z_SCALE = TARGET_LENGTH / (SOURCE_MAX_Z - SOURCE_MIN_Z);
+    private static final float TARGET_WIDTH = 1.9f;
+    private static final float UNIFORM_RENDER_SCALE = TARGET_WIDTH / (SOURCE_MAX_X - SOURCE_MIN_X);
+    private static final float MODEL_X_SCALE = UNIFORM_RENDER_SCALE;
+    private static final float MODEL_Y_SCALE = UNIFORM_RENDER_SCALE;
+    private static final float MODEL_Z_SCALE = UNIFORM_RENDER_SCALE;
     private static final float MODEL_Z_CENTER = (SOURCE_MIN_Z + SOURCE_MAX_Z) * 0.5f;
     private static final float FRONT_WHEEL_LEFT_PIVOT_X = -0.647447f;
     private static final float FRONT_WHEEL_RIGHT_PIVOT_X = 0.647447f;
     private static final float FRONT_WHEEL_PIVOT_Z = -1.556256f;
 
-    private static final int CARBON = rgb(24, 24, 28);
-    private static final int TYRE = rgb(18, 18, 22);
+    private static final int CARBON = rgb(34, 38, 48);
+    private static final int TYRE = rgb(42, 46, 54);
     private static final int METAL = rgb(155, 155, 150);
 
     private static ColoredObjModel carModel;
     private static float[] frontWheelPivots;
     // Pre-baked color array per livery index — populated once per livery, reused every frame.
     private static final java.util.HashMap<String, int[]> BAKED_COLORS = new java.util.HashMap<>();
+
+    public static void invalidateLiveryCache(String textureId) {
+        BAKED_COLORS.keySet().removeIf(key -> key.endsWith(":" + textureId));
+    }
 
     public OpenwheelCarRenderer(EntityRendererProvider.Context context) {
         super(context);
@@ -67,6 +74,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         state.lightCoords = 15728880;
         state.tyreCompound = car.getTyreCompound();
         state.liveryColors = car.getLiveryColors();
+        state.liveryTexture = car.getLiveryTexture();
     }
 
     @Override
@@ -74,8 +82,9 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         super.submit(state, poseStack, nodeCollector, cameraState);
         loadModel();
 
-        String liveryColorKey = liveryColorKey(state.liveryColors);
-        int[] bakedColors = BAKED_COLORS.computeIfAbsent(liveryColorKey, ignored -> carModel.bakeColors(face -> liveryColor(face, state.liveryColors)));
+        NativeImage liveryImage = state.liveryTexture.isPresent() ? ClientLiveryTextures.loadOrCreate(Minecraft.getInstance(), state.liveryTexture, state.liveryColors.body()) : null;
+        String liveryColorKey = liveryColorKey(state.liveryColors, state.liveryTexture);
+        int[] bakedColors = BAKED_COLORS.computeIfAbsent(liveryColorKey, ignored -> carModel.bakeColors(face -> liveryColor(face, state.liveryColors, liveryImage)));
 
         poseStack.pushPose();
         poseStack.mulPose(Axis.YP.rotationDegrees(-state.yRot));
@@ -117,21 +126,21 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
                 vertex(consumer, pose, face.x0(), face.y0(), face.z0(), face.nx(), face.ny(), face.nz(), color, light);
                 vertex(consumer, pose, face.x1(), face.y1(), face.z1(), face.nx(), face.ny(), face.nz(), color, light);
                 vertex(consumer, pose, face.x2(), face.y2(), face.z2(), face.nx(), face.ny(), face.nz(), color, light);
-                vertex(consumer, pose, face.x2(), face.y2(), face.z2(), face.nx(), face.ny(), face.nz(), color, light);
+                vertex(consumer, pose, face.x3(), face.y3(), face.z3(), face.nx(), face.ny(), face.nz(), color, light);
             } else {
                 steeredVertex(consumer, pose, face.x0(), face.y0(), face.z0(), face.nx(), face.ny(), face.nz(), color, light, pivotX, steerSin, steerCos);
                 steeredVertex(consumer, pose, face.x1(), face.y1(), face.z1(), face.nx(), face.ny(), face.nz(), color, light, pivotX, steerSin, steerCos);
                 steeredVertex(consumer, pose, face.x2(), face.y2(), face.z2(), face.nx(), face.ny(), face.nz(), color, light, pivotX, steerSin, steerCos);
-                steeredVertex(consumer, pose, face.x2(), face.y2(), face.z2(), face.nx(), face.ny(), face.nz(), color, light, pivotX, steerSin, steerCos);
+                steeredVertex(consumer, pose, face.x3(), face.y3(), face.z3(), face.nx(), face.ny(), face.nz(), color, light, pivotX, steerSin, steerCos);
             }
         }
     }
 
-    private static String liveryColorKey(CarLiveryColors colors) {
-        return colors.body() + ":" + colors.accent1() + ":" + colors.accent2();
+    private static String liveryColorKey(CarLiveryColors colors, CarLiveryTexture texture) {
+        return colors.body() + ":" + colors.accent1() + ":" + colors.accent2() + ":" + texture.id();
     }
 
-    private static int liveryColor(ColoredObjModel.Face face, CarLiveryColors colors) {
+    private static int liveryColor(ColoredObjModel.Face face, CarLiveryColors colors, NativeImage liveryImage) {
         int materialRgb = face.materialRgb();
         int r = (materialRgb >> 16) & 255;
         int g = (materialRgb >> 8) & 255;
@@ -139,11 +148,17 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         int brightness = Math.max(r, Math.max(g, b));
         String group = face.group();
 
-        if (group.startsWith("Wheel_")) {
+        if (isRubber(face)) {
             return TYRE;
         }
-        if (group.equals("Underfloor-mid") || group.equals("Diffuser")) {
+        if (isCarbonFibre(face)) {
             return CARBON;
+        }
+        if (liveryImage != null && isLiveryPaintable(face)) {
+            int sampled = sampleLivery(face, liveryImage);
+            if (((sampled >>> 24) & 255) > 0) {
+                return sampled;
+            }
         }
         if (group.endsWith("-FW-Endplate") || group.startsWith("RW-")) {
             return fixedAeroDetailColor(r, g, b, brightness);
@@ -154,7 +169,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         if (group.equals("FW-Tip")) {
             return materialDetailColor(r, g, b, brightness, colors.accent2(), colors.accent1(), METAL);
         }
-        if (group.equals("Upper-Body")) {
+        if (group.equals("Upper-Body") || group.equals("Chassis")) {
             return materialDetailColor(r, g, b, brightness, colors.body(), colors.accent1(), colors.accent2());
         }
         if (group.equals("LeftSection") || group.equals("RightSection")) {
@@ -164,6 +179,33 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
             return materialDetailColor(r, g, b, brightness, colors.body(), colors.accent1(), colors.accent2());
         }
         return materialDetailColor(r, g, b, brightness, colors.body(), colors.accent1(), colors.accent2());
+    }
+
+    private static boolean isCarbonFibre(ColoredObjModel.Face face) {
+        int materialRgb = face.materialRgb() & 0x00FFFFFF;
+        String group = face.group();
+        return materialRgb == 0x00222630 || group.equals("Underfloor-mid") || group.equals("Underfloor") || group.equals("Diffuser");
+    }
+
+    private static boolean isRubber(ColoredObjModel.Face face) {
+        return (face.materialRgb() & 0x00FFFFFF) == 0x002A2E36;
+    }
+
+    private static boolean isLiveryPaintable(ColoredObjModel.Face face) {
+        return LiveryUvMapping.isPaintable(face.group()) && LiveryUvMapping.isPaintableMaterial(face.materialRgb());
+    }
+
+    private static int sampleLivery(ColoredObjModel.Face face, NativeImage image) {
+        float x = (face.x0() + face.x1() + face.x2()) / 3.0f;
+        float y = (face.y0() + face.y1() + face.y2()) / 3.0f;
+        float z = (face.z0() + face.z1() + face.z2()) / 3.0f;
+        LiveryUvMapping.Uv uv = LiveryUvMapping.uvForVertex(face.group(), x, y, z);
+        if (uv == null) {
+            return 0;
+        }
+        int u = Math.max(0, Math.min(image.getWidth() - 1, Math.round(uv.u())));
+        int v = Math.max(0, Math.min(image.getHeight() - 1, Math.round(uv.v())));
+        return image.getPixel(u, v);
     }
 
     private static int fixedAeroDetailColor(int r, int g, int b, int brightness) {
@@ -224,5 +266,6 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         public int lightCoords;
         public int tyreCompound;
         public CarLiveryColors liveryColors = CarLiveryColors.DEFAULT;
+        public CarLiveryTexture liveryTexture = CarLiveryTexture.NONE;
     }
 }
