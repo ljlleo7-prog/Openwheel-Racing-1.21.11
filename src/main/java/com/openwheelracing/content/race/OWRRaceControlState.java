@@ -17,7 +17,7 @@ public class OWRRaceControlState extends SavedData {
         Codec.INT.optionalFieldOf("max_ers_capacity_mj", 4).forGetter(OWRRaceControlState::getMaxErsCapacityMj),
         Codec.INT.optionalFieldOf("max_balanced_deploy_kw", 200).forGetter(OWRRaceControlState::getMaxBalancedDeployKw),
         Codec.INT.optionalFieldOf("max_attack_deploy_kw", 350).forGetter(OWRRaceControlState::getMaxAttackDeployKw),
-        Codec.INT.optionalFieldOf("max_harvest_negative_kw", 110).forGetter(OWRRaceControlState::getMaxHarvestNegativeKw)
+        Codec.INT.optionalFieldOf("max_harvest_negative_kw", 350).forGetter(OWRRaceControlState::getMaxHarvestNegativeKw)
     ).apply(instance, OWRRaceControlState::new));
 
     private static final SavedDataType<OWRRaceControlState> TYPE = new SavedDataType<>(
@@ -38,7 +38,7 @@ public class OWRRaceControlState extends SavedData {
     private int revision;
 
     public OWRRaceControlState() {
-        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true, 4, 200, 350, 110);
+        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true, 4, 200, 350, 350);
     }
 
     private OWRRaceControlState(boolean checkpointCheckEnabled, boolean offTrackCheckEnabled, int minimumValidLapTicks, boolean wheelInputAllowed,
@@ -50,7 +50,7 @@ public class OWRRaceControlState extends SavedData {
         this.maxErsCapacityMj = clamp(maxErsCapacityMj, 2, 12);
         this.maxBalancedDeployKw = clamp(maxBalancedDeployKw, 0, 350);
         this.maxAttackDeployKw = clamp(maxAttackDeployKw, 0, 350);
-        this.maxHarvestNegativeKw = clamp(maxHarvestNegativeKw, 0, 250);
+        this.maxHarvestNegativeKw = clamp(maxHarvestNegativeKw, 0, 350);
     }
 
     public static OWRRaceControlState get(ServerLevel level) {
@@ -150,7 +150,7 @@ public class OWRRaceControlState extends SavedData {
     }
 
     public void setMaxHarvestNegativeKw(int value) {
-        int clamped = clamp(value, 0, 250);
+        int clamped = clamp(value, 0, 350);
         if (maxHarvestNegativeKw == clamped) {
             return;
         }

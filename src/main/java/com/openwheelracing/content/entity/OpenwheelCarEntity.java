@@ -91,6 +91,12 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Integer> ERS_HARVEST_END_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Float> ERS_CAPACITY = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Integer> ERS_ATTACK_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> ERS_LICO_SPEED_THRESHOLD = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Float> ERS_LICO_STEERING_THRESHOLD = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> ERS_LICO_LATERAL_G_THRESHOLD = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Integer> ERS_LICO_HARVEST_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> ERS_LICO_BALANCED_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> ERS_LICO_ATTACK_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
 
     private static final int PIT_STOP_DURATION = 60; // 3 seconds
     private static final int PIT_RUBBER_COST = 2;    // rubber items consumed per stop
@@ -116,6 +122,16 @@ public class OpenwheelCarEntity extends Entity {
     public static final int ERS_HARVEST_START_POWER_DEFAULT_KW = 0;
     public static final int ERS_HARVEST_END_POWER_DEFAULT_KW = -110;
     public static final int ERS_ATTACK_POWER_DEFAULT_KW = 350;
+    public static final int ERS_LICO_SPEED_THRESHOLD_DEFAULT_KMH = 260;
+    public static final double ERS_LICO_STEERING_THRESHOLD_DEFAULT_DEGREES = 1.8;
+    public static final double ERS_LICO_LATERAL_G_THRESHOLD_DEFAULT = 0.28;
+    public static final int ERS_LICO_HARVEST_POWER_DEFAULT_KW = -350;
+    public static final int ERS_LICO_BALANCED_POWER_DEFAULT_KW = -180;
+    public static final int ERS_LICO_ATTACK_POWER_DEFAULT_KW = 0;
+    public static final double ERS_LICO_POWER_RAMP_KW_PER_SECOND = 400.0;
+    public static final int ERS_LICO_LIFT_CONFIRM_TICKS = 4;
+    public static final double ERS_LICO_THROTTLE_DEADZONE = 0.03;
+    public static final double ERS_LICO_BRAKE_DEADZONE = 0.02;
     public static final double ERS_CAPACITY_DEFAULT_J = 4_000_000.0;
 
     // Seat offset: eye height = car Y + (-0.62) + player eye height (1.62) ≈ 1.0 above ground
@@ -286,6 +302,8 @@ public class OpenwheelCarEntity extends Entity {
     private double debugRlSlipAngle;
     private double debugRrSlipAngle;
     private double debugDownforce;
+    private double ersLiftAndCoastPowerWatts;
+    private int ersLiftConfirmTicks;
 
     public void applyDriveInput(float throttle, float brake, float steering) {
         this.inputThrottle = throttle;
@@ -336,6 +354,12 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(ERS_HARVEST_END_POWER, ERS_HARVEST_END_POWER_DEFAULT_KW);
         builder.define(ERS_CAPACITY, (float) ERS_CAPACITY_DEFAULT_J);
         builder.define(ERS_ATTACK_POWER, ERS_ATTACK_POWER_DEFAULT_KW);
+        builder.define(ERS_LICO_SPEED_THRESHOLD, ERS_LICO_SPEED_THRESHOLD_DEFAULT_KMH);
+        builder.define(ERS_LICO_STEERING_THRESHOLD, (float) ERS_LICO_STEERING_THRESHOLD_DEFAULT_DEGREES);
+        builder.define(ERS_LICO_LATERAL_G_THRESHOLD, (float) ERS_LICO_LATERAL_G_THRESHOLD_DEFAULT);
+        builder.define(ERS_LICO_HARVEST_POWER, ERS_LICO_HARVEST_POWER_DEFAULT_KW);
+        builder.define(ERS_LICO_BALANCED_POWER, ERS_LICO_BALANCED_POWER_DEFAULT_KW);
+        builder.define(ERS_LICO_ATTACK_POWER, ERS_LICO_ATTACK_POWER_DEFAULT_KW);
     }
 
     @Override
@@ -557,13 +581,45 @@ public class OpenwheelCarEntity extends Entity {
         return entityData.get(ERS_ATTACK_POWER);
     }
 
+    public int getErsLicoSpeedThresholdKmh() {
+        return entityData.get(ERS_LICO_SPEED_THRESHOLD);
+    }
+
+    public double getErsLicoSteeringThresholdDegrees() {
+        return entityData.get(ERS_LICO_STEERING_THRESHOLD);
+    }
+
+    public double getErsLicoLateralGThreshold() {
+        return entityData.get(ERS_LICO_LATERAL_G_THRESHOLD);
+    }
+
+    public int getErsLicoHarvestPowerKw() {
+        return entityData.get(ERS_LICO_HARVEST_POWER);
+    }
+
+    public int getErsLicoBalancedPowerKw() {
+        return entityData.get(ERS_LICO_BALANCED_POWER);
+    }
+
+    public int getErsLicoAttackPowerKw() {
+        return entityData.get(ERS_LICO_ATTACK_POWER);
+    }
+
     public void setErsTuning(int balancedClipStartKmh, int balancedClipEndKmh, int harvestNegativeStartKmh, int harvestNegativeFullKmh,
             int balancedStartPowerKw, int balancedEndPowerKw, int harvestStartPowerKw, int harvestEndPowerKw, double capacityJoules) {
-        setErsTuning(balancedClipStartKmh, balancedClipEndKmh, harvestNegativeStartKmh, harvestNegativeFullKmh, balancedStartPowerKw, balancedEndPowerKw, harvestStartPowerKw, harvestEndPowerKw, capacityJoules, getErsAttackPowerKw());
+        setErsTuning(balancedClipStartKmh, balancedClipEndKmh, harvestNegativeStartKmh, harvestNegativeFullKmh, balancedStartPowerKw, balancedEndPowerKw, harvestStartPowerKw, harvestEndPowerKw, capacityJoules, getErsAttackPowerKw(),
+            getErsLicoSpeedThresholdKmh(), getErsLicoSteeringThresholdDegrees(), getErsLicoLateralGThreshold(), getErsLicoHarvestPowerKw(), getErsLicoBalancedPowerKw(), getErsLicoAttackPowerKw());
     }
 
     public void setErsTuning(int balancedClipStartKmh, int balancedClipEndKmh, int harvestNegativeStartKmh, int harvestNegativeFullKmh,
             int balancedStartPowerKw, int balancedEndPowerKw, int harvestStartPowerKw, int harvestEndPowerKw, double capacityJoules, int attackPowerKw) {
+        setErsTuning(balancedClipStartKmh, balancedClipEndKmh, harvestNegativeStartKmh, harvestNegativeFullKmh, balancedStartPowerKw, balancedEndPowerKw, harvestStartPowerKw, harvestEndPowerKw, capacityJoules, attackPowerKw,
+            getErsLicoSpeedThresholdKmh(), getErsLicoSteeringThresholdDegrees(), getErsLicoLateralGThreshold(), getErsLicoHarvestPowerKw(), getErsLicoBalancedPowerKw(), getErsLicoAttackPowerKw());
+    }
+
+    public void setErsTuning(int balancedClipStartKmh, int balancedClipEndKmh, int harvestNegativeStartKmh, int harvestNegativeFullKmh,
+            int balancedStartPowerKw, int balancedEndPowerKw, int harvestStartPowerKw, int harvestEndPowerKw, double capacityJoules, int attackPowerKw,
+            int licoSpeedThresholdKmh, double licoSteeringThresholdDegrees, double licoLateralGThreshold, int licoHarvestPowerKw, int licoBalancedPowerKw, int licoAttackPowerKw) {
         int balancedStart = clampInt(balancedClipStartKmh, 220, 350);
         int balancedEnd = Math.max(balancedStart + 10, clampInt(balancedClipEndKmh, 230, 360));
         int harvestStart = clampInt(harvestNegativeStartKmh, 220, 360);
@@ -576,9 +632,15 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(ERS_HARVEST_NEGATIVE_FULL, harvestFull);
         entityData.set(ERS_BALANCED_START_POWER, clampInt(balancedStartPowerKw, 0, 350));
         entityData.set(ERS_BALANCED_END_POWER, clampInt(balancedEndPowerKw, 0, 350));
-        entityData.set(ERS_HARVEST_START_POWER, clampInt(harvestStartPowerKw, -250, 0));
-        entityData.set(ERS_HARVEST_END_POWER, clampInt(harvestEndPowerKw, -250, 0));
+        entityData.set(ERS_HARVEST_START_POWER, clampInt(harvestStartPowerKw, -350, 0));
+        entityData.set(ERS_HARVEST_END_POWER, clampInt(harvestEndPowerKw, -350, 0));
         entityData.set(ERS_ATTACK_POWER, clampInt(attackPowerKw, 0, 350));
+        entityData.set(ERS_LICO_SPEED_THRESHOLD, clampInt(licoSpeedThresholdKmh, 180, 360));
+        entityData.set(ERS_LICO_STEERING_THRESHOLD, (float) clamp(licoSteeringThresholdDegrees, 0.2, 8.0));
+        entityData.set(ERS_LICO_LATERAL_G_THRESHOLD, (float) clamp(licoLateralGThreshold, 0.05, 1.0));
+        entityData.set(ERS_LICO_HARVEST_POWER, clampInt(licoHarvestPowerKw, -350, 0));
+        entityData.set(ERS_LICO_BALANCED_POWER, clampInt(licoBalancedPowerKw, -350, 0));
+        entityData.set(ERS_LICO_ATTACK_POWER, clampInt(licoAttackPowerKw, -350, 0));
         entityData.set(ERS_CAPACITY, (float) newCapacity);
         if (currentCapacity > 0.0 && newCapacity != currentCapacity) {
             setErsEnergyJoules(entityData.get(ERS_ENERGY) * newCapacity / currentCapacity);
@@ -598,7 +660,13 @@ public class OpenwheelCarEntity extends Entity {
             getErsHarvestStartPowerKw(),
             getErsHarvestEndPowerKw(),
             getErsCapacityJoules(),
-            getErsAttackPowerKw()
+            getErsAttackPowerKw(),
+            getErsLicoSpeedThresholdKmh(),
+            getErsLicoSteeringThresholdDegrees(),
+            getErsLicoLateralGThreshold(),
+            getErsLicoHarvestPowerKw(),
+            getErsLicoBalancedPowerKw(),
+            getErsLicoAttackPowerKw()
         );
     }
 
@@ -613,7 +681,13 @@ public class OpenwheelCarEntity extends Entity {
             -Math.min(Math.abs(getErsHarvestStartPowerKw()), maxHarvestNegativeKw),
             -Math.min(Math.abs(getErsHarvestEndPowerKw()), maxHarvestNegativeKw),
             Math.min(getErsCapacityJoules(), maxCapacityMj * 1_000_000.0),
-            Math.min(getErsAttackPowerKw(), maxAttackDeployKw)
+            Math.min(getErsAttackPowerKw(), maxAttackDeployKw),
+            getErsLicoSpeedThresholdKmh(),
+            getErsLicoSteeringThresholdDegrees(),
+            getErsLicoLateralGThreshold(),
+            -Math.min(Math.abs(getErsLicoHarvestPowerKw()), maxHarvestNegativeKw),
+            -Math.min(Math.abs(getErsLicoBalancedPowerKw()), maxHarvestNegativeKw),
+            -Math.min(Math.abs(getErsLicoAttackPowerKw()), maxHarvestNegativeKw)
         );
     }
 
@@ -1076,7 +1150,13 @@ public class OpenwheelCarEntity extends Entity {
             input.getIntOr("ErsHarvestStartPower", ERS_HARVEST_START_POWER_DEFAULT_KW),
             input.getIntOr("ErsHarvestEndPower", ERS_HARVEST_END_POWER_DEFAULT_KW),
             input.getDoubleOr("ErsCapacity", ERS_CAPACITY_DEFAULT_J),
-            input.getIntOr("ErsAttackPower", ERS_ATTACK_POWER_DEFAULT_KW)
+            input.getIntOr("ErsAttackPower", ERS_ATTACK_POWER_DEFAULT_KW),
+            input.getIntOr("ErsLicoSpeedThreshold", ERS_LICO_SPEED_THRESHOLD_DEFAULT_KMH),
+            input.getDoubleOr("ErsLicoSteeringThreshold", ERS_LICO_STEERING_THRESHOLD_DEFAULT_DEGREES),
+            input.getDoubleOr("ErsLicoLateralGThreshold", ERS_LICO_LATERAL_G_THRESHOLD_DEFAULT),
+            input.getIntOr("ErsLicoHarvestPower", ERS_LICO_HARVEST_POWER_DEFAULT_KW),
+            input.getIntOr("ErsLicoBalancedPower", ERS_LICO_BALANCED_POWER_DEFAULT_KW),
+            input.getIntOr("ErsLicoAttackPower", ERS_LICO_ATTACK_POWER_DEFAULT_KW)
         );
         setErsEnergyJoules(input.getDoubleOr("ErsEnergy", getErsCapacityJoules()));
         steeringAngle = input.getDoubleOr("SteeringAngle", 0.0);
@@ -1118,6 +1198,12 @@ public class OpenwheelCarEntity extends Entity {
         output.putInt("ErsHarvestStartPower", getErsHarvestStartPowerKw());
         output.putInt("ErsHarvestEndPower", getErsHarvestEndPowerKw());
         output.putInt("ErsAttackPower", getErsAttackPowerKw());
+        output.putInt("ErsLicoSpeedThreshold", getErsLicoSpeedThresholdKmh());
+        output.putDouble("ErsLicoSteeringThreshold", getErsLicoSteeringThresholdDegrees());
+        output.putDouble("ErsLicoLateralGThreshold", getErsLicoLateralGThreshold());
+        output.putInt("ErsLicoHarvestPower", getErsLicoHarvestPowerKw());
+        output.putInt("ErsLicoBalancedPower", getErsLicoBalancedPowerKw());
+        output.putInt("ErsLicoAttackPower", getErsLicoAttackPowerKw());
         output.putDouble("ErsCapacity", getErsCapacityJoules());
         output.putDouble("SteeringAngle", steeringAngle);
         output.putDouble("YawRate", yawRate);
@@ -1401,6 +1487,8 @@ public class OpenwheelCarEntity extends Entity {
         inputBrake = 0;
         inputSteering = 0;
         if (getControllingPassenger() == null) {
+            ersLiftConfirmTicks = 0;
+            ersLiftAndCoastPowerWatts = 0.0;
             tickPassiveMovement(debugMovement);
             return;
         }
@@ -1508,11 +1596,13 @@ public class OpenwheelCarEntity extends Entity {
         }
         boolean steeringReleased = steerInput == 0.0 && Math.abs(steeringAngle) < SLIP_ANGLE_DEADBAND;
 
+        boolean liftInputConfirmedThisTick = updateLiftAndCoastConfirmation(throttle, brake);
         double previousKineticEnergy = 0.5 * CAR_MASS_KG * (velocityLong * velocityLong + velocityLat * velocityLat) + 0.5 * YAW_INERTIA * yawRate * yawRate;
         double previousVelocityLong = velocityLong;
         double yawDelta = 0.0;
         double driveWorkJoules = 0.0;
         double subDt = PHYSICS_DT / PHYSICS_SUBSTEPS;
+        double substepLateralAccelerationEstimate = 0.0;
         double finalFlLatForce = 0.0;
         double finalFrLatForce = 0.0;
         double finalRlLatForce = 0.0;
@@ -1575,7 +1665,7 @@ public class OpenwheelCarEntity extends Entity {
                     ? Math.max(subDriveForceRequest, clutchForce)
                     : Math.min(subDriveForceRequest, clutchForce);
             }
-            ErsPowerResult ersPower = calculateErsPower(throttle, gear, subSpeedBlocksPerTick, velocityLong, subDt, surface);
+            ErsPowerResult ersPower = calculateErsPower(throttle, brake, liftInputConfirmedThisTick, gear, subSpeedBlocksPerTick, velocityLong, substepLateralAccelerationEstimate / GRAVITY, subDt, surface);
             if (driveDirection > 0.0 && ersPower.powerWatts() != 0.0
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
                     && subSpeedBlocksPerTick < pitSpeedLimit) {
@@ -1604,7 +1694,7 @@ public class OpenwheelCarEntity extends Entity {
             double subRollingForce = ROLLING_RESISTANCE * tyreWearDragFactor * (CAR_MASS_KG * GRAVITY + subDownforce);
             double subSinkDragForce = surface.sinkDrag * (CAR_MASS_KG * GRAVITY + subDownforce);
             double subPreliminaryAx = (subDriveForceRequest - subBrakeDirection * subBrakeForceEstimate - Math.signum(velocityLong) * (subAeroDrag + subRollingForce + subSinkDragForce)) / CAR_MASS_KG;
-            double subLateralAccelerationEstimate = (velocityLat - debugVelocityLat) / Math.max(subDt, 1.0E-6);
+            double subLateralAccelerationEstimate = substepLateralAccelerationEstimate;
             double subLongitudinalLoadTransfer = CAR_MASS_KG * subPreliminaryAx * CG_HEIGHT / WHEELBASE;
             double subLateralLoadTransfer = CAR_MASS_KG * subLateralAccelerationEstimate * CG_HEIGHT / TRACK_WIDTH;
             double subNormalFront = Math.max(300.0, subStaticFrontLoad + subAeroFrontLoad - subLongitudinalLoadTransfer);
@@ -1740,6 +1830,7 @@ public class OpenwheelCarEntity extends Entity {
             double forceAccelerationLong = longitudinalForce / CAR_MASS_KG;
             double couplingAccelerationLong = yawRate * velocityLat;
             double subAccelerationLat = lateralForce / CAR_MASS_KG - yawRate * velocityLong;
+            substepLateralAccelerationEstimate = subAccelerationLat;
 
             velocityLong += forceAccelerationLong * subDt;
             if (subVelocityLongBefore >= 0.0 && velocityLong < 0.0 && driveDirection >= 0.0 && subDriveForceRequest <= subBrakeForceRequest) {
@@ -2546,7 +2637,7 @@ public class OpenwheelCarEntity extends Entity {
         return enginePowerWatts(rpm) * (PEAK_POWER_WATTS - ERS_POWER_SHARE_WATTS) / PEAK_POWER_WATTS;
     }
 
-    private ErsPowerResult calculateErsPower(double throttle, int gear, double speedBlocksPerTick, double velocityLong, double dt, SurfaceProfile surface) {
+    private ErsPowerResult calculateErsPower(double throttle, double brake, boolean liftInputConfirmed, int gear, double speedBlocksPerTick, double velocityLong, double lateralAccelerationG, double dt, SurfaceProfile surface) {
         if (level().isClientSide()) {
             return new ErsPowerResult(0.0);
         }
@@ -2563,10 +2654,20 @@ public class OpenwheelCarEntity extends Entity {
         int balancedClipStartKmh = getErsBalancedClipStartKmh();
         int balancedClipEndKmh = getErsBalancedClipEndKmh();
 
-        if (mode == ERS_MODE_HARVEST && gear > NEUTRAL_GEAR && velocityLong > 0.0 && speedKmh > harvestNegativeStartKmh && surface.countsAsTrack) {
+        if (canLiftAndCoastHarvest(mode, throttle, brake, liftInputConfirmed, gear, speedKmh, velocityLong, lateralAccelerationG, surface)) {
+            double targetPowerWatts = licoTargetPowerWatts(mode);
+            double rampWatts = ERS_LICO_POWER_RAMP_KW_PER_SECOND * 1000.0 * dt;
+            double currentNegativePowerWatts = Math.min(0.0, entityData.get(ERS_POWER_KW) * 1000.0);
+            ersLiftAndCoastPowerWatts = Math.min(ersLiftAndCoastPowerWatts, currentNegativePowerWatts);
+            ersLiftAndCoastPowerWatts = Math.max(targetPowerWatts, ersLiftAndCoastPowerWatts - rampWatts);
+            powerWatts = ersLiftAndCoastPowerWatts;
+            activity = ersActivityForPower(powerWatts);
+            storedEnergy = applyErsPowerToEnergy(storedEnergy, capacityJoules, powerWatts, dt);
+        } else if (mode == ERS_MODE_HARVEST && gear > NEUTRAL_GEAR && velocityLong > 0.0 && speedKmh > harvestNegativeStartKmh && surface.countsAsTrack) {
             powerWatts = interpolatePowerWatts(speedKmh, harvestNegativeStartKmh, harvestNegativeFullKmh, getErsHarvestStartPowerKw(), getErsHarvestEndPowerKw());
-            activity = powerWatts < 0.0 ? ERS_ACTIVITY_NEGATIVE : ERS_ACTIVITY_NEUTRAL;
-            storedEnergy = Math.min(capacityJoules, storedEnergy + Math.max(0.0, -powerWatts) * dt * ERS_RECOVERY_EFFICIENCY);
+            ersLiftAndCoastPowerWatts = Math.min(0.0, powerWatts);
+            activity = ersActivityForPower(powerWatts);
+            storedEnergy = applyErsPowerToEnergy(storedEnergy, capacityJoules, powerWatts, dt);
         } else if (throttle > 0.0 && gear > NEUTRAL_GEAR && storedEnergy > 1.0 && surface.countsAsTrack) {
             double requestedPower = switch (mode) {
                 case ERS_MODE_ATTACK -> getErsAttackPowerKw() * 1000.0;
@@ -2579,6 +2680,8 @@ public class OpenwheelCarEntity extends Entity {
                 storedEnergy -= powerWatts * dt;
                 activity = ERS_ACTIVITY_DEPLOYING;
             }
+        } else {
+            ersLiftAndCoastPowerWatts = 0.0;
         }
 
         entityData.set(ERS_ENERGY, (float) clamp(storedEnergy, 0.0, capacityJoules));
@@ -2590,6 +2693,47 @@ public class OpenwheelCarEntity extends Entity {
     private static double interpolatePowerWatts(double speedKmh, int startKmh, int endKmh, int startPowerKw, int endPowerKw) {
         double t = smoothstep((speedKmh - startKmh) / Math.max(1.0, endKmh - startKmh));
         return (startPowerKw + (endPowerKw - startPowerKw) * t) * 1000.0;
+    }
+
+    private static int ersActivityForPower(double powerWatts) {
+        return powerWatts < 0.0 ? ERS_ACTIVITY_NEGATIVE : ERS_ACTIVITY_NEUTRAL;
+    }
+
+    private static double applyErsPowerToEnergy(double storedEnergy, double capacityJoules, double powerWatts, double dt) {
+        return Math.min(capacityJoules, storedEnergy + Math.max(0.0, -powerWatts) * dt * ERS_RECOVERY_EFFICIENCY);
+    }
+
+    private boolean updateLiftAndCoastConfirmation(double throttle, double brake) {
+        if (throttle <= ERS_LICO_THROTTLE_DEADZONE && brake <= ERS_LICO_BRAKE_DEADZONE) {
+            ersLiftConfirmTicks = Math.min(ERS_LICO_LIFT_CONFIRM_TICKS, ersLiftConfirmTicks + 1);
+        } else {
+            ersLiftConfirmTicks = 0;
+            ersLiftAndCoastPowerWatts = 0.0;
+        }
+        return ersLiftConfirmTicks >= ERS_LICO_LIFT_CONFIRM_TICKS;
+    }
+
+    private boolean canLiftAndCoastHarvest(int mode, double throttle, double brake, boolean liftInputConfirmed, int gear, double speedKmh, double velocityLong, double lateralAccelerationG, SurfaceProfile surface) {
+        return liftInputConfirmed
+            && licoTargetPowerWatts(mode) < 0.0
+            && throttle <= ERS_LICO_THROTTLE_DEADZONE
+            && brake <= ERS_LICO_BRAKE_DEADZONE
+            && gear > NEUTRAL_GEAR
+            && velocityLong > 0.0
+            && speedKmh >= getErsLicoSpeedThresholdKmh()
+            && Math.abs(steeringAngle) <= Math.toRadians(getErsLicoSteeringThresholdDegrees())
+            && Math.abs(lateralAccelerationG) <= getErsLicoLateralGThreshold()
+            && surface.countsAsTrack;
+    }
+
+    private double licoTargetPowerWatts(int mode) {
+        int powerKw = switch (mode) {
+            case ERS_MODE_HARVEST -> getErsLicoHarvestPowerKw();
+            case ERS_MODE_BALANCED -> getErsLicoBalancedPowerKw();
+            case ERS_MODE_ATTACK -> getErsLicoAttackPowerKw();
+            default -> 0;
+        };
+        return powerKw * 1000.0;
     }
 
     private void harvestErsFromBraking(double previousSpeedBlocksPerTick, double currentSpeedBlocksPerTick, double brake, SurfaceProfile surface) {

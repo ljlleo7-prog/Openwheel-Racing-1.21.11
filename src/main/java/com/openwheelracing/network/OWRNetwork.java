@@ -512,7 +512,8 @@ public final class OWRNetwork {
     }
 
     public record SetErsThresholdsMessage(int balancedClipStartKmh, int balancedClipEndKmh, int harvestNegativeStartKmh, int harvestNegativeFullKmh,
-            int balancedStartPowerKw, int balancedEndPowerKw, int harvestStartPowerKw, int harvestEndPowerKw, double capacityMj) {
+            int balancedStartPowerKw, int balancedEndPowerKw, int harvestStartPowerKw, int harvestEndPowerKw, double capacityMj,
+            int licoSpeedThresholdKmh, double licoSteeringThresholdDegrees, double licoLateralGThreshold, int licoHarvestPowerKw, int licoBalancedPowerKw, int licoAttackPowerKw) {
         private static void encode(SetErsThresholdsMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.balancedClipStartKmh);
             buffer.writeInt(message.balancedClipEndKmh);
@@ -523,6 +524,12 @@ public final class OWRNetwork {
             buffer.writeInt(message.harvestStartPowerKw);
             buffer.writeInt(message.harvestEndPowerKw);
             buffer.writeDouble(message.capacityMj);
+            buffer.writeInt(message.licoSpeedThresholdKmh);
+            buffer.writeDouble(message.licoSteeringThresholdDegrees);
+            buffer.writeDouble(message.licoLateralGThreshold);
+            buffer.writeInt(message.licoHarvestPowerKw);
+            buffer.writeInt(message.licoBalancedPowerKw);
+            buffer.writeInt(message.licoAttackPowerKw);
         }
 
         private static SetErsThresholdsMessage decode(FriendlyByteBuf buffer) {
@@ -535,7 +542,13 @@ public final class OWRNetwork {
                 buffer.readInt(),
                 buffer.readInt(),
                 buffer.readInt(),
-                buffer.readDouble()
+                buffer.readDouble(),
+                buffer.readInt(),
+                buffer.readDouble(),
+                buffer.readDouble(),
+                buffer.readInt(),
+                buffer.readInt(),
+                buffer.readInt()
             );
         }
 
@@ -556,7 +569,13 @@ public final class OWRNetwork {
                     -Math.min(Math.abs(message.harvestStartPowerKw), raceControl.getMaxHarvestNegativeKw()),
                     -Math.min(Math.abs(message.harvestEndPowerKw), raceControl.getMaxHarvestNegativeKw()),
                     Math.min(message.capacityMj, raceControl.getMaxErsCapacityMj()) * 1_000_000.0,
-                    raceControl.getMaxAttackDeployKw()
+                    raceControl.getMaxAttackDeployKw(),
+                    message.licoSpeedThresholdKmh,
+                    message.licoSteeringThresholdDegrees,
+                    message.licoLateralGThreshold,
+                    -Math.min(Math.abs(message.licoHarvestPowerKw), raceControl.getMaxHarvestNegativeKw()),
+                    -Math.min(Math.abs(message.licoBalancedPowerKw), raceControl.getMaxHarvestNegativeKw()),
+                    -Math.min(Math.abs(message.licoAttackPowerKw), raceControl.getMaxHarvestNegativeKw())
                 );
             });
             context.setPacketHandled(true);

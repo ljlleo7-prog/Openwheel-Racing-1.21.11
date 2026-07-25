@@ -54,9 +54,15 @@ public final class ClientLiveryTextures {
 
     public static NativeImage loadOrCreate(Minecraft minecraft, CarLiveryTexture texture, int fallbackColor) {
         if (texture != null && texture.isPresent()) {
-            NativeImage existing = loadImage(minecraft, texture.id());
-            if (existing != null) {
-                return existing;
+            String id = texture.id();
+            NativeImage cached = IMAGES.get(id);
+            if (cached != null) {
+                return cached;
+            }
+            NativeImage loaded = loadImage(minecraft, id);
+            if (loaded != null) {
+                register(minecraft, id, loaded);
+                return loaded;
             }
         }
         NativeImage image = new NativeImage(SIZE, SIZE, true);

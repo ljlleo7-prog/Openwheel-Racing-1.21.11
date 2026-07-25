@@ -23,6 +23,12 @@ public final class OWRClientInputHandler {
     private static int sentBalancedEndPower = Integer.MIN_VALUE;
     private static int sentHarvestStartPower = Integer.MIN_VALUE;
     private static int sentHarvestEndPower = Integer.MIN_VALUE;
+    private static int sentLicoSpeedThreshold = Integer.MIN_VALUE;
+    private static double sentLicoSteeringThreshold = Double.NaN;
+    private static double sentLicoLateralGThreshold = Double.NaN;
+    private static int sentLicoHarvestPower = Integer.MIN_VALUE;
+    private static int sentLicoBalancedPower = Integer.MIN_VALUE;
+    private static int sentLicoAttackPower = Integer.MIN_VALUE;
     private static double sentCapacityMj = Double.NaN;
 
     private OWRClientInputHandler() {
@@ -140,6 +146,12 @@ public final class OWRClientInputHandler {
                 && settings.ersBalancedEndPowerKw == sentBalancedEndPower
                 && settings.ersHarvestStartPowerKw == sentHarvestStartPower
                 && settings.ersHarvestEndPowerKw == sentHarvestEndPower
+                && settings.ersLicoSpeedThresholdKmh == sentLicoSpeedThreshold
+                && settings.ersLicoSteeringThresholdDegrees == sentLicoSteeringThreshold
+                && settings.ersLicoLateralGThreshold == sentLicoLateralGThreshold
+                && settings.ersLicoHarvestPowerKw == sentLicoHarvestPower
+                && settings.ersLicoBalancedPowerKw == sentLicoBalancedPower
+                && settings.ersLicoAttackPowerKw == sentLicoAttackPower
                 && settings.ersCapacityMj == sentCapacityMj) {
             return;
         }
@@ -152,6 +164,12 @@ public final class OWRClientInputHandler {
         sentBalancedEndPower = settings.ersBalancedEndPowerKw;
         sentHarvestStartPower = settings.ersHarvestStartPowerKw;
         sentHarvestEndPower = settings.ersHarvestEndPowerKw;
+        sentLicoSpeedThreshold = settings.ersLicoSpeedThresholdKmh;
+        sentLicoSteeringThreshold = settings.ersLicoSteeringThresholdDegrees;
+        sentLicoLateralGThreshold = settings.ersLicoLateralGThreshold;
+        sentLicoHarvestPower = settings.ersLicoHarvestPowerKw;
+        sentLicoBalancedPower = settings.ersLicoBalancedPowerKw;
+        sentLicoAttackPower = settings.ersLicoAttackPowerKw;
         sentCapacityMj = settings.ersCapacityMj;
         OWRNetwork.CHANNEL.send(new OWRNetwork.SetErsThresholdsMessage(
             sentBalancedClipStart,
@@ -162,7 +180,13 @@ public final class OWRClientInputHandler {
             sentBalancedEndPower,
             sentHarvestStartPower,
             sentHarvestEndPower,
-            sentCapacityMj
+            sentCapacityMj,
+            sentLicoSpeedThreshold,
+            sentLicoSteeringThreshold,
+            sentLicoLateralGThreshold,
+            sentLicoHarvestPower,
+            sentLicoBalancedPower,
+            sentLicoAttackPower
         ), PacketDistributor.SERVER.noArg());
     }
 

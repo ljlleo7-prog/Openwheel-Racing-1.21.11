@@ -19,7 +19,7 @@ import org.lwjgl.glfw.GLFW;
 
 public class OpenwheelSetupScreen extends Screen {
     private static final int PANEL_WIDTH = 380;
-    private static final int CONTENT_HEIGHT = 430;
+    private static final int CONTENT_HEIGHT = 560;
     private final Screen parent;
     private WheelInputSettings settings;
     private int scrollOffset;
@@ -67,9 +67,15 @@ public class OpenwheelSetupScreen extends Screen {
         addRenderableWidget(new ErsRangeSlider(x + 24, ersY + 102, PANEL_WIDTH - 48, 18, ErsRange.HARVEST));
         addRenderableWidget(new PowerBox(left, ersY + 128, true, PowerTarget.HARVEST_START));
         addRenderableWidget(new PowerBox(right, ersY + 128, false, PowerTarget.HARVEST_END));
-        addRenderableWidget(new BatterySlider(left, ersY + 174, PANEL_WIDTH - 32, 20));
+        addRenderableWidget(new LicoSpeedSlider(left, ersY + 184, PANEL_WIDTH - 32, 20));
+        addRenderableWidget(new LicoSteeringSlider(left, ersY + 214, 160, 20));
+        addRenderableWidget(new LicoLateralGSlider(right, ersY + 214, 160, 20));
+        addRenderableWidget(new PowerBox(left, ersY + 270, true, PowerTarget.LICO_HARVEST));
+        addRenderableWidget(new PowerBox(right, ersY + 270, false, PowerTarget.LICO_BALANCED));
+        addRenderableWidget(new PowerBox(left, ersY + 320, true, PowerTarget.LICO_ATTACK));
+        addRenderableWidget(new BatterySlider(left, ersY + 364, PANEL_WIDTH - 32, 20));
 
-        int controlsY = y + 340;
+        int controlsY = y + 470;
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.wheel_setup"), button -> Minecraft.getInstance().setScreen(new WheelSetupScreen(this)))
             .bounds(left, controlsY + 24, PANEL_WIDTH - 32, 20)
             .build());
@@ -78,10 +84,10 @@ public class OpenwheelSetupScreen extends Screen {
             .build());
 
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.done"), button -> saveAndClose())
-            .bounds(x + 106, y + 402, 76, 20)
+            .bounds(x + 106, y + 532, 76, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.cancel"), button -> closeToParent())
-            .bounds(x + 198, y + 402, 76, 20)
+            .bounds(x + 198, y + 532, 76, 20)
             .build());
         updateWidgetVisibility();
     }
@@ -102,14 +108,20 @@ public class OpenwheelSetupScreen extends Screen {
         int y = 42 - scrollOffset;
         graphics.fill(x, Math.max(8, y), x + PANEL_WIDTH, Math.min(height - 8, y + CONTENT_HEIGHT), 0xDD1F2328);
         fillPanel(graphics, x + 6, y + 22, y + 86, 0xFF2A3038);
-        fillPanel(graphics, x + 6, y + 102, y + 310, 0xFF293443);
-        fillPanel(graphics, x + 6, y + 326, y + 390, 0xFF2F3640);
+        fillPanel(graphics, x + 6, y + 102, y + 440, 0xFF293443);
+        fillPanel(graphics, x + 6, y + 456, y + 520, 0xFF2F3640);
         drawIfVisible(graphics, title, x + 10, y + 8, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.visual"), x + 12, y + 24, 0xFFC9D1D9);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers"), x + 12, y + 104, 0xFFC9D1D9);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.balanced_range"), x + 24, y + 122, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.harvest_range"), x + 24, y + 196, 0xFFE8EDF2);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.controls"), x + 12, y + 328, 0xFFC9D1D9);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico"), x + 24, y + 272, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_thresholds"), x + 24, y + 290, 0xFFC9D1D9);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_power"), x + 24, y + 358, 0xFFC9D1D9);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_harvest"), x + 16, y + 382, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_balanced"), x + 204, y + 382, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_attack"), x + 16, y + 432, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.controls"), x + 12, y + 458, 0xFFC9D1D9);
         super.render(graphics, mouseX, mouseY, partialTick);
         renderScrollbar(graphics, x + PANEL_WIDTH + 4);
     }
@@ -217,7 +229,10 @@ public class OpenwheelSetupScreen extends Screen {
         BALANCED_START,
         BALANCED_END,
         HARVEST_START,
-        HARVEST_END
+        HARVEST_END,
+        LICO_HARVEST,
+        LICO_BALANCED,
+        LICO_ATTACK
     }
 
     private class ErsRangeSlider extends AbstractWidget {
@@ -343,6 +358,9 @@ public class OpenwheelSetupScreen extends Screen {
                 case BALANCED_END -> settings.ersBalancedEndPowerKw;
                 case HARVEST_START -> settings.ersHarvestStartPowerKw;
                 case HARVEST_END -> settings.ersHarvestEndPowerKw;
+                case LICO_HARVEST -> settings.ersLicoHarvestPowerKw;
+                case LICO_BALANCED -> settings.ersLicoBalancedPowerKw;
+                case LICO_ATTACK -> settings.ersLicoAttackPowerKw;
             };
         }
 
@@ -355,8 +373,11 @@ public class OpenwheelSetupScreen extends Screen {
                 switch (target) {
                     case BALANCED_START -> settings.ersBalancedStartPowerKw = clampInt(power, 0, 350);
                     case BALANCED_END -> settings.ersBalancedEndPowerKw = clampInt(power, 0, 350);
-                    case HARVEST_START -> settings.ersHarvestStartPowerKw = clampInt(power, -250, 0);
-                    case HARVEST_END -> settings.ersHarvestEndPowerKw = clampInt(power, -250, 0);
+                    case HARVEST_START -> settings.ersHarvestStartPowerKw = clampInt(power, -350, 0);
+                    case HARVEST_END -> settings.ersHarvestEndPowerKw = clampInt(power, -350, 0);
+                    case LICO_HARVEST -> settings.ersLicoHarvestPowerKw = clampInt(power, -350, 0);
+                    case LICO_BALANCED -> settings.ersLicoBalancedPowerKw = clampInt(power, -350, 0);
+                    case LICO_ATTACK -> settings.ersLicoAttackPowerKw = clampInt(power, -350, 0);
                 }
             } catch (NumberFormatException ignored) {
             }
@@ -377,6 +398,57 @@ public class OpenwheelSetupScreen extends Screen {
         @Override
         protected void applyValue() {
             settings.ersCapacityMj = Math.round((2.0 + value * 10.0) * 10.0) / 10.0;
+        }
+    }
+
+    private class LicoSpeedSlider extends AbstractSliderButton {
+        private LicoSpeedSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, Component.empty(), (settings.ersLicoSpeedThresholdKmh - 180) / 180.0);
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.translatable("screen.openwheelracing.setup.ers.lico_speed", settings.ersLicoSpeedThresholdKmh));
+        }
+
+        @Override
+        protected void applyValue() {
+            settings.ersLicoSpeedThresholdKmh = 180 + (int) Math.round(value * 180.0);
+        }
+    }
+
+    private class LicoSteeringSlider extends AbstractSliderButton {
+        private LicoSteeringSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, Component.empty(), (settings.ersLicoSteeringThresholdDegrees - 0.2) / 7.8);
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.translatable("screen.openwheelracing.setup.ers.lico_steer", String.format(Locale.ROOT, "%.1f", settings.ersLicoSteeringThresholdDegrees)));
+        }
+
+        @Override
+        protected void applyValue() {
+            settings.ersLicoSteeringThresholdDegrees = Math.round((0.2 + value * 7.8) * 10.0) / 10.0;
+        }
+    }
+
+    private class LicoLateralGSlider extends AbstractSliderButton {
+        private LicoLateralGSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, Component.empty(), (settings.ersLicoLateralGThreshold - 0.05) / 0.95);
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.translatable("screen.openwheelracing.setup.ers.lico_lateral_g", String.format(Locale.ROOT, "%.2f", settings.ersLicoLateralGThreshold)));
+        }
+
+        @Override
+        protected void applyValue() {
+            settings.ersLicoLateralGThreshold = Math.round((0.05 + value * 0.95) * 100.0) / 100.0;
         }
     }
 }

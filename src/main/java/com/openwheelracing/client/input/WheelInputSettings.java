@@ -34,6 +34,12 @@ public class WheelInputSettings {
     public Integer ersBalancedEndPowerKw;
     public Integer ersHarvestStartPowerKw;
     public Integer ersHarvestEndPowerKw;
+    public Integer ersLicoSpeedThresholdKmh;
+    public Double ersLicoSteeringThresholdDegrees;
+    public Double ersLicoLateralGThreshold;
+    public Integer ersLicoHarvestPowerKw;
+    public Integer ersLicoBalancedPowerKw;
+    public Integer ersLicoAttackPowerKw;
     public Double ersCapacityMj;
     public AxisBinding steering = new AxisBinding(-1, false, -1.0f, 1.0f, 0.0f, 0.08f, 1.0f, 1.0f);
     public AxisBinding throttle = new AxisBinding(-1, true, -1.0f, 1.0f, 1.0f, 0.03f, 1.0f, 1.0f);
@@ -154,8 +160,14 @@ public class WheelInputSettings {
         }
         ersBalancedStartPowerKw = clampInt(ersBalancedStartPowerKw == null ? 200 : ersBalancedStartPowerKw, 0, 350);
         ersBalancedEndPowerKw = clampInt(ersBalancedEndPowerKw == null ? 0 : ersBalancedEndPowerKw, 0, 350);
-        ersHarvestStartPowerKw = clampInt(ersHarvestStartPowerKw == null ? 0 : ersHarvestStartPowerKw, -250, 0);
-        ersHarvestEndPowerKw = clampInt(ersHarvestEndPowerKw == null ? -110 : ersHarvestEndPowerKw, -250, 0);
+        ersHarvestStartPowerKw = clampInt(ersHarvestStartPowerKw == null ? 0 : ersHarvestStartPowerKw, -350, 0);
+        ersHarvestEndPowerKw = clampInt(ersHarvestEndPowerKw == null ? -110 : ersHarvestEndPowerKw, -350, 0);
+        ersLicoSpeedThresholdKmh = clampInt(ersLicoSpeedThresholdKmh == null ? 260 : ersLicoSpeedThresholdKmh, 180, 360);
+        ersLicoSteeringThresholdDegrees = clampDouble(ersLicoSteeringThresholdDegrees == null ? 1.8 : ersLicoSteeringThresholdDegrees, 0.2, 8.0);
+        ersLicoLateralGThreshold = clampDouble(ersLicoLateralGThreshold == null ? 0.28 : ersLicoLateralGThreshold, 0.05, 1.0);
+        ersLicoHarvestPowerKw = clampInt(ersLicoHarvestPowerKw == null ? -350 : ersLicoHarvestPowerKw, -350, 0);
+        ersLicoBalancedPowerKw = clampInt(ersLicoBalancedPowerKw == null ? -180 : ersLicoBalancedPowerKw, -350, 0);
+        ersLicoAttackPowerKw = clampInt(ersLicoAttackPowerKw == null ? 0 : ersLicoAttackPowerKw, -350, 0);
         ersCapacityMj = clampDouble(ersCapacityMj == null ? 4.0 : ersCapacityMj, 2.0, 12.0);
         EnumMap<ButtonRole, Integer> sanitizedButtons = new EnumMap<>(ButtonRole.class);
         if (buttons != null) {
@@ -189,6 +201,12 @@ public class WheelInputSettings {
         settings.ersBalancedEndPowerKw = 0;
         settings.ersHarvestStartPowerKw = 0;
         settings.ersHarvestEndPowerKw = -110;
+        settings.ersLicoSpeedThresholdKmh = 260;
+        settings.ersLicoSteeringThresholdDegrees = 1.8;
+        settings.ersLicoLateralGThreshold = 0.28;
+        settings.ersLicoHarvestPowerKw = -350;
+        settings.ersLicoBalancedPowerKw = -180;
+        settings.ersLicoAttackPowerKw = 0;
         settings.ersCapacityMj = 4.0;
         settings.buttons = new EnumMap<>(ButtonRole.class);
         return settings;
