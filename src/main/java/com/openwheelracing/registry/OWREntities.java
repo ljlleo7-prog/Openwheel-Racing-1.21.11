@@ -7,15 +7,14 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
-import net.minecraftforge.eventbus.api.bus.BusGroup;
-import net.minecraftforge.registries.DeferredRegister;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.registries.RegistryObject;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.registries.DeferredRegister;
+import net.neoforged.neoforge.registries.DeferredHolder;
 
 public final class OWREntities {
-    public static final DeferredRegister<EntityType<?>> ENTITY_TYPES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, OpenwheelRacing.MODID);
+    public static final DeferredRegister<EntityType<?>> ENTITY_TYPES = DeferredRegister.create(Registries.ENTITY_TYPE, OpenwheelRacing.MODID);
 
-    public static final RegistryObject<EntityType<OpenwheelCarEntity>> PROTOTYPE_CAR = ENTITY_TYPES.register("prototype_car",
+    public static final DeferredHolder<EntityType<?>, EntityType<OpenwheelCarEntity>> PROTOTYPE_CAR = ENTITY_TYPES.register("prototype_car",
         () -> EntityType.Builder.of(OpenwheelCarEntity::new, MobCategory.MISC)
             .sized(1.9f, 1.05f)
             .clientTrackingRange(10)
@@ -26,7 +25,7 @@ public final class OWREntities {
     private OWREntities() {
     }
 
-    public static void register(BusGroup modBusGroup) {
-        ENTITY_TYPES.register(modBusGroup);
+    public static void register(IEventBus modBus) {
+        ENTITY_TYPES.register(modBus);
     }
 }

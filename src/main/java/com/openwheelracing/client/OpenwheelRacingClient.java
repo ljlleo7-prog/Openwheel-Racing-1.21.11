@@ -9,26 +9,34 @@ import com.openwheelracing.client.screen.RefineryScreen;
 import com.openwheelracing.registry.OWREntities;
 import com.openwheelracing.registry.OWRMenus;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.client.renderer.entity.EntityRenderers;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.eventbus.api.listener.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
+import net.neoforged.neoforge.common.NeoForge;
 
-@Mod.EventBusSubscriber(modid = OpenwheelRacing.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
+@Mod(value = OpenwheelRacing.MODID, dist = net.neoforged.api.distmarker.Dist.CLIENT)
 public final class OpenwheelRacingClient {
-    private OpenwheelRacingClient() {
+    public OpenwheelRacingClient(IEventBus modBus) {
+        modBus.addListener(this::onClientSetup);
+        modBus.addListener(this::onRegisterMenuScreens);
+        modBus.addListener(OpenwheelRacingClientEvents::onRegisterKeyMappings);
+        modBus.addListener(OpenwheelRacingClientEvents::onRegisterGuiLayers);
+        NeoForge.EVENT_BUS.addListener(OpenwheelRacingClientEvents::onScreenInit);
+        NeoForge.EVENT_BUS.addListener(OpenwheelRacingClientEvents::onClientTick);
     }
 
-    @SubscribeEvent
-    public static void onClientSetup(FMLClientSetupEvent event) {
+    private void onClientSetup(FMLClientSetupEvent event) {
         event.enqueueWork(() -> {
             WheelInputSettings.load(Minecraft.getInstance());
-            MenuScreens.register(OWRMenus.CAR_ASSEMBLY.get(), CarAssemblyScreen::new);
-            MenuScreens.register(OWRMenus.REFINERY.get(), RefineryScreen::new);
-            MenuScreens.register(OWRMenus.RACE_DIRECTOR.get(), RaceDirectorScreen::new);
             EntityRenderers.register(OWREntities.PROTOTYPE_CAR.get(), OpenwheelCarRenderer::new);
         });
+    }
+
+    private void onRegisterMenuScreens(RegisterMenuScreensEvent event) {
+        event.register(OWRMenus.CAR_ASSEMBLY.get(), CarAssemblyScreen::new);
+        event.register(OWRMenus.REFINERY.get(), RefineryScreen::new);
+        event.register(OWRMenus.RACE_DIRECTOR.get(), RaceDirectorScreen::new);
     }
 }

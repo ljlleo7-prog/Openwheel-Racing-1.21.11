@@ -27,7 +27,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraftforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 
 import java.io.DataInputStream;
@@ -276,7 +275,7 @@ public class TrackEditorScreen extends Screen {
     public boolean keyPressed(KeyEvent event) {
         int keyCode = event.key();
         if ((event.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0 && keyCode == GLFW.GLFW_KEY_Z) {
-            OWRNetwork.CHANNEL.send(new OWRNetwork.TrackEditorUndoMessage(), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.TrackEditorUndoMessage());
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_C) {
@@ -764,7 +763,7 @@ public class TrackEditorScreen extends Screen {
                 i++;
                 continue;
             }
-            OWRNetwork.CHANNEL.send(new OWRNetwork.TrackEditorPlaceMessage(queued.operation()), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.TrackEditorPlaceMessage(queued.operation()));
             PENDING_QUEUE.remove(i);
             sent++;
         }
@@ -824,7 +823,7 @@ public class TrackEditorScreen extends Screen {
         if (minecraft.player != null && !isOperationNearPlayer(operation, minecraft.player.blockPosition())) {
             enqueueOperation(operation, QueueReason.TOO_FAR);
         } else {
-            OWRNetwork.CHANNEL.send(new OWRNetwork.TrackEditorPlaceMessage(operation), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.TrackEditorPlaceMessage(operation));
         }
         if (mode == TrackEditorMode.FREEHAND || mode == TrackEditorMode.EDGE) {
             BlockPos last = points.get(points.size() - 1);

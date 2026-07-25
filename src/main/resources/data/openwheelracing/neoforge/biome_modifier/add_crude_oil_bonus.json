@@ -1,5 +1,5 @@
 {
-  "type": "forge:add_features",
+  "type": "neoforge:add_features",
   "biomes": "#openwheelracing:oil_rich",
   "features": "openwheelracing:crude_oil_bonus",
   "step": "underground_ores"

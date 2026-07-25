@@ -12,11 +12,11 @@ import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FlowingFluid;
 import net.minecraft.world.level.redstone.Orientation;
-import net.minecraftforge.fluids.FluidInteractionRegistry;
+import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
 
 public class CrudeOilBlock extends LiquidBlock {
     public CrudeOilBlock(Properties properties) {
-        super(OWRFluids.CRUDE_OIL, properties);
+        super(OWRFluids.CRUDE_OIL.get(), properties);
     }
 
     @Override
@@ -33,7 +33,6 @@ public class CrudeOilBlock extends LiquidBlock {
         }
     }
 
-    @Override
     public FlowingFluid getFluid() {
         return OWRFluids.CRUDE_OIL.get();
     }

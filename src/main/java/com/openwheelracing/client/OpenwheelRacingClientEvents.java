@@ -12,32 +12,25 @@ import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.AddGuiOverlayLayersEvent;
-import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.client.event.ScreenEvent;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.eventbus.api.listener.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.event.ScreenEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 
-@Mod.EventBusSubscriber(modid = OpenwheelRacing.MODID, value = Dist.CLIENT)
 public final class OpenwheelRacingClientEvents {
     private static final Identifier CAR_HUD = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "car_hud");
 
     private OpenwheelRacingClientEvents() {
     }
 
-    @SubscribeEvent
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         OWRKeyMappings.register(event);
     }
 
-    @SubscribeEvent
-    public static void onAddGuiOverlayLayers(AddGuiOverlayLayersEvent event) {
-        event.getLayeredDraw().add(CAR_HUD, CarHudOverlay::render);
+    public static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
+        event.registerAboveAll(CAR_HUD, CarHudOverlay::render);
     }
 
-    @SubscribeEvent
     public static void onScreenInit(ScreenEvent.Init.Post event) {
         Screen screen = event.getScreen();
         if (!(screen instanceof PauseScreen)) {
@@ -48,8 +41,7 @@ public final class OpenwheelRacingClientEvents {
             .build());
     }
 
-    @SubscribeEvent
-    public static void onClientTick(TickEvent.ClientTickEvent.Post event) {
+    public static void onClientTick(ClientTickEvent.Post event) {
         OWRClientInputHandler.onClientTick(event);
         CarSoundManager.onClientTick();
     }

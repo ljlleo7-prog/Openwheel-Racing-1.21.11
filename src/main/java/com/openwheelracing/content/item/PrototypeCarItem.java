@@ -61,7 +61,7 @@ public class PrototypeCarItem extends Item {
         return stack;
     }
 
-    public static int getDamage(ItemStack stack) {
+    public static int getCarDamage(ItemStack stack) {
         Integer damage = stack.get(OWRDataComponents.CAR_DAMAGE.get());
         return damage == null ? 0 : damage;
     }
@@ -124,7 +124,7 @@ public class PrototypeCarItem extends Item {
             car.setPos(spawnPos.x, spawnPos.y, spawnPos.z);
             car.setYRot(player.getYRot());
             car.setSetup(getSetup(stack));
-            car.setDamagePercent(getDamage(stack));
+            car.setDamagePercent(getCarDamage(stack));
             car.setTyreWearPercent(getTyreWear(stack));
             car.setLivery(getLivery(stack));
             car.setLiveryColors(getLiveryColors(stack));
@@ -156,7 +156,7 @@ public class PrototypeCarItem extends Item {
         if (texture.isPresent()) {
             tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.livery_texture", texture.id()).withStyle(ChatFormatting.BLUE));
         }
-        tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.damage", getDamage(stack)).withStyle(ChatFormatting.DARK_RED));
+        tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.damage", getCarDamage(stack)).withStyle(ChatFormatting.DARK_RED));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.tyres", Math.max(0, 100 - getTyreWear(stack))).withStyle(ChatFormatting.YELLOW));
     }
 }

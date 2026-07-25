@@ -1,11 +1,11 @@
-# See https://docs.minecraftforge.net/en/1.21.x/gettingstarted/modfiles/#modstoml
+# See https://docs.neoforged.net/docs/1.21.11/gettingstarted/modfiles/
 modLoader="javafml"
-loaderVersion="[61,)"
+loaderVersion="[1,)"
 license="All Rights Reserved"
 
 [[mods]]
 modId="openwheelracing"
-version="1.9.1"
+version="1.9.2"
 displayName="Openwheel Racing"
 authors="Pilot Raikonnen"
 description='''
@@ -13,9 +13,9 @@ Craft, tune, and race open-wheel cars on custom-built Minecraft circuits.
 '''
 
 [[dependencies.openwheelracing]]
-    modId="forge"
+    modId="neoforge"
     mandatory=true
-    versionRange="[61,)"
+    versionRange="[21.11,)"
     ordering="NONE"
     side="BOTH"
 

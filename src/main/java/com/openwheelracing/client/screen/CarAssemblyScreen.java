@@ -6,7 +6,6 @@ import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.network.OWRNetwork;
 import net.minecraft.client.Minecraft;
-import net.minecraftforge.network.PacketDistributor;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
@@ -45,7 +44,7 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
             .bounds(leftPos + 184, topPos + 112, 62, 14)
             .build());
         addLiveryColorButtons(132);
-        addRenderableWidget(Button.builder(Component.literal("Repair"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RepairCarMessage(), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.literal("Repair"), button -> OWRNetwork.sendToServer(new OWRNetwork.RepairCarMessage()))
             .bounds(leftPos + 190, topPos + 98, 52, 14)
             .build());
     }
@@ -118,19 +117,19 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
     }
 
     private void addTuneButtons(int setupSlot, int yOffset) {
-        addRenderableWidget(Button.builder(Component.literal("-"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.TuneCarMessage(setupSlot, -1), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.literal("-"), button -> OWRNetwork.sendToServer(new OWRNetwork.TuneCarMessage(setupSlot, -1)))
             .bounds(leftPos + 214, topPos + yOffset, 12, 11)
             .build());
-        addRenderableWidget(Button.builder(Component.literal("+"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.TuneCarMessage(setupSlot, 1), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.literal("+"), button -> OWRNetwork.sendToServer(new OWRNetwork.TuneCarMessage(setupSlot, 1)))
             .bounds(leftPos + 232, topPos + yOffset, 12, 11)
             .build());
     }
 
     private void addLiveryButtons(int yOffset) {
-        addRenderableWidget(Button.builder(Component.literal("-"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.CycleLiveryMessage(-1), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.literal("-"), button -> OWRNetwork.sendToServer(new OWRNetwork.CycleLiveryMessage(-1)))
             .bounds(leftPos + 214, topPos + yOffset, 12, 11)
             .build());
-        addRenderableWidget(Button.builder(Component.literal("+"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.CycleLiveryMessage(1), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.literal("+"), button -> OWRNetwork.sendToServer(new OWRNetwork.CycleLiveryMessage(1)))
             .bounds(leftPos + 232, topPos + yOffset, 12, 11)
             .build());
     }
@@ -173,7 +172,7 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
     private void applyColorPicker() {
         if (colorPickerChannel >= 0) {
             int color = CarLiveryColors.rgb(pickerRed, pickerGreen, pickerBlue);
-            OWRNetwork.CHANNEL.send(new OWRNetwork.SetLiveryColorMessage(colorPickerChannel, color), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.SetLiveryColorMessage(colorPickerChannel, color));
         }
         closeColorPicker();
     }

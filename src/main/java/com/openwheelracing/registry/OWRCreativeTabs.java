@@ -8,14 +8,14 @@ import com.openwheelracing.content.item.TyreItem;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.CreativeModeTab;
-import net.minecraftforge.eventbus.api.bus.BusGroup;
-import net.minecraftforge.registries.DeferredRegister;
-import net.minecraftforge.registries.RegistryObject;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.registries.DeferredRegister;
+import net.neoforged.neoforge.registries.DeferredHolder;
 
 public final class OWRCreativeTabs {
     public static final DeferredRegister<CreativeModeTab> CREATIVE_MODE_TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB, OpenwheelRacing.MODID);
 
-    public static final RegistryObject<CreativeModeTab> OPENWHEEL_RACING = CREATIVE_MODE_TABS.register("openwheel_racing", () -> CreativeModeTab.builder()
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> OPENWHEEL_RACING = CREATIVE_MODE_TABS.register("openwheel_racing", () -> CreativeModeTab.builder()
         .title(Component.translatable("itemGroup.openwheelracing.openwheel_racing"))
         .icon(PrototypeCarItem::createWithDefaultSetup)
         .displayItems((parameters, output) -> {
@@ -59,7 +59,7 @@ public final class OWRCreativeTabs {
     private OWRCreativeTabs() {
     }
 
-    public static void register(BusGroup modBusGroup) {
-        CREATIVE_MODE_TABS.register(modBusGroup);
+    public static void register(IEventBus modBus) {
+        CREATIVE_MODE_TABS.register(modBus);
     }
 }

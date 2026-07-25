@@ -27,6 +27,9 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
@@ -35,136 +38,65 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.event.network.CustomPayloadEvent;
-import net.minecraftforge.network.ChannelBuilder;
-import net.minecraftforge.network.SimpleChannel;
+import net.neoforged.neoforge.client.network.ClientPacketDistributor;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final int PROTOCOL = 1;
-    public static final SimpleChannel CHANNEL = ChannelBuilder
-        .named(Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "main"))
-        .networkProtocolVersion(PROTOCOL)
-        .simpleChannel();
+    private static final String PROTOCOL = "1";
 
     private OWRNetwork() {
     }
 
-    public static void register() {
-        CHANNEL.messageBuilder(TuneCarMessage.class)
-            .encoder(TuneCarMessage::encode)
-            .decoder(TuneCarMessage::decode)
-            .consumerMainThread(TuneCarMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(RepairCarMessage.class)
-            .encoder(RepairCarMessage::encode)
-            .decoder(RepairCarMessage::decode)
-            .consumerMainThread(RepairCarMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(CycleLiveryMessage.class)
-            .encoder(CycleLiveryMessage::encode)
-            .decoder(CycleLiveryMessage::decode)
-            .consumerMainThread(CycleLiveryMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(SetLiveryColorMessage.class)
-            .encoder(SetLiveryColorMessage::encode)
-            .decoder(SetLiveryColorMessage::decode)
-            .consumerMainThread(SetLiveryColorMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(SetLiveryTextureMessage.class)
-            .encoder(SetLiveryTextureMessage::encode)
-            .decoder(SetLiveryTextureMessage::decode)
-            .consumerMainThread(SetLiveryTextureMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(ShiftMessage.class)
-            .encoder(ShiftMessage::encode)
-            .decoder(ShiftMessage::decode)
-            .consumerMainThread(ShiftMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(ExitCarMessage.class)
-            .encoder(ExitCarMessage::encode)
-            .decoder(ExitCarMessage::decode)
-            .consumerMainThread(ExitCarMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(DriveInputMessage.class)
-            .encoder(DriveInputMessage::encode)
-            .decoder(DriveInputMessage::decode)
-            .consumerMainThread(DriveInputMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(ToggleAbsMessage.class)
-            .encoder(ToggleAbsMessage::encode)
-            .decoder(ToggleAbsMessage::decode)
-            .consumerMainThread(ToggleAbsMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(ToggleTractionControlMessage.class)
-            .encoder(ToggleTractionControlMessage::encode)
-            .decoder(ToggleTractionControlMessage::decode)
-            .consumerMainThread(ToggleTractionControlMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(ToggleDrsMessage.class)
-            .encoder(ToggleDrsMessage::encode)
-            .decoder(ToggleDrsMessage::decode)
-            .consumerMainThread(ToggleDrsMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(CycleErsModeMessage.class)
-            .encoder(CycleErsModeMessage::encode)
-            .decoder(CycleErsModeMessage::decode)
-            .consumerMainThread(CycleErsModeMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(SetErsThresholdsMessage.class)
-            .encoder(SetErsThresholdsMessage::encode)
-            .decoder(SetErsThresholdsMessage::decode)
-            .consumerMainThread(SetErsThresholdsMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(MountCarMessage.class)
-            .encoder(MountCarMessage::encode)
-            .decoder(MountCarMessage::decode)
-            .consumerMainThread(MountCarMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(TrackEditorPlaceMessage.class)
-            .encoder(TrackEditorPlaceMessage::encode)
-            .decoder(TrackEditorPlaceMessage::decode)
-            .consumerMainThread(TrackEditorPlaceMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(TrackEditorUndoMessage.class)
-            .encoder(TrackEditorUndoMessage::encode)
-            .decoder(TrackEditorUndoMessage::decode)
-            .consumerMainThread(TrackEditorUndoMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(RaceDirectorToggleRuleMessage.class)
-            .encoder(RaceDirectorToggleRuleMessage::encode)
-            .decoder(RaceDirectorToggleRuleMessage::decode)
-            .consumerMainThread(RaceDirectorToggleRuleMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(RaceDirectorSetMinLapTicksMessage.class)
-            .encoder(RaceDirectorSetMinLapTicksMessage::encode)
-            .decoder(RaceDirectorSetMinLapTicksMessage::decode)
-            .consumerMainThread(RaceDirectorSetMinLapTicksMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(RaceDirectorSetErsLimitMessage.class)
-            .encoder(RaceDirectorSetErsLimitMessage::encode)
-            .decoder(RaceDirectorSetErsLimitMessage::decode)
-            .consumerMainThread(RaceDirectorSetErsLimitMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(RaceDirectorSetPageMessage.class)
-            .encoder(RaceDirectorSetPageMessage::encode)
-            .decoder(RaceDirectorSetPageMessage::decode)
-            .consumerMainThread(RaceDirectorSetPageMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(RaceDirectorInvalidateLapMessage.class)
-            .encoder(RaceDirectorInvalidateLapMessage::encode)
-            .decoder(RaceDirectorInvalidateLapMessage::decode)
-            .consumerMainThread(RaceDirectorInvalidateLapMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(RaceDirectorSnapshotMessage.class)
-            .encoder(RaceDirectorSnapshotMessage::encode)
-            .decoder(RaceDirectorSnapshotMessage::decode)
-            .consumerMainThread(RaceDirectorSnapshotMessage::handle)
-            .add();
-        CHANNEL.messageBuilder(RankingBoardMessage.class)
-            .encoder(RankingBoardMessage::encode)
-            .decoder(RankingBoardMessage::decode)
-            .consumerMainThread(RankingBoardMessage::handle)
-            .add();
+    public static void register(RegisterPayloadHandlersEvent event) {
+        PayloadRegistrar registrar = event.registrar(PROTOCOL);
+        registrar.playToServer(TuneCarMessage.TYPE, codec(TuneCarMessage::encode, TuneCarMessage::decode), TuneCarMessage::handle);
+        registrar.playToServer(RepairCarMessage.TYPE, codec(RepairCarMessage::encode, RepairCarMessage::decode), RepairCarMessage::handle);
+        registrar.playToServer(CycleLiveryMessage.TYPE, codec(CycleLiveryMessage::encode, CycleLiveryMessage::decode), CycleLiveryMessage::handle);
+        registrar.playToServer(SetLiveryColorMessage.TYPE, codec(SetLiveryColorMessage::encode, SetLiveryColorMessage::decode), SetLiveryColorMessage::handle);
+        registrar.playToServer(SetLiveryTextureMessage.TYPE, codec(SetLiveryTextureMessage::encode, SetLiveryTextureMessage::decode), SetLiveryTextureMessage::handle);
+        registrar.playToServer(ShiftMessage.TYPE, codec(ShiftMessage::encode, ShiftMessage::decode), ShiftMessage::handle);
+        registrar.playToServer(ExitCarMessage.TYPE, codec(ExitCarMessage::encode, ExitCarMessage::decode), ExitCarMessage::handle);
+        registrar.playToServer(DriveInputMessage.TYPE, codec(DriveInputMessage::encode, DriveInputMessage::decode), DriveInputMessage::handle);
+        registrar.playToServer(ToggleAbsMessage.TYPE, codec(ToggleAbsMessage::encode, ToggleAbsMessage::decode), ToggleAbsMessage::handle);
+        registrar.playToServer(ToggleTractionControlMessage.TYPE, codec(ToggleTractionControlMessage::encode, ToggleTractionControlMessage::decode), ToggleTractionControlMessage::handle);
+        registrar.playToServer(ToggleDrsMessage.TYPE, codec(ToggleDrsMessage::encode, ToggleDrsMessage::decode), ToggleDrsMessage::handle);
+        registrar.playToServer(CycleErsModeMessage.TYPE, codec(CycleErsModeMessage::encode, CycleErsModeMessage::decode), CycleErsModeMessage::handle);
+        registrar.playToServer(SetErsThresholdsMessage.TYPE, codec(SetErsThresholdsMessage::encode, SetErsThresholdsMessage::decode), SetErsThresholdsMessage::handle);
+        registrar.playToServer(MountCarMessage.TYPE, codec(MountCarMessage::encode, MountCarMessage::decode), MountCarMessage::handle);
+        registrar.playToServer(TrackEditorPlaceMessage.TYPE, codec(TrackEditorPlaceMessage::encode, TrackEditorPlaceMessage::decode), TrackEditorPlaceMessage::handle);
+        registrar.playToServer(TrackEditorUndoMessage.TYPE, codec(TrackEditorUndoMessage::encode, TrackEditorUndoMessage::decode), TrackEditorUndoMessage::handle);
+        registrar.playToServer(RaceDirectorToggleRuleMessage.TYPE, codec(RaceDirectorToggleRuleMessage::encode, RaceDirectorToggleRuleMessage::decode), RaceDirectorToggleRuleMessage::handle);
+        registrar.playToServer(RaceDirectorSetMinLapTicksMessage.TYPE, codec(RaceDirectorSetMinLapTicksMessage::encode, RaceDirectorSetMinLapTicksMessage::decode), RaceDirectorSetMinLapTicksMessage::handle);
+        registrar.playToServer(RaceDirectorSetErsLimitMessage.TYPE, codec(RaceDirectorSetErsLimitMessage::encode, RaceDirectorSetErsLimitMessage::decode), RaceDirectorSetErsLimitMessage::handle);
+        registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
+        registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
+        registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
+        registrar.playToClient(RankingBoardMessage.TYPE, codec(RankingBoardMessage::encode, RankingBoardMessage::decode), RankingBoardMessage::handle);
+    }
+
+    public static void sendToServer(CustomPacketPayload payload) {
+        ClientPacketDistributor.sendToServer(payload);
+    }
+
+    private static <T extends CustomPacketPayload> StreamCodec<RegistryFriendlyByteBuf, T> codec(Encoder<T> encoder, Decoder<T> decoder) {
+        return StreamCodec.of((buffer, message) -> encoder.encode(message, buffer), decoder::decode);
+    }
+
+    private static <T extends CustomPacketPayload> CustomPacketPayload.Type<T> payloadType(String path) {
+        return new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, path));
+    }
+
+    @FunctionalInterface
+    private interface Encoder<T> {
+        void encode(T message, FriendlyByteBuf buffer);
+    }
+
+    @FunctionalInterface
+    private interface Decoder<T> {
+        T decode(FriendlyByteBuf buffer);
     }
 
     private static float sanitizePedal(float value) {
@@ -196,7 +128,14 @@ public final class OWRNetwork {
         return 0.0f;
     }
 
-    public record TuneCarMessage(int slot, int delta) {
+    public record TuneCarMessage(int slot, int delta) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<TuneCarMessage> TYPE = payloadType("tune_car_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(TuneCarMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.slot);
             buffer.writeInt(message.delta);
@@ -206,9 +145,9 @@ public final class OWRNetwork {
             return new TuneCarMessage(buffer.readInt(), buffer.readInt());
         }
 
-        private static void handle(TuneCarMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(TuneCarMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
                     return;
                 }
@@ -227,11 +166,17 @@ public final class OWRNetwork {
                 stack.set(OWRDataComponents.CAR_SETUP.get(), updated);
                 menu.slotsChanged(menu.getContainer());
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record RepairCarMessage() {
+    public record RepairCarMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RepairCarMessage> TYPE = payloadType("repair_car_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(RepairCarMessage message, FriendlyByteBuf buffer) {
         }
 
@@ -239,9 +184,9 @@ public final class OWRNetwork {
             return new RepairCarMessage();
         }
 
-        private static void handle(RepairCarMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(RepairCarMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
                     return;
                 }
@@ -249,7 +194,7 @@ public final class OWRNetwork {
                 if (!stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get())) {
                     return;
                 }
-                int damage = PrototypeCarItem.getDamage(stack);
+                int damage = PrototypeCarItem.getCarDamage(stack);
                 if (damage <= 0 || !player.getInventory().contains(new ItemStack(OWRItems.RUBBER.get()))) {
                     return;
                 }
@@ -257,11 +202,17 @@ public final class OWRNetwork {
                 stack.set(OWRDataComponents.CAR_DAMAGE.get(), Math.max(0, damage - 25));
                 menu.slotsChanged(menu.getContainer());
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record CycleLiveryMessage(int delta) {
+    public record CycleLiveryMessage(int delta) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<CycleLiveryMessage> TYPE = payloadType("cycle_livery_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(CycleLiveryMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.delta);
         }
@@ -270,9 +221,9 @@ public final class OWRNetwork {
             return new CycleLiveryMessage(buffer.readInt());
         }
 
-        private static void handle(CycleLiveryMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(CycleLiveryMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
                     return;
                 }
@@ -287,11 +238,17 @@ public final class OWRNetwork {
                 PrototypeCarItem.setLiveryColors(stack, colors);
                 menu.slotsChanged(menu.getContainer());
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record SetLiveryColorMessage(int channel, int color) {
+    public record SetLiveryColorMessage(int channel, int color) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<SetLiveryColorMessage> TYPE = payloadType("set_livery_color_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(SetLiveryColorMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.channel);
             buffer.writeInt(message.color);
@@ -301,9 +258,9 @@ public final class OWRNetwork {
             return new SetLiveryColorMessage(buffer.readInt(), buffer.readInt());
         }
 
-        private static void handle(SetLiveryColorMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(SetLiveryColorMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
                     return;
                 }
@@ -314,11 +271,17 @@ public final class OWRNetwork {
                 PrototypeCarItem.setLiveryColors(stack, PrototypeCarItem.getLiveryColors(stack).withChannel(message.channel, message.color));
                 menu.slotsChanged(menu.getContainer());
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record SetLiveryTextureMessage(String textureId) {
+    public record SetLiveryTextureMessage(String textureId) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<SetLiveryTextureMessage> TYPE = payloadType("set_livery_texture_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(SetLiveryTextureMessage message, FriendlyByteBuf buffer) {
             buffer.writeUtf(CarLiveryTexture.sanitize(message.textureId));
         }
@@ -327,9 +290,9 @@ public final class OWRNetwork {
             return new SetLiveryTextureMessage(buffer.readUtf(80));
         }
 
-        private static void handle(SetLiveryTextureMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(SetLiveryTextureMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
                     return;
                 }
@@ -340,11 +303,17 @@ public final class OWRNetwork {
                 PrototypeCarItem.setLiveryTexture(stack, new CarLiveryTexture(message.textureId));
                 menu.slotsChanged(menu.getContainer());
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record ShiftMessage(int direction) {
+    public record ShiftMessage(int direction) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<ShiftMessage> TYPE = payloadType("shift_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(ShiftMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.direction);
         }
@@ -353,9 +322,9 @@ public final class OWRNetwork {
             return new ShiftMessage(buffer.readInt());
         }
 
-        private static void handle(ShiftMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(ShiftMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
@@ -365,11 +334,17 @@ public final class OWRNetwork {
                     car.shiftDown();
                 }
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record ExitCarMessage() {
+    public record ExitCarMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<ExitCarMessage> TYPE = payloadType("exit_car_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(ExitCarMessage message, FriendlyByteBuf buffer) {
         }
 
@@ -377,18 +352,24 @@ public final class OWRNetwork {
             return new ExitCarMessage();
         }
 
-        private static void handle(ExitCarMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(ExitCarMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player != null) {
                     player.stopRiding();
                 }
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record DriveInputMessage(float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering) {
+    public record DriveInputMessage(float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<DriveInputMessage> TYPE = payloadType("drive_input_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(DriveInputMessage message, FriendlyByteBuf buffer) {
             buffer.writeFloat(message.keyboardThrottle);
             buffer.writeFloat(message.keyboardBrake);
@@ -402,9 +383,9 @@ public final class OWRNetwork {
             return new DriveInputMessage(buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
         }
 
-        private static void handle(DriveInputMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(DriveInputMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
@@ -426,11 +407,17 @@ public final class OWRNetwork {
                 }
                 car.applyDriveInput(throttle, brake, steering);
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record ToggleAbsMessage() {
+    public record ToggleAbsMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<ToggleAbsMessage> TYPE = payloadType("toggle_abs_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(ToggleAbsMessage message, FriendlyByteBuf buffer) {
         }
 
@@ -438,19 +425,25 @@ public final class OWRNetwork {
             return new ToggleAbsMessage();
         }
 
-        private static void handle(ToggleAbsMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(ToggleAbsMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
                 car.toggleAbs();
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record ToggleTractionControlMessage() {
+    public record ToggleTractionControlMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<ToggleTractionControlMessage> TYPE = payloadType("toggle_traction_control_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(ToggleTractionControlMessage message, FriendlyByteBuf buffer) {
         }
 
@@ -458,19 +451,25 @@ public final class OWRNetwork {
             return new ToggleTractionControlMessage();
         }
 
-        private static void handle(ToggleTractionControlMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(ToggleTractionControlMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
                 car.toggleTractionControl();
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record ToggleDrsMessage() {
+    public record ToggleDrsMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<ToggleDrsMessage> TYPE = payloadType("toggle_drs_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(ToggleDrsMessage message, FriendlyByteBuf buffer) {
         }
 
@@ -478,19 +477,25 @@ public final class OWRNetwork {
             return new ToggleDrsMessage();
         }
 
-        private static void handle(ToggleDrsMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(ToggleDrsMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
                 car.toggleDrs();
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record CycleErsModeMessage(int direction) {
+    public record CycleErsModeMessage(int direction) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<CycleErsModeMessage> TYPE = payloadType("cycle_ers_mode_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(CycleErsModeMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.direction);
         }
@@ -499,21 +504,27 @@ public final class OWRNetwork {
             return new CycleErsModeMessage(buffer.readInt());
         }
 
-        private static void handle(CycleErsModeMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(CycleErsModeMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
                 car.cycleErsMode(message.direction);
             });
-            context.setPacketHandled(true);
         }
     }
 
     public record SetErsThresholdsMessage(int balancedClipStartKmh, int balancedClipEndKmh, int harvestNegativeStartKmh, int harvestNegativeFullKmh,
             int balancedStartPowerKw, int balancedEndPowerKw, int harvestStartPowerKw, int harvestEndPowerKw, double capacityMj,
-            int licoSpeedThresholdKmh, double licoSteeringThresholdDegrees, double licoLateralGThreshold, int licoHarvestPowerKw, int licoBalancedPowerKw, int licoAttackPowerKw) {
+            int licoSpeedThresholdKmh, double licoSteeringThresholdDegrees, double licoLateralGThreshold, int licoHarvestPowerKw, int licoBalancedPowerKw, int licoAttackPowerKw) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<SetErsThresholdsMessage> TYPE = payloadType("set_ers_thresholds_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(SetErsThresholdsMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.balancedClipStartKmh);
             buffer.writeInt(message.balancedClipEndKmh);
@@ -552,9 +563,9 @@ public final class OWRNetwork {
             );
         }
 
-        private static void handle(SetErsThresholdsMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(SetErsThresholdsMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
@@ -578,11 +589,17 @@ public final class OWRNetwork {
                     -Math.min(Math.abs(message.licoAttackPowerKw), raceControl.getMaxHarvestNegativeKw())
                 );
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record MountCarMessage() {
+    public record MountCarMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<MountCarMessage> TYPE = payloadType("mount_car_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(MountCarMessage message, FriendlyByteBuf buffer) {
         }
 
@@ -590,9 +607,9 @@ public final class OWRNetwork {
             return new MountCarMessage();
         }
 
-        private static void handle(MountCarMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(MountCarMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || player.getVehicle() != null) {
                     return;
                 }
@@ -620,11 +637,17 @@ public final class OWRNetwork {
                     best.prepareForDriver(player);
                 }
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record TrackEditorPlaceMessage(TrackEditorOperation operation) {
+    public record TrackEditorPlaceMessage(TrackEditorOperation operation) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<TrackEditorPlaceMessage> TYPE = payloadType("track_editor_place_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(TrackEditorPlaceMessage message, FriendlyByteBuf buffer) {
             buffer.writeEnum(message.operation.mode());
             buffer.writeEnum(message.operation.material());
@@ -661,9 +684,9 @@ public final class OWRNetwork {
             return new TrackEditorPlaceMessage(new TrackEditorOperation(mode, material, width, points, facing, preset, runoffMaterial, fullSurface, clearHeight));
         }
 
-        private static void handle(TrackEditorPlaceMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(TrackEditorPlaceMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player != null) {
                     TrackEditorPlacementService.PlacementResult result = TrackEditorPlacementService.place(player, message.operation());
                     if (result != TrackEditorPlacementService.PlacementResult.PLACED) {
@@ -671,11 +694,17 @@ public final class OWRNetwork {
                     }
                 }
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record TrackEditorUndoMessage() {
+    public record TrackEditorUndoMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<TrackEditorUndoMessage> TYPE = payloadType("track_editor_undo_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(TrackEditorUndoMessage message, FriendlyByteBuf buffer) {
         }
 
@@ -683,30 +712,36 @@ public final class OWRNetwork {
             return new TrackEditorUndoMessage();
         }
 
-        private static void handle(TrackEditorUndoMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(TrackEditorUndoMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player != null) {
                     TrackEditorUndoStore.undo(player);
                 }
             });
-            context.setPacketHandled(true);
         }
     }
 
     public static void sendRaceDirectorSnapshot(ServerPlayer player, RaceDirectorSnapshot snapshot) {
-        CHANNEL.send(new RaceDirectorSnapshotMessage(snapshot), net.minecraftforge.network.PacketDistributor.PLAYER.with(player));
+        PacketDistributor.sendToPlayer(player, new RaceDirectorSnapshotMessage(snapshot));
     }
 
     public static void broadcastRankingBoard(net.minecraft.server.MinecraftServer server, net.minecraft.server.level.ServerLevel level) {
         List<OWRLapRecords.DriverBest> sorted = OWRLapRecords.get(level).getPlayerBestLapsSorted();
         RankingBoardMessage msg = new RankingBoardMessage(sorted);
         for (net.minecraft.server.level.ServerPlayer p : server.getPlayerList().getPlayers()) {
-            CHANNEL.send(msg, net.minecraftforge.network.PacketDistributor.PLAYER.with(p));
+            PacketDistributor.sendToPlayer(p, msg);
         }
     }
 
-    public record RaceDirectorSnapshotMessage(RaceDirectorSnapshot snapshot) {
+    public record RaceDirectorSnapshotMessage(RaceDirectorSnapshot snapshot) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSnapshotMessage> TYPE = payloadType("race_director_snapshot_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(RaceDirectorSnapshotMessage message, FriendlyByteBuf buffer) {
             RaceDirectorSnapshot snapshot = message.snapshot;
             buffer.writeBoolean(snapshot.checkpointCheckEnabled());
@@ -746,13 +781,19 @@ public final class OWRNetwork {
             return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, laps));
         }
 
-        private static void handle(RaceDirectorSnapshotMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {
             context.enqueueWork(() -> applyRaceDirectorSnapshot(message.snapshot));
-            context.setPacketHandled(true);
         }
     }
 
-    public record RaceDirectorToggleRuleMessage(int rule) {
+    public record RaceDirectorToggleRuleMessage(int rule) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorToggleRuleMessage> TYPE = payloadType("race_director_toggle_rule_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         public static final int CHECKPOINTS = 0;
         public static final int OFF_TRACK = 1;
 
@@ -764,9 +805,9 @@ public final class OWRNetwork {
             return new RaceDirectorToggleRuleMessage(buffer.readInt());
         }
 
-        private static void handle(RaceDirectorToggleRuleMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(RaceDirectorToggleRuleMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof RaceDirectorMenu)) {
                     return;
                 }
@@ -777,11 +818,17 @@ public final class OWRNetwork {
                     state.toggleOffTrackCheck();
                 }
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record RaceDirectorSetMinLapTicksMessage(int ticks) {
+    public record RaceDirectorSetMinLapTicksMessage(int ticks) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSetMinLapTicksMessage> TYPE = payloadType("race_director_set_min_lap_ticks_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(RaceDirectorSetMinLapTicksMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.ticks);
         }
@@ -790,19 +837,25 @@ public final class OWRNetwork {
             return new RaceDirectorSetMinLapTicksMessage(buffer.readInt());
         }
 
-        private static void handle(RaceDirectorSetMinLapTicksMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(RaceDirectorSetMinLapTicksMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof RaceDirectorMenu)) {
                     return;
                 }
                 OWRRaceControlState.get(player.level()).setMinimumValidLapTicks(message.ticks);
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record RaceDirectorSetErsLimitMessage(int limit, int delta) {
+    public record RaceDirectorSetErsLimitMessage(int limit, int delta) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSetErsLimitMessage> TYPE = payloadType("race_director_set_ers_limit_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         public static final int CAPACITY = 0;
         public static final int BALANCED_DEPLOY = 1;
         public static final int ATTACK_DEPLOY = 2;
@@ -817,9 +870,9 @@ public final class OWRNetwork {
             return new RaceDirectorSetErsLimitMessage(buffer.readInt(), buffer.readInt());
         }
 
-        private static void handle(RaceDirectorSetErsLimitMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(RaceDirectorSetErsLimitMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
                     return;
                 }
@@ -837,11 +890,17 @@ public final class OWRNetwork {
                 }
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record RaceDirectorSetPageMessage(int page) {
+    public record RaceDirectorSetPageMessage(int page) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSetPageMessage> TYPE = payloadType("race_director_set_page_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(RaceDirectorSetPageMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.page);
         }
@@ -850,20 +909,26 @@ public final class OWRNetwork {
             return new RaceDirectorSetPageMessage(buffer.readInt());
         }
 
-        private static void handle(RaceDirectorSetPageMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(RaceDirectorSetPageMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
                     return;
                 }
                 menu.setPage(message.page);
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record RaceDirectorInvalidateLapMessage(long lapId) {
+    public record RaceDirectorInvalidateLapMessage(long lapId) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorInvalidateLapMessage> TYPE = payloadType("race_director_invalidate_lap_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(RaceDirectorInvalidateLapMessage message, FriendlyByteBuf buffer) {
             buffer.writeLong(message.lapId);
         }
@@ -872,9 +937,9 @@ public final class OWRNetwork {
             return new RaceDirectorInvalidateLapMessage(buffer.readLong());
         }
 
-        private static void handle(RaceDirectorInvalidateLapMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(RaceDirectorInvalidateLapMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
-                ServerPlayer player = context.getSender();
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
                     return;
                 }
@@ -889,11 +954,17 @@ public final class OWRNetwork {
                     }
                 });
             });
-            context.setPacketHandled(true);
         }
     }
 
-    public record RankingBoardMessage(List<OWRLapRecords.DriverBest> entries) {
+    public record RankingBoardMessage(List<OWRLapRecords.DriverBest> entries) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RankingBoardMessage> TYPE = payloadType("ranking_board_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
         private static void encode(RankingBoardMessage message, FriendlyByteBuf buffer) {
             buffer.writeVarInt(message.entries.size());
             for (OWRLapRecords.DriverBest entry : message.entries) {
@@ -911,9 +982,8 @@ public final class OWRNetwork {
             return new RankingBoardMessage(entries);
         }
 
-        private static void handle(RankingBoardMessage message, CustomPayloadEvent.Context context) {
+        private static void handle(RankingBoardMessage message, IPayloadContext context) {
             context.enqueueWork(() -> LapRankingClient.setRanking(message.entries));
-            context.setPacketHandled(true);
         }
     }
 

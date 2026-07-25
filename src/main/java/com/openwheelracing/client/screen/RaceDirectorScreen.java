@@ -12,7 +12,6 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraftforge.network.PacketDistributor;
 
 public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu> {
     private static final int ROW_X = 12;
@@ -41,10 +40,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     @Override
     protected void init() {
         super.init();
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.checkpoints"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.CHECKPOINTS), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.checkpoints"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.CHECKPOINTS)))
             .bounds(leftPos + 12, topPos + 22, 112, 16)
             .build());
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.off_track"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.OFF_TRACK), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.off_track"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.OFF_TRACK)))
             .bounds(leftPos + 130, topPos + 22, 112, 16)
             .build());
         addRenderableWidget(Button.builder(Component.literal("-"), button -> setMinimumLapTicks(menu.getSnapshot().minimumValidLapTicks() - 20))
@@ -57,15 +56,15 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.BALANCED_DEPLOY, leftPos + 204, topPos + 108, 10);
         addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.ATTACK_DEPLOY, leftPos + 204, topPos + 124, 10);
         addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.HARVEST_NEGATIVE, leftPos + 204, topPos + 140, 10);
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.previous"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorSetPageMessage(Math.max(0, menu.getPage() - 1)), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.previous"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetPageMessage(Math.max(0, menu.getPage() - 1))))
             .bounds(leftPos + 12, topPos + 166, 60, 16)
             .build());
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.next"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorSetPageMessage(menu.getPage() + 1), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.next"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetPageMessage(menu.getPage() + 1)))
             .bounds(leftPos + 78, topPos + 166, 60, 16)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.invalidate"), button -> {
             if (selectedLapId != -1L) {
-                OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorInvalidateLapMessage(selectedLapId), PacketDistributor.SERVER.noArg());
+                OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorInvalidateLapMessage(selectedLapId));
             }
         }).bounds(leftPos + 196, topPos + 166, 92, 16).build());
     }
@@ -160,14 +159,14 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     }
 
     private void setMinimumLapTicks(int ticks) {
-        OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorSetMinLapTicksMessage(Math.max(1, ticks)), PacketDistributor.SERVER.noArg());
+        OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetMinLapTicksMessage(Math.max(1, ticks)));
     }
 
     private void addLimitButtons(int limit, int x, int y, int step) {
-        addRenderableWidget(Button.builder(Component.literal("-"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorSetErsLimitMessage(limit, -step), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.literal("-"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetErsLimitMessage(limit, -step)))
             .bounds(x, y, 18, 14)
             .build());
-        addRenderableWidget(Button.builder(Component.literal("+"), button -> OWRNetwork.CHANNEL.send(new OWRNetwork.RaceDirectorSetErsLimitMessage(limit, step), PacketDistributor.SERVER.noArg()))
+        addRenderableWidget(Button.builder(Component.literal("+"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetErsLimitMessage(limit, step)))
             .bounds(x + 74, y, 18, 14)
             .build());
     }

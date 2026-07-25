@@ -19,7 +19,6 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 
 public class LiveryEditorScreen extends Screen {
@@ -229,7 +228,7 @@ public class LiveryEditorScreen extends Screen {
             } else {
                 ClientLiveryTextures.save(Minecraft.getInstance(), texture.id(), liveryImage);
             }
-            OWRNetwork.CHANNEL.send(new OWRNetwork.SetLiveryTextureMessage(texture.id()), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.SetLiveryTextureMessage(texture.id()));
             OpenwheelCarRenderer.invalidateLiveryCache(texture.id());
             status = "Saved ✓  " + texture.id() + ".png";
         } catch (IOException e) {
