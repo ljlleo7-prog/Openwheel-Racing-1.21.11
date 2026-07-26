@@ -7,6 +7,7 @@ import com.openwheelracing.network.OWRNetwork;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.core.BlockPos;
@@ -15,15 +16,16 @@ import net.minecraft.world.entity.player.Inventory;
 
 public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu> {
     private static final int ROW_X = 12;
-    private static final int ROW_Y = 74;
+    private static final int ROW_Y = 102;
     private static final int ROW_WIDTH = 176;
     private static final int ROW_HEIGHT = 12;
+    private EditBox sessionNameBox;
     private long selectedLapId = -1L;
 
     public RaceDirectorScreen(RaceDirectorMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
         imageWidth = 300;
-        imageHeight = 204;
+        imageHeight = 218;
         inventoryLabelY = 1000;
     }
 
@@ -40,33 +42,56 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     @Override
     protected void init() {
         super.init();
+        rebuildWidgets();
+    }
+
+    @Override
+    protected void rebuildWidgets() {
+        clearWidgets();
+        String typedSessionName = sessionNameBox == null ? "" : sessionNameBox.getValue();
+        RaceDirectorSnapshot snapshot = menu.getSnapshot();
+        sessionNameBox = new EditBox(font, leftPos + 116, topPos + 18, 82, 16, Component.empty());
+        sessionNameBox.setMaxLength(40);
+        sessionNameBox.setValue(typedSessionName);
+        sessionNameBox.setHint(Component.translatable("screen.openwheelracing.race_director.session_name_hint"));
+        addRenderableWidget(sessionNameBox);
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.new_session"), button -> {
+            OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorStartSessionMessage(sessionNameBox.getValue()));
+            selectedLapId = -1L;
+        }).bounds(leftPos + 204, topPos + 18, 84, 16).build());
+        addRenderableWidget(Button.builder(Component.translatable(snapshot.archiveMode() ? "screen.openwheelracing.race_director.current" : "screen.openwheelracing.race_director.archive"), button -> {
+            OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetArchiveModeMessage(!menu.getSnapshot().archiveMode()));
+            selectedLapId = -1L;
+        }).bounds(leftPos + 204, topPos + 38, 84, 16).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.checkpoints"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.CHECKPOINTS)))
-            .bounds(leftPos + 12, topPos + 22, 112, 16)
+            .bounds(leftPos + 12, topPos + 40, 112, 16)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.off_track"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.OFF_TRACK)))
-            .bounds(leftPos + 130, topPos + 22, 112, 16)
+            .bounds(leftPos + 130, topPos + 40, 68, 16)
             .build());
         addRenderableWidget(Button.builder(Component.literal("-"), button -> setMinimumLapTicks(menu.getSnapshot().minimumValidLapTicks() - 20))
-            .bounds(leftPos + 247, topPos + 22, 18, 16)
+            .bounds(leftPos + 247, topPos + 58, 18, 16)
             .build());
         addRenderableWidget(Button.builder(Component.literal("+"), button -> setMinimumLapTicks(menu.getSnapshot().minimumValidLapTicks() + 20))
-            .bounds(leftPos + 268, topPos + 22, 18, 16)
+            .bounds(leftPos + 268, topPos + 58, 18, 16)
             .build());
-        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.CAPACITY, leftPos + 204, topPos + 92, 1);
-        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.BALANCED_DEPLOY, leftPos + 204, topPos + 108, 10);
-        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.ATTACK_DEPLOY, leftPos + 204, topPos + 124, 10);
-        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.HARVEST_NEGATIVE, leftPos + 204, topPos + 140, 10);
+        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.CAPACITY, leftPos + 204, topPos + 106, 1);
+        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.BALANCED_DEPLOY, leftPos + 204, topPos + 122, 10);
+        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.ATTACK_DEPLOY, leftPos + 204, topPos + 138, 10);
+        addLimitButtons(OWRNetwork.RaceDirectorSetErsLimitMessage.HARVEST_NEGATIVE, leftPos + 204, topPos + 154, 10);
+        addConditionModifierButtons(OWRNetwork.RaceDirectorCycleConditionModifierMessage.CAR_DAMAGE, leftPos + 12, topPos + 68);
+        addConditionModifierButtons(OWRNetwork.RaceDirectorCycleConditionModifierMessage.TYRE_WEAR, leftPos + 104, topPos + 68);
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.previous"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetPageMessage(Math.max(0, menu.getPage() - 1))))
-            .bounds(leftPos + 12, topPos + 166, 60, 16)
+            .bounds(leftPos + 12, topPos + 180, 60, 16)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.next"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetPageMessage(menu.getPage() + 1)))
-            .bounds(leftPos + 78, topPos + 166, 60, 16)
+            .bounds(leftPos + 78, topPos + 180, 60, 16)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.invalidate"), button -> {
             if (selectedLapId != -1L) {
                 OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorInvalidateLapMessage(selectedLapId));
             }
-        }).bounds(leftPos + 196, topPos + 166, 92, 16).build());
+        }).bounds(leftPos + 196, topPos + 180, 92, 16).build());
     }
 
     @Override
@@ -74,27 +99,29 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         int x = leftPos;
         int y = topPos;
         graphics.fill(x, y, x + imageWidth, y + imageHeight, 0xFF1F2328);
-        graphics.fill(x + 6, y + 16, x + imageWidth - 6, y + 48, 0xFF2F3640);
-        graphics.fill(x + 6, y + 66, x + 190, y + 160, 0xFF2A3038);
-        graphics.fill(x + 194, y + 66, x + imageWidth - 6, y + 160, 0xFF2A3038);
+        graphics.fill(x + 6, y + 16, x + imageWidth - 6, y + 82, 0xFF2F3640);
+        graphics.fill(x + 6, y + 94, x + 190, y + 174, 0xFF2A3038);
+        graphics.fill(x + 194, y + 86, x + imageWidth - 6, y + 174, 0xFF2A3038);
     }
 
     @Override
     protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
         RaceDirectorSnapshot snapshot = menu.getSnapshot();
         graphics.drawString(font, title, 8, 6, 0xFFE8EDF2, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rules"), 8, 54, 0xFFE8EDF2, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.recent_laps"), 8, 66, 0xFFE8EDF2, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.details"), 198, 66, 0xFFE8EDF2, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rule_status", state(snapshot.checkpointCheckEnabled()), state(snapshot.offTrackCheckEnabled()), formatSeconds(snapshot.minimumValidLapTicks())), 12, 42, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_limits"), 198, 82, 0xFFE8EDF2, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_capacity", snapshot.maxErsCapacityMj()), 226, 94, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_balanced", snapshot.maxBalancedDeployKw()), 226, 110, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_attack", snapshot.maxAttackDeployKw()), 226, 126, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_harvest", snapshot.maxHarvestNegativeKw()), 226, 142, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.active_session", snapshot.activeSessionName()), 12, 22, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rules"), 8, 84, 0xFFE8EDF2, false);
+        graphics.drawString(font, Component.translatable(snapshot.archiveMode() ? "screen.openwheelracing.race_director.archived_laps" : "screen.openwheelracing.race_director.recent_laps"), 8, 94, 0xFFE8EDF2, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.details"), 198, 86, 0xFFE8EDF2, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rule_status", state(snapshot.checkpointCheckEnabled()), state(snapshot.offTrackCheckEnabled()), formatSeconds(snapshot.minimumValidLapTicks())), 12, 62, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.condition_modifiers", formatModifier(snapshot.carDamageModifier()), formatModifier(snapshot.tyreWearModifier())), 36, 72, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_limits"), 198, 96, 0xFFE8EDF2, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_capacity", snapshot.maxErsCapacityMj()), 226, 108, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_balanced", snapshot.maxBalancedDeployKw()), 226, 124, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_attack", snapshot.maxAttackDeployKw()), 226, 140, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_harvest", snapshot.maxHarvestNegativeKw()), 226, 156, 0xFFC9D1D9, false);
         drawLapRows(graphics, snapshot);
         drawSelectedLap(graphics);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.page", snapshot.page() + 1, snapshot.maxPage() + 1), 146, 170, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.page", snapshot.page() + 1, snapshot.maxPage() + 1), 146, 184, 0xFFC9D1D9, false);
     }
 
     @Override
@@ -124,7 +151,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     private void drawLapRows(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
         if (snapshot.laps().isEmpty()) {
-            graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.no_laps"), ROW_X, ROW_Y, 0xFFC9D1D9, false);
+            graphics.drawString(font, Component.translatable(snapshot.archiveMode() ? "screen.openwheelracing.race_director.no_archived_laps" : "screen.openwheelracing.race_director.no_session_laps"), ROW_X, ROW_Y, 0xFFC9D1D9, false);
             return;
         }
         for (int index = 0; index < snapshot.laps().size(); index++) {
@@ -134,19 +161,26 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
                 graphics.fill(ROW_X - 2, y - 1, ROW_X + ROW_WIDTH, y + ROW_HEIGHT - 1, 0xFF3F5F7F);
             }
             int color = row.invalidated() ? 0xFFFF7777 : 0xFFE8EDF2;
-            graphics.drawString(font, row.driverName() + "  " + formatLapTime(row.lapTicks()), ROW_X, y, color, false);
+            String rowText = snapshot.archiveMode()
+                ? row.sessionName() + " / " + row.driverName() + "  " + formatLapTime(row.lapTicks())
+                : row.driverName() + "  " + formatLapTime(row.lapTicks());
+            graphics.drawString(font, fit(rowText, ROW_WIDTH), ROW_X, y, color, false);
         }
     }
 
     private void drawSelectedLap(GuiGraphics graphics) {
         RaceDirectorLapRow row = selectedRow();
         if (row == null) {
-            graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.select_lap"), 198, 154, 0xFFC9D1D9, false);
+            graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.select_lap"), 198, 168, 0xFFC9D1D9, false);
             return;
         }
-        int y = 154;
-        graphics.drawString(font, row.driverName(), 198, y, 0xFFE8EDF2, false);
+        int y = 166;
+        graphics.drawString(font, fit(row.driverName(), 88), 198, y, 0xFFE8EDF2, false);
         graphics.drawString(font, formatLapTime(row.lapTicks()) + " / CP " + row.checkpointCount(), 198, y + 12, row.invalidated() ? 0xFFFF7777 : 0xFF7EE787, false);
+        if (menu.getSnapshot().archiveMode()) {
+            graphics.drawString(font, fit(row.sessionName(), 88), 198, y + 24, 0xFFC9D1D9, false);
+            return;
+        }
         BlockPos pos = BlockPos.of(row.startFinishPos());
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.position", pos.getX(), pos.getY(), pos.getZ()), 198, y + 24, 0xFFC9D1D9, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.setup", row.power(), row.grip(), row.aero(), row.gearing()), 198, y + 40, 0xFFC9D1D9, false);
@@ -171,12 +205,32 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             .build());
     }
 
+    private void addConditionModifierButtons(int modifier, int x, int y) {
+        addRenderableWidget(Button.builder(Component.literal("-"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorCycleConditionModifierMessage(modifier, -1)))
+            .bounds(x, y, 18, 14)
+            .build());
+        addRenderableWidget(Button.builder(Component.literal("+"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorCycleConditionModifierMessage(modifier, 1)))
+            .bounds(x + 68, y, 18, 14)
+            .build());
+    }
+
+    private String fit(String text, int width) {
+        if (font.width(text) <= width) {
+            return text;
+        }
+        return font.plainSubstrByWidth(text, width - font.width("...")) + "...";
+    }
+
     private static String state(boolean enabled) {
         return enabled ? "ON" : "OFF";
     }
 
     private static String formatSeconds(int ticks) {
         return String.format("%.1fs", ticks / 20.0f);
+    }
+
+    private static String formatModifier(double modifier) {
+        return modifier == Math.rint(modifier) ? String.format("%.0fx", modifier) : String.format("%.1fx", modifier);
     }
 
     private static String formatLapTime(int ticks) {

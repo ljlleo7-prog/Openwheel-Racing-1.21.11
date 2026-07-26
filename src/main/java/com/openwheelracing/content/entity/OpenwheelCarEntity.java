@@ -39,6 +39,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.entity.decoration.HangingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -218,9 +219,9 @@ public class OpenwheelCarEntity extends Entity {
     private static final long FRONT_UNDERSTEER_WARNING_COOLDOWN = 20L;
     private static final double ENTITY_IMPACT_MIN_SPEED = 0.16;
     private static final double ENTITY_IMPACT_SOFT_SPEED = 0.30;
-    private static final double ENTITY_IMPACT_CAR_DAMAGE = 11.0;
+    private static final double ENTITY_IMPACT_CAR_DAMAGE = 5.5;
     private static final double ENTITY_IMPACT_LIVING_DAMAGE = 40.0;
-    private static final double ENTITY_IMPACT_OTHER_CAR_DAMAGE = 7.0;
+    private static final double ENTITY_IMPACT_OTHER_CAR_DAMAGE = 3.5;
     private static final long ENTITY_IMPACT_COOLDOWN_TICKS = 8L;
     private static final double DRS_DRAG_FACTOR = 0.78;
     private static final double DRS_DOWNFORCE_FACTOR = 0.72;
@@ -304,6 +305,7 @@ public class OpenwheelCarEntity extends Entity {
     private double debugDownforce;
     private double ersLiftAndCoastPowerWatts;
     private int ersLiftConfirmTicks;
+    private boolean ersLiftAndCoastArmed;
 
     public void applyDriveInput(float throttle, float brake, float steering) {
         this.inputThrottle = throttle;
@@ -1489,6 +1491,7 @@ public class OpenwheelCarEntity extends Entity {
         if (getControllingPassenger() == null) {
             ersLiftConfirmTicks = 0;
             ersLiftAndCoastPowerWatts = 0.0;
+            ersLiftAndCoastArmed = false;
             tickPassiveMovement(debugMovement);
             return;
         }
@@ -1572,6 +1575,7 @@ public class OpenwheelCarEntity extends Entity {
         boolean clutchReleasing = clutchReleaseTicks > 0 && gear != NEUTRAL_GEAR;
         int engineRpm = updateEngineRpm(horizontalSpeed, gear, gearTopSpeed, throttle, launchClutch, clutchReleasing);
         double power = combustionPowerWatts(engineRpm) * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
+        double requestedIcePowerWatts = throttle > 0.0 && gear > NEUTRAL_GEAR ? power * throttle : 0.0;
         double tyreSlip = 0.0;
 
         double steerInput = Math.abs(steering) > STEERING_DEADZONE ? steering : 0.0;
@@ -1601,6 +1605,10 @@ public class OpenwheelCarEntity extends Entity {
         double previousVelocityLong = velocityLong;
         double yawDelta = 0.0;
         double driveWorkJoules = 0.0;
+        double requestedIceDriveEnergyJoules = 0.0;
+        double actualPositiveDriveEnergyJoules = 0.0;
+        double requestedPositiveErsEnergyJoules = 0.0;
+        double requestedNegativeErsEnergyJoules = 0.0;
         double subDt = PHYSICS_DT / PHYSICS_SUBSTEPS;
         double substepLateralAccelerationEstimate = 0.0;
         double finalFlLatForce = 0.0;
@@ -1666,11 +1674,11 @@ public class OpenwheelCarEntity extends Entity {
                     : Math.min(subDriveForceRequest, clutchForce);
             }
             ErsPowerResult ersPower = calculateErsPower(throttle, brake, liftInputConfirmedThisTick, gear, subSpeedBlocksPerTick, velocityLong, substepLateralAccelerationEstimate / GRAVITY, subDt, surface);
-            if (driveDirection > 0.0 && ersPower.powerWatts() != 0.0
-                    && Math.abs(velocityLong) / 20.0 < gearTopSpeed
-                    && subSpeedBlocksPerTick < pitSpeedLimit) {
-                subDriveForceRequest += ersPower.powerWatts() / Math.max(MIN_POWER_SPEED, Math.abs(velocityLong));
-            }
+            double subRequestedPositiveErsPower = Math.max(0.0, ersPower.powerWatts());
+            requestedPositiveErsEnergyJoules += subRequestedPositiveErsPower * subDt;
+            requestedNegativeErsEnergyJoules += Math.max(0.0, -ersPower.powerWatts()) * subDt;
+            requestedIceDriveEnergyJoules += Math.max(0.0, requestedIcePowerWatts) * subDt;
+            double pendingErsDriveForce = 0.0;
             double subForwardRollingFraction = Math.abs(velocityLong) / Math.max(1.0, subSpeed);
             if (subSpeed > 3.0 && subForwardRollingFraction < 0.45 && !clutchReleasing) {
                 subDriveForceRequest *= subForwardRollingFraction / 0.45;
@@ -1682,12 +1690,19 @@ public class OpenwheelCarEntity extends Entity {
                     ? Math.min(subDriveForceRequest, tractionLimit)
                     : Math.max(subDriveForceRequest, -tractionLimit);
             }
+            if (driveDirection > 0.0 && ersPower.powerWatts() != 0.0
+                    && Math.abs(velocityLong) / 20.0 < gearTopSpeed
+                    && subSpeedBlocksPerTick < pitSpeedLimit) {
+                pendingErsDriveForce = ersPower.powerWatts() / Math.max(MIN_POWER_SPEED, Math.abs(velocityLong));
+            }
 
             double subBrakeForceRequest = brake * MAX_BRAKE_FORCE;
             if (surface == SurfaceProfile.PIT_LANE && subSpeedBlocksPerTick >= pitSpeedLimit) {
                 subDriveForceRequest = 0.0;
+                pendingErsDriveForce = Math.min(0.0, pendingErsDriveForce);
                 subBrakeForceRequest = Math.max(subBrakeForceRequest, 6_000.0);
             }
+            subDriveForceRequest += pendingErsDriveForce;
             double subBrakeForceEstimate = brake * Math.min(MAX_BRAKE_FORCE, ASPHALT_MU_LONGITUDINAL * surface.grip * (CAR_MASS_KG * GRAVITY + subDownforce));
             double subBrakeDirection = Math.abs(velocityLong) > 0.1 ? Math.signum(velocityLong) : 0.0;
             double tyreWearDragFactor = 1.0 + getTyreWearPercent() * 0.0022;
@@ -1862,7 +1877,9 @@ public class OpenwheelCarEntity extends Entity {
                 yawRate *= 1.0 - Math.min(0.18, brake * 0.10);
             }
             yawDelta += yawRate * subDt;
-            driveWorkJoules += Math.max(0.0, (rearLongForce + frontLongForce) * velocityLong) * subDt;
+            double positiveDriveWorkJoules = Math.max(0.0, (rearLongForce + frontLongForce) * velocityLong) * subDt;
+            driveWorkJoules += positiveDriveWorkJoules;
+            actualPositiveDriveEnergyJoules += positiveDriveWorkJoules;
 
             finalFlLatForce = flLatForce;
             finalFrLatForce = frLatForce;
@@ -1889,6 +1906,8 @@ public class OpenwheelCarEntity extends Entity {
             finalFrontSaturation = Math.max(flDemand, frDemand);
             finalRearSaturation = Math.max(rlDemand, rrDemand);
         }
+
+        reconcilePowerLimitedErsEnergy(requestedIceDriveEnergyJoules, requestedPositiveErsEnergyJoules, requestedNegativeErsEnergyJoules, actualPositiveDriveEnergyJoules, PHYSICS_DT);
 
         double newKineticEnergy = 0.5 * CAR_MASS_KG * (velocityLong * velocityLong + velocityLat * velocityLat) + 0.5 * YAW_INERTIA * yawRate * yawRate;
         double allowedEnergy = previousKineticEnergy + driveWorkJoules;
@@ -1951,7 +1970,7 @@ public class OpenwheelCarEntity extends Entity {
         double steeringWear = Math.abs(steeringAngle) / Math.max(Math.toRadians(1.0), LOW_SPEED_STEER_ANGLE);
         tyreSlip = Math.max(tyreSlip, Math.min(1.0, slipMetric * Math.min(1.0, speedMetersPerSecond / 18.0)));
         if (speedMetersPerSecond > 1.0) {
-            addTyreWear((float) ((slipMetric + steeringWear * 0.06) * speedMetersPerSecond * 0.00035 * setup.tyreWearMultiplier() * surface.wearMult));
+            addTyreWear((float) ((slipMetric + steeringWear * 0.06) * speedMetersPerSecond * 0.000175 * setup.tyreWearMultiplier() * surface.wearMult));
         }
 
         forward = Vec3.directionFromRotation(0.0f, getYRot());
@@ -2248,6 +2267,7 @@ public class OpenwheelCarEntity extends Entity {
         Block block = state.getBlock();
         return state.canBeReplaced()
             || state.is(BlockTags.FLOWERS)
+            || state.is(BlockTags.ALL_SIGNS)
             || block instanceof LeavesBlock
             || block == Blocks.VINE
             || block == Blocks.SNOW;
@@ -2370,6 +2390,7 @@ public class OpenwheelCarEntity extends Entity {
             && entity.isAlive()
             && !hasPassenger(entity)
             && !(entity.getVehicle() instanceof OpenwheelCarEntity)
+            && !(entity instanceof HangingEntity)
             && (entity instanceof LivingEntity || entity instanceof OpenwheelCarEntity);
     }
 
@@ -2703,27 +2724,62 @@ public class OpenwheelCarEntity extends Entity {
         return Math.min(capacityJoules, storedEnergy + Math.max(0.0, -powerWatts) * dt * ERS_RECOVERY_EFFICIENCY);
     }
 
+    private void reconcilePowerLimitedErsEnergy(double requestedIceEnergyJoules, double requestedPositiveErsEnergyJoules, double requestedNegativeErsEnergyJoules, double actualPositiveDriveEnergyJoules, double dt) {
+        if (level().isClientSide()) {
+            return;
+        }
+        double usefulPositiveErsEnergy = Math.min(requestedPositiveErsEnergyJoules, Math.max(0.0, actualPositiveDriveEnergyJoules - requestedIceEnergyJoules));
+        double wastedPositiveErsEnergy = Math.max(0.0, requestedPositiveErsEnergyJoules - usefulPositiveErsEnergy);
+        double unusedIceEnergy = Math.max(0.0, requestedIceEnergyJoules - actualPositiveDriveEnergyJoules);
+        double negativeLimitJoules = maxCurrentErsNegativePowerWatts() * dt;
+        double negativeRequestEnergy = Math.min(negativeLimitJoules, unusedIceEnergy + requestedNegativeErsEnergyJoules);
+        double recoveryEnergy = negativeRequestEnergy * ERS_RECOVERY_EFFICIENCY;
+        double storedEnergy = entityData.get(ERS_ENERGY);
+        double capacityJoules = getErsCapacityJoules();
+        storedEnergy = clamp(storedEnergy + wastedPositiveErsEnergy + recoveryEnergy, 0.0, capacityJoules);
+        entityData.set(ERS_ENERGY, (float) storedEnergy);
+        if (recoveryEnergy > 1.0 && usefulPositiveErsEnergy <= 1.0) {
+            entityData.set(ERS_ACTIVITY, ERS_ACTIVITY_NEGATIVE);
+            entityData.set(ERS_POWER_KW, (float) (-negativeRequestEnergy / Math.max(1.0E-6, dt) / 1000.0));
+        } else if (usefulPositiveErsEnergy > 1.0) {
+            entityData.set(ERS_ACTIVITY, ERS_ACTIVITY_DEPLOYING);
+            entityData.set(ERS_POWER_KW, (float) (usefulPositiveErsEnergy / Math.max(1.0E-6, dt) / 1000.0));
+        }
+    }
+
+    private double maxCurrentErsNegativePowerWatts() {
+        return Math.max(0.0, Math.max(Math.max(Math.abs(getErsHarvestStartPowerKw()), Math.abs(getErsHarvestEndPowerKw())), Math.max(Math.abs(getErsLicoHarvestPowerKw()), Math.max(Math.abs(getErsLicoBalancedPowerKw()), Math.abs(getErsLicoAttackPowerKw()))))) * 1000.0;
+    }
+
     private boolean updateLiftAndCoastConfirmation(double throttle, double brake) {
         if (throttle <= ERS_LICO_THROTTLE_DEADZONE && brake <= ERS_LICO_BRAKE_DEADZONE) {
             ersLiftConfirmTicks = Math.min(ERS_LICO_LIFT_CONFIRM_TICKS, ersLiftConfirmTicks + 1);
         } else {
             ersLiftConfirmTicks = 0;
             ersLiftAndCoastPowerWatts = 0.0;
+            ersLiftAndCoastArmed = false;
         }
         return ersLiftConfirmTicks >= ERS_LICO_LIFT_CONFIRM_TICKS;
     }
 
     private boolean canLiftAndCoastHarvest(int mode, double throttle, double brake, boolean liftInputConfirmed, int gear, double speedKmh, double velocityLong, double lateralAccelerationG, SurfaceProfile surface) {
-        return liftInputConfirmed
-            && licoTargetPowerWatts(mode) < 0.0
-            && throttle <= ERS_LICO_THROTTLE_DEADZONE
-            && brake <= ERS_LICO_BRAKE_DEADZONE
-            && gear > NEUTRAL_GEAR
-            && velocityLong > 0.0
-            && speedKmh >= getErsLicoSpeedThresholdKmh()
-            && Math.abs(steeringAngle) <= Math.toRadians(getErsLicoSteeringThresholdDegrees())
-            && Math.abs(lateralAccelerationG) <= getErsLicoLateralGThreshold()
-            && surface.countsAsTrack;
+        if (!liftInputConfirmed
+                || licoTargetPowerWatts(mode) >= 0.0
+                || throttle > ERS_LICO_THROTTLE_DEADZONE
+                || brake > ERS_LICO_BRAKE_DEADZONE
+                || gear <= NEUTRAL_GEAR
+                || velocityLong <= 0.0
+                || Math.abs(steeringAngle) > Math.toRadians(getErsLicoSteeringThresholdDegrees())
+                || Math.abs(lateralAccelerationG) > getErsLicoLateralGThreshold()
+                || !surface.countsAsTrack) {
+            ersLiftAndCoastArmed = false;
+            return false;
+        }
+        if (!ersLiftAndCoastArmed && speedKmh < getErsLicoSpeedThresholdKmh()) {
+            return false;
+        }
+        ersLiftAndCoastArmed = true;
+        return true;
     }
 
     private double licoTargetPowerWatts(int mode) {
@@ -2923,10 +2979,18 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private void addDamage(float amount) {
-        entityData.set(DAMAGE, Math.min(100.0f, getDamagePercent() + amount));
+        entityData.set(DAMAGE, Math.min(100.0f, getDamagePercent() + amount * raceControlDamageModifier()));
     }
 
     private void addTyreWear(float amount) {
-        entityData.set(TYRE_WEAR, Math.min(100.0f, getTyreWearPercent() + amount));
+        entityData.set(TYRE_WEAR, Math.min(100.0f, getTyreWearPercent() + amount * raceControlTyreWearModifier()));
+    }
+
+    private float raceControlDamageModifier() {
+        return level() instanceof ServerLevel serverLevel ? (float) OWRRaceControlState.get(serverLevel).getCarDamageModifier() : 1.0f;
+    }
+
+    private float raceControlTyreWearModifier() {
+        return level() instanceof ServerLevel serverLevel ? (float) OWRRaceControlState.get(serverLevel).getTyreWearModifier() : 1.0f;
     }
 }

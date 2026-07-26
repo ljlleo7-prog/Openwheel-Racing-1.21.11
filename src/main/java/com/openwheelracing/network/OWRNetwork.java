@@ -45,7 +45,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "1";
+    private static final String PROTOCOL = "2";
 
     private OWRNetwork() {
     }
@@ -71,6 +71,9 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorToggleRuleMessage.TYPE, codec(RaceDirectorToggleRuleMessage::encode, RaceDirectorToggleRuleMessage::decode), RaceDirectorToggleRuleMessage::handle);
         registrar.playToServer(RaceDirectorSetMinLapTicksMessage.TYPE, codec(RaceDirectorSetMinLapTicksMessage::encode, RaceDirectorSetMinLapTicksMessage::decode), RaceDirectorSetMinLapTicksMessage::handle);
         registrar.playToServer(RaceDirectorSetErsLimitMessage.TYPE, codec(RaceDirectorSetErsLimitMessage::encode, RaceDirectorSetErsLimitMessage::decode), RaceDirectorSetErsLimitMessage::handle);
+        registrar.playToServer(RaceDirectorCycleConditionModifierMessage.TYPE, codec(RaceDirectorCycleConditionModifierMessage::encode, RaceDirectorCycleConditionModifierMessage::decode), RaceDirectorCycleConditionModifierMessage::handle);
+        registrar.playToServer(RaceDirectorStartSessionMessage.TYPE, codec(RaceDirectorStartSessionMessage::encode, RaceDirectorStartSessionMessage::decode), RaceDirectorStartSessionMessage::handle);
+        registrar.playToServer(RaceDirectorSetArchiveModeMessage.TYPE, codec(RaceDirectorSetArchiveModeMessage::encode, RaceDirectorSetArchiveModeMessage::decode), RaceDirectorSetArchiveModeMessage::handle);
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
         registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
         registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
@@ -755,6 +758,11 @@ public final class OWRNetwork {
             buffer.writeInt(snapshot.maxBalancedDeployKw());
             buffer.writeInt(snapshot.maxAttackDeployKw());
             buffer.writeInt(snapshot.maxHarvestNegativeKw());
+            buffer.writeDouble(snapshot.carDamageModifier());
+            buffer.writeDouble(snapshot.tyreWearModifier());
+            buffer.writeLong(snapshot.activeSessionId());
+            buffer.writeUtf(snapshot.activeSessionName());
+            buffer.writeBoolean(snapshot.archiveMode());
             buffer.writeVarInt(snapshot.laps().size());
             for (RaceDirectorLapRow row : snapshot.laps()) {
                 RaceDirectorLapRow.encode(row, buffer);
@@ -773,12 +781,17 @@ public final class OWRNetwork {
             int maxBalancedDeployKw = buffer.readInt();
             int maxAttackDeployKw = buffer.readInt();
             int maxHarvestNegativeKw = buffer.readInt();
+            double carDamageModifier = buffer.readDouble();
+            double tyreWearModifier = buffer.readDouble();
+            long activeSessionId = buffer.readLong();
+            String activeSessionName = buffer.readUtf();
+            boolean archiveMode = buffer.readBoolean();
             int lapCount = buffer.readVarInt();
             java.util.ArrayList<RaceDirectorLapRow> laps = new java.util.ArrayList<>(lapCount);
             for (int index = 0; index < lapCount; index++) {
                 laps.add(RaceDirectorLapRow.decode(buffer));
             }
-            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, laps));
+            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, carDamageModifier, tyreWearModifier, activeSessionId, activeSessionName, archiveMode, laps));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {
@@ -888,6 +901,101 @@ public final class OWRNetwork {
                 if (player.getVehicle() instanceof OpenwheelCarEntity car) {
                     car.applyErsLimits(state.getMaxErsCapacityMj(), state.getMaxBalancedDeployKw(), state.getMaxAttackDeployKw(), state.getMaxHarvestNegativeKw());
                 }
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
+    public record RaceDirectorCycleConditionModifierMessage(int modifier, int delta) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorCycleConditionModifierMessage> TYPE = payloadType("race_director_cycle_condition_modifier_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        public static final int CAR_DAMAGE = 0;
+        public static final int TYRE_WEAR = 1;
+
+        private static void encode(RaceDirectorCycleConditionModifierMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.modifier);
+            buffer.writeInt(message.delta);
+        }
+
+        private static RaceDirectorCycleConditionModifierMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorCycleConditionModifierMessage(buffer.readInt(), buffer.readInt());
+        }
+
+        private static void handle(RaceDirectorCycleConditionModifierMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                    return;
+                }
+                OWRRaceControlState state = OWRRaceControlState.get(player.level());
+                if (message.modifier == CAR_DAMAGE) {
+                    state.cycleCarDamageModifier(message.delta);
+                } else if (message.modifier == TYRE_WEAR) {
+                    state.cycleTyreWearModifier(message.delta);
+                }
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
+    public record RaceDirectorStartSessionMessage(String sessionName) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorStartSessionMessage> TYPE = payloadType("race_director_start_session_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RaceDirectorStartSessionMessage message, FriendlyByteBuf buffer) {
+            buffer.writeUtf(message.sessionName);
+        }
+
+        private static RaceDirectorStartSessionMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorStartSessionMessage(buffer.readUtf(80));
+        }
+
+        private static void handle(RaceDirectorStartSessionMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                    return;
+                }
+                menu.setArchiveMode(false);
+                menu.setPage(0);
+                OWRLapRecords.get(player.level()).startNewSession(message.sessionName);
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
+    public record RaceDirectorSetArchiveModeMessage(boolean archiveMode) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSetArchiveModeMessage> TYPE = payloadType("race_director_set_archive_mode_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RaceDirectorSetArchiveModeMessage message, FriendlyByteBuf buffer) {
+            buffer.writeBoolean(message.archiveMode);
+        }
+
+        private static RaceDirectorSetArchiveModeMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorSetArchiveModeMessage(buffer.readBoolean());
+        }
+
+        private static void handle(RaceDirectorSetArchiveModeMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                    return;
+                }
+                menu.setArchiveMode(message.archiveMode);
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });
         }

@@ -24,6 +24,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private final ContainerLevelAccess access;
     private final Player player;
     private int page;
+    private boolean archiveMode;
     private int lastRaceControlRevision = Integer.MIN_VALUE;
     private int lastLapRecordsRevision = Integer.MIN_VALUE;
     private RaceDirectorSnapshot snapshot = RaceDirectorSnapshot.empty();
@@ -50,6 +51,17 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         this.page = Math.max(0, page);
     }
 
+    public boolean isArchiveMode() {
+        return archiveMode;
+    }
+
+    public void setArchiveMode(boolean archiveMode) {
+        if (this.archiveMode != archiveMode) {
+            this.archiveMode = archiveMode;
+            page = 0;
+        }
+    }
+
     public RaceDirectorSnapshot getSnapshot() {
         return snapshot;
     }
@@ -57,6 +69,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     public void applySnapshot(RaceDirectorSnapshot snapshot) {
         this.snapshot = snapshot;
         this.page = snapshot.page();
+        this.archiveMode = snapshot.archiveMode();
     }
 
     @Override
@@ -78,10 +91,10 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     public RaceDirectorSnapshot createSnapshot(ServerLevel level) {
         OWRRaceControlState controlState = OWRRaceControlState.get(level);
         OWRLapRecords records = OWRLapRecords.get(level);
-        int totalLaps = records.getLapCount();
+        int totalLaps = records.getVisibleLapCount(archiveMode);
         int maxPage = Math.max(0, (totalLaps - 1) / LAPS_PER_PAGE);
         page = Math.min(page, maxPage);
-        List<RaceDirectorLapRow> laps = records.getRecentLaps(page, LAPS_PER_PAGE).stream()
+        List<RaceDirectorLapRow> laps = records.getVisibleLaps(archiveMode, page, LAPS_PER_PAGE).stream()
             .map(RaceDirectorLapRow::fromRecord)
             .toList();
         return new RaceDirectorSnapshot(
@@ -96,6 +109,11 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             controlState.getMaxBalancedDeployKw(),
             controlState.getMaxAttackDeployKw(),
             controlState.getMaxHarvestNegativeKw(),
+            controlState.getCarDamageModifier(),
+            controlState.getTyreWearModifier(),
+            records.getActiveSessionId(),
+            records.getActiveSessionName(),
+            archiveMode,
             laps
         );
     }
