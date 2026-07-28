@@ -12,6 +12,14 @@ public final class VehiclePhysics {
     public static final double PIT_LANE_GRIP = ASPHALT_GRIP;
     public static final double PIT_LANE_DRAG = ASPHALT_DRAG;
 
+    public static final double TYRE_AMBIENT_TEMPERATURE_C = 28.0;
+    public static final double TYRE_HEAT_CAPACITY_J_PER_C = 42_000.0;
+    public static final double TYRE_ROLLING_RESISTANCE_HEAT_FRACTION = 0.62;
+    public static final double TYRE_SLIP_HEAT_FRACTION = 0.26;
+    public static final double TYRE_STATIONARY_COOLING_PER_SECOND = 0.00060;
+    public static final double TYRE_WIND_COOLING_PER_MPS_SECOND = 0.0000048;
+    public static final double TYRE_G_FORCE_HEAT_FACTOR = 0.18;
+
     private static final double REVERSE_TOP_SPEED_KMH = 60.0;
     private static final double[] GEAR_TOP_SPEEDS_KMH = {0.0, 100.0, 135.0, 170.0, 205.0, 245.0, 280.0, 320.0, 360.0};
 
@@ -48,5 +56,67 @@ public final class VehiclePhysics {
         double availableBrakeForce = ASPHALT_MU_LONGITUDINAL * surfaceGrip * normalLoad;
         double brakeAcceleration = Math.min(MAX_BRAKE_FORCE, availableBrakeForce) / CAR_MASS_KG;
         return initialSpeedMetersPerSecond * initialSpeedMetersPerSecond / (2.0 * brakeAcceleration);
+    }
+
+    public static double tyreRollingHeatPowerWatts(double normalLoad, double speedMetersPerSecond, double rollingResistance) {
+        return Math.max(0.0, rollingResistance * normalLoad * Math.max(0.0, speedMetersPerSecond) * TYRE_ROLLING_RESISTANCE_HEAT_FRACTION);
+    }
+
+    public static double tyreSlipHeatPowerWatts(double longitudinalForce, double lateralForce, double normalLoad, double speedMetersPerSecond, double demand, double slipAngleRadians) {
+        double safeNormalLoad = Math.max(1.0, normalLoad);
+        double speed = Math.max(0.0, speedMetersPerSecond);
+        double longitudinalUtilization = Math.min(1.0, Math.abs(longitudinalForce) / (safeNormalLoad * ASPHALT_MU_LONGITUDINAL));
+        double lateralUtilization = Math.min(1.0, Math.abs(lateralForce) / (safeNormalLoad * ASPHALT_MU_LONGITUDINAL));
+        double longitudinalWorkSpeed = longitudinalUtilization * speed * 0.055;
+        double lateralScrubSpeed = Math.abs(Math.sin(slipAngleRadians)) * speed * 0.160;
+        double lateralGripWorkSpeed = lateralUtilization * speed * 0.0060;
+        double saturation = Math.max(0.0, demand - 0.96);
+        double saturationSlipSpeed = saturation * saturation * speed * 0.750;
+        double forceMagnitude = Math.sqrt(longitudinalForce * longitudinalForce + lateralForce * lateralForce);
+        return (Math.abs(longitudinalForce) * longitudinalWorkSpeed + Math.abs(lateralForce) * (lateralScrubSpeed + lateralGripWorkSpeed) + forceMagnitude * saturationSlipSpeed) * TYRE_SLIP_HEAT_FRACTION;
+    }
+
+    public static double tyreLoadHeatMultiplier(double longitudinalForce, double lateralForce, double normalLoad) {
+        double safeNormalLoad = Math.max(1.0, normalLoad);
+        double longitudinalG = Math.abs(longitudinalForce) / safeNormalLoad;
+        double lateralG = Math.abs(lateralForce) / safeNormalLoad;
+        double combinedG = Math.sqrt(longitudinalG * longitudinalG + lateralG * lateralG);
+        return 1.0 + Math.max(0.0, combinedG - 0.08) * TYRE_G_FORCE_HEAT_FACTOR;
+    }
+
+    public static double tyreGForceHeatMultiplier(double longitudinalG, double lateralG) {
+        double combinedG = Math.sqrt(longitudinalG * longitudinalG + lateralG * lateralG);
+        return 1.0 + Math.max(0.0, combinedG - 0.08) * TYRE_G_FORCE_HEAT_FACTOR;
+    }
+
+    public static double tyreHeatDeltaC(double heatPowerWatts, double compoundHeatGain, double longitudinalG, double lateralG, double dtSeconds) {
+        double heatEnergy = Math.max(0.0, heatPowerWatts) * tyreGForceHeatMultiplier(longitudinalG, lateralG) * Math.max(0.0, compoundHeatGain) * dtSeconds;
+        return heatEnergy / TYRE_HEAT_CAPACITY_J_PER_C;
+    }
+
+    public static double tyreHeatDeltaC(double heatPowerWatts, double compoundHeatGain, double longitudinalForce, double lateralForce, double normalLoad, double dtSeconds) {
+        double heatEnergy = Math.max(0.0, heatPowerWatts) * tyreLoadHeatMultiplier(longitudinalForce, lateralForce, normalLoad) * Math.max(0.0, compoundHeatGain) * dtSeconds;
+        return heatEnergy / TYRE_HEAT_CAPACITY_J_PER_C;
+    }
+
+    public static double tyreCoolingDeltaC(double temperatureC, double speedMetersPerSecond, double dtSeconds) {
+        if (temperatureC <= TYRE_AMBIENT_TEMPERATURE_C) {
+            return 0.0;
+        }
+        double coolingRate = TYRE_STATIONARY_COOLING_PER_SECOND + TYRE_WIND_COOLING_PER_MPS_SECOND * Math.max(0.0, speedMetersPerSecond);
+        return (temperatureC - TYRE_AMBIENT_TEMPERATURE_C) * (1.0 - Math.exp(-coolingRate * dtSeconds));
+    }
+
+    public static double nextTyreTemperatureC(double temperatureC, double heatPowerWatts, double compoundHeatGain, double longitudinalG, double lateralG, double speedMetersPerSecond, double dtSeconds) {
+        double next = temperatureC + tyreHeatDeltaC(heatPowerWatts, compoundHeatGain, longitudinalG, lateralG, dtSeconds) - tyreCoolingDeltaC(temperatureC, speedMetersPerSecond, dtSeconds);
+        return Math.max(TYRE_AMBIENT_TEMPERATURE_C, next);
+    }
+
+    public static double simulateTyreEquilibriumC(double initialTemperatureC, double heatPowerWatts, double compoundHeatGain, double longitudinalG, double lateralG, double speedMetersPerSecond, int ticks) {
+        double temperature = initialTemperatureC;
+        for (int tick = 0; tick < ticks; tick++) {
+            temperature = nextTyreTemperatureC(temperature, heatPowerWatts, compoundHeatGain, longitudinalG, lateralG, speedMetersPerSecond, 0.05);
+        }
+        return temperature;
     }
 }

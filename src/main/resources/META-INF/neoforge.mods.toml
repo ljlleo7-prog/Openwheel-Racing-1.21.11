@@ -5,12 +5,15 @@ license="All Rights Reserved"
 
 [[mods]]
 modId="openwheelracing"
-version="1.10.1"
+version="1.10.3"
 displayName="Openwheel Racing"
 authors="Pilot Raikonnen"
 description='''
 Craft, tune, and race open-wheel cars on custom-built Minecraft circuits.
 '''
+
+[[mixins]]
+    config="openwheelracing.mixins.json"
 
 [[dependencies.openwheelracing]]
     modId="neoforge"

@@ -13,6 +13,8 @@ import net.minecraft.network.chat.Component;
 public final class CarHudOverlay {
     private static final int PANEL_WIDTH = 142;
     private static final int PANEL_HEIGHT = 100;
+    private static int lastTemperatureCarId = -1;
+    private static float displayedTyreTemperatureC = Float.NaN;
 
     private CarHudOverlay() {
     }
@@ -47,8 +49,9 @@ public final class CarHudOverlay {
             graphics.drawString(font, "LAP  " + formatLapTime(displayedLapTicks), x + 8, y + 51, lapColor, false);
             graphics.drawString(font, "CP   " + (car.hasCheckpoint() ? "OK" : "--"), x + 8, y + 62, car.hasCheckpoint() ? 0xFFB7FFB7 : 0xFFFFDD66, false);
             graphics.drawString(font, "BEST " + formatLapTime(car.getBestLapTicks()), x + 8, y + 73, 0xFFFFFF99, false);
-            String tyreTemp = String.format("TEMP %3.0fC", car.getTyreTemperatureCelsius());
-            graphics.drawString(font, tyreTemp, x + PANEL_WIDTH - 8 - font.width(tyreTemp), y + 86, tyreTemperatureColor(car), false);
+            float tyreTemperature = displayedTyreTemperature(car);
+            String tyreTemp = String.format("TEMP %3.0fC", tyreTemperature);
+            graphics.drawString(font, tyreTemp, x + PANEL_WIDTH - 8 - font.width(tyreTemp), y + 86, tyreTemperatureColor(car, tyreTemperature), false);
 
             if (car.isInPitStop()) {
                 int remaining = car.getPitStopTicks();
@@ -206,6 +209,12 @@ public final class CarHudOverlay {
         debugLine(graphics, font, x, row, 0xFFDDDDDD, String.format("    RL %5.0f RR %5.0f", car.getDebugRlLoad(), car.getDebugRrLoad())); row += lineHeight;
         debugLine(graphics, font, x, row, demandColor(maxDemand(car)), String.format("dem FL %.2f FR %.2f", car.getDebugFlDemand(), car.getDebugFrDemand())); row += lineHeight;
         debugLine(graphics, font, x, row, demandColor(maxDemand(car)), String.format("    RL %.2f RR %.2f", car.getDebugRlDemand(), car.getDebugRrDemand())); row += lineHeight;
+        float flTemp = car.getTyreTemperatureFlCelsius();
+        float frTemp = car.getTyreTemperatureFrCelsius();
+        float rlTemp = car.getTyreTemperatureRlCelsius();
+        float rrTemp = car.getTyreTemperatureRrCelsius();
+        debugLine(graphics, font, x, row, tyreTemperatureColor(car, (flTemp + frTemp) * 0.5f), String.format("Tmp FL %.1f FR %.1f", flTemp, frTemp)); row += lineHeight;
+        debugLine(graphics, font, x, row, tyreTemperatureColor(car, (rlTemp + rrTemp) * 0.5f), String.format("    RL %.1f RR %.1f", rlTemp, rrTemp)); row += lineHeight;
         debugLine(graphics, font, x, row, 0xFFFFAAAA, String.format("slp FL %.1f FR %.1f", car.getDebugFlSlipAngleDegrees(), car.getDebugFrSlipAngleDegrees())); row += lineHeight;
         debugLine(graphics, font, x, row, 0xFFFFAAAA, String.format("    RL %.1f RR %.1f", car.getDebugRlSlipAngleDegrees(), car.getDebugRrSlipAngleDegrees()));
     }
@@ -233,8 +242,7 @@ public final class CarHudOverlay {
         return 0xFFB7FFB7;
     }
 
-    private static int tyreTemperatureColor(OpenwheelCarEntity car) {
-        float temperature = car.getTyreTemperatureCelsius();
+    private static int tyreTemperatureColor(OpenwheelCarEntity car, float temperature) {
         float min = car.getTyreWorkingTemperatureMinCelsius();
         float max = car.getTyreWorkingTemperatureMaxCelsius();
         if (temperature < min - 10.0f) {
@@ -257,6 +265,17 @@ public final class CarHudOverlay {
             Math.max(car.getDebugFlDemand(), car.getDebugFrDemand()),
             Math.max(car.getDebugRlDemand(), car.getDebugRrDemand())
         );
+    }
+
+    private static float displayedTyreTemperature(OpenwheelCarEntity car) {
+        float target = car.getTyreTemperatureCelsius();
+        if (lastTemperatureCarId != car.getId() || Float.isNaN(displayedTyreTemperatureC)) {
+            lastTemperatureCarId = car.getId();
+            displayedTyreTemperatureC = target;
+        } else {
+            displayedTyreTemperatureC += (target - displayedTyreTemperatureC) * 0.35f;
+        }
+        return displayedTyreTemperatureC;
     }
 
     private static String formatLapTime(int ticks) {

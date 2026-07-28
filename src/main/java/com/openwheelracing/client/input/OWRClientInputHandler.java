@@ -8,10 +8,12 @@ import com.openwheelracing.registry.OWRSoundEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.sounds.SoundSource;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import org.lwjgl.glfw.GLFW;
 
 public final class OWRClientInputHandler {
     private static boolean shiftUpWasDown;
     private static boolean shiftDownWasDown;
+    private static final boolean[] onboardNumberWasDown = new boolean[9];
     private static boolean sentIdleDriveInput;
     private static int lastSyncedCarId = Integer.MIN_VALUE;
     private static int sentBalancedClipStart = Integer.MIN_VALUE;
@@ -81,15 +83,14 @@ public final class OWRClientInputHandler {
         boolean shiftUpDown = isDown(OWRKeyMappings.SHIFT_UP) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_UP);
         boolean shiftDownDown = isDown(OWRKeyMappings.SHIFT_DOWN) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_DOWN);
         if (shiftUpDown && !shiftUpWasDown) {
-            car.shiftLocal(1);
-            OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(1));
+            shiftUp();
         }
         if (shiftDownDown && !shiftDownWasDown) {
-            car.shiftLocal(-1);
-            OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(-1));
+            shiftDown();
         }
         shiftUpWasDown = shiftUpDown;
         shiftDownWasDown = shiftDownDown;
+        handleOnboardNumberKeys();
         while (OWRKeyMappings.EXIT_CAR.consumeClick()) {
             OWRNetwork.sendToServer(new OWRNetwork.ExitCarMessage());
         }
@@ -113,24 +114,102 @@ public final class OWRClientInputHandler {
             OWRNetwork.sendToServer(new OWRNetwork.ToggleTractionControlMessage());
         }
         while (OWRKeyMappings.TOGGLE_DRS.consumeClick()) {
-            car.toggleDrs();
-            OWRNetwork.sendToServer(new OWRNetwork.ToggleDrsMessage());
-            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 1.0f, 1.0f);
+            toggleDrs();
         }
         if (wheel.pressed(WheelInputSettings.ButtonRole.TOGGLE_DRS)) {
-            car.toggleDrs();
-            OWRNetwork.sendToServer(new OWRNetwork.ToggleDrsMessage());
-            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 1.0f, 1.0f);
+            toggleDrs();
         }
         while (OWRKeyMappings.ERS_MODE_PREVIOUS.consumeClick()) {
-            car.cycleErsModeLocal(-1);
-            OWRNetwork.sendToServer(new OWRNetwork.CycleErsModeMessage(-1));
-            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, 0.85f);
+            cycleErsMode(-1);
         }
         while (OWRKeyMappings.ERS_MODE_NEXT.consumeClick()) {
-            car.cycleErsModeLocal(1);
-            OWRNetwork.sendToServer(new OWRNetwork.CycleErsModeMessage(1));
-            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, 1.15f);
+            cycleErsMode(1);
+        }
+    }
+
+    public static boolean shiftUp() {
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null) {
+            return false;
+        }
+        car.shiftLocal(1);
+        OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(1));
+        return true;
+    }
+
+    public static boolean shiftDown() {
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null) {
+            return false;
+        }
+        car.shiftLocal(-1);
+        OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(-1));
+        return true;
+    }
+
+    public static boolean toggleDrs() {
+        Minecraft mc = Minecraft.getInstance();
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null || mc.player == null) {
+            return false;
+        }
+        car.toggleDrs();
+        OWRNetwork.sendToServer(new OWRNetwork.ToggleDrsMessage());
+        mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 1.0f, 1.0f);
+        return true;
+    }
+
+    public static boolean cycleErsMode(int direction) {
+        Minecraft mc = Minecraft.getInstance();
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null || mc.player == null || direction == 0) {
+            return false;
+        }
+        car.cycleErsModeLocal(direction);
+        OWRNetwork.sendToServer(new OWRNetwork.CycleErsModeMessage(direction));
+        mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, direction > 0 ? 1.15f : 0.85f);
+        return true;
+    }
+
+    public static boolean setErsMode(int mode) {
+        Minecraft mc = Minecraft.getInstance();
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null || mc.player == null) {
+            return false;
+        }
+        int clampedMode = Math.max(OpenwheelCarEntity.ERS_MODE_HARVEST, Math.min(OpenwheelCarEntity.ERS_MODE_ATTACK, mode));
+        car.setErsMode(clampedMode);
+        OWRNetwork.sendToServer(new OWRNetwork.SetErsModeMessage(clampedMode));
+        mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, clampedMode == OpenwheelCarEntity.ERS_MODE_ATTACK ? 1.15f : clampedMode == OpenwheelCarEntity.ERS_MODE_HARVEST ? 0.85f : 1.0f);
+        return true;
+    }
+
+    public static boolean handleOnboardNumberKey(int keyCode) {
+        int slot = keyCode - GLFW.GLFW_KEY_1;
+        if (slot < 0 || slot >= 9 || onboardCar() == null) {
+            return false;
+        }
+        if (slot < 3) {
+            setErsMode(slot);
+        }
+        return true;
+    }
+
+    public static OpenwheelCarEntity onboardCar() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null && mc.screen == null && mc.player.getVehicle() instanceof OpenwheelCarEntity car) {
+            return car;
+        }
+        return null;
+    }
+
+    private static void handleOnboardNumberKeys() {
+        for (int i = 0; i < onboardNumberWasDown.length; i++) {
+            boolean down = isRawKeyDown(GLFW.GLFW_KEY_1 + i);
+            if (down && !onboardNumberWasDown[i]) {
+                handleOnboardNumberKey(GLFW.GLFW_KEY_1 + i);
+            }
+            onboardNumberWasDown[i] = down;
         }
     }
 

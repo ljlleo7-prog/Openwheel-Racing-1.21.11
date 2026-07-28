@@ -64,6 +64,7 @@ public final class OWRNetwork {
         registrar.playToServer(ToggleTractionControlMessage.TYPE, codec(ToggleTractionControlMessage::encode, ToggleTractionControlMessage::decode), ToggleTractionControlMessage::handle);
         registrar.playToServer(ToggleDrsMessage.TYPE, codec(ToggleDrsMessage::encode, ToggleDrsMessage::decode), ToggleDrsMessage::handle);
         registrar.playToServer(CycleErsModeMessage.TYPE, codec(CycleErsModeMessage::encode, CycleErsModeMessage::decode), CycleErsModeMessage::handle);
+        registrar.playToServer(SetErsModeMessage.TYPE, codec(SetErsModeMessage::encode, SetErsModeMessage::decode), SetErsModeMessage::handle);
         registrar.playToServer(SetErsThresholdsMessage.TYPE, codec(SetErsThresholdsMessage::encode, SetErsThresholdsMessage::decode), SetErsThresholdsMessage::handle);
         registrar.playToServer(MountCarMessage.TYPE, codec(MountCarMessage::encode, MountCarMessage::decode), MountCarMessage::handle);
         registrar.playToServer(TrackEditorPlaceMessage.TYPE, codec(TrackEditorPlaceMessage::encode, TrackEditorPlaceMessage::decode), TrackEditorPlaceMessage::handle);
@@ -514,6 +515,36 @@ public final class OWRNetwork {
                     return;
                 }
                 car.cycleErsMode(message.direction);
+            });
+        }
+    }
+
+    public record SetErsModeMessage(int mode) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<SetErsModeMessage> TYPE = payloadType("set_ers_mode_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(SetErsModeMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.mode);
+        }
+
+        private static SetErsModeMessage decode(FriendlyByteBuf buffer) {
+            return new SetErsModeMessage(buffer.readInt());
+        }
+
+        private static void handle(SetErsModeMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
+                    return;
+                }
+                if (message.mode < OpenwheelCarEntity.ERS_MODE_HARVEST || message.mode > OpenwheelCarEntity.ERS_MODE_ATTACK) {
+                    return;
+                }
+                car.setErsMode(message.mode);
             });
         }
     }
