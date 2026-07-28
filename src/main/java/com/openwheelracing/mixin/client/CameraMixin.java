@@ -19,12 +19,9 @@ public abstract class CameraMixin {
         if (!OWRCameraMode.isTCamera() || !(viewEntity.getVehicle() instanceof OpenwheelCarEntity car)) {
             return;
         }
-        this.setRotation(car.getYRot(), 8.0F, 0.0F);
         Vec3 position = OWRCameraMode.tCameraPosition(car, viewEntity, partialTick);
         this.setPosition(position);
     }
 
     @Shadow protected abstract void setPosition(Vec3 position);
-
-    @Shadow public abstract void setRotation(float yaw, float pitch, float roll);
 }

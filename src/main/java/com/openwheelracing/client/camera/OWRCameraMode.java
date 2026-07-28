@@ -7,8 +7,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 public final class OWRCameraMode {
-    private static final double T_CAMERA_HEIGHT = 1.5;
-    private static final double T_CAMERA_REAR_OFFSET = 2.8;
+    private static final double T_CAMERA_HEIGHT = 1.22;
+    private static final double T_CAMERA_FORWARD_OFFSET = -0.28;
     private static boolean tCamera;
 
     private OWRCameraMode() {
@@ -56,9 +56,9 @@ public final class OWRCameraMode {
         double z = lerp(partialTick, car.zOld, car.getZ());
         float yaw = car.getYRot();
         double radians = Math.toRadians(yaw);
-        double rearX = Math.sin(radians) * T_CAMERA_REAR_OFFSET;
-        double rearZ = -Math.cos(radians) * T_CAMERA_REAR_OFFSET;
-        return new Vec3(x + rearX, y + T_CAMERA_HEIGHT, z + rearZ);
+        double forwardX = -Math.sin(radians);
+        double forwardZ = Math.cos(radians);
+        return new Vec3(x + forwardX * T_CAMERA_FORWARD_OFFSET, y + T_CAMERA_HEIGHT, z + forwardZ * T_CAMERA_FORWARD_OFFSET);
     }
 
     private static double lerp(float partialTick, double start, double end) {
