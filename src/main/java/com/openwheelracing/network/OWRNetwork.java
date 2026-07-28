@@ -45,7 +45,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "2";
+    private static final String PROTOCOL = "3";
 
     private OWRNetwork() {
     }
@@ -730,8 +730,8 @@ public final class OWRNetwork {
     }
 
     public static void broadcastRankingBoard(net.minecraft.server.MinecraftServer server, net.minecraft.server.level.ServerLevel level) {
-        List<OWRLapRecords.DriverBest> sorted = OWRLapRecords.get(level).getPlayerBestLapsSorted();
-        RankingBoardMessage msg = new RankingBoardMessage(sorted);
+        OWRLapRecords records = OWRLapRecords.get(level);
+        RankingBoardMessage msg = new RankingBoardMessage(records.getActiveSessionName(), records.getActiveSessionBestLapsSorted());
         for (net.minecraft.server.level.ServerPlayer p : server.getPlayerList().getPlayers()) {
             PacketDistributor.sendToPlayer(p, msg);
         }
@@ -969,6 +969,9 @@ public final class OWRNetwork {
                 menu.setPage(0);
                 OWRLapRecords.get(player.level()).startNewSession(message.sessionName);
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+                if (player.level() instanceof ServerLevel serverLevel) {
+                    broadcastRankingBoard(serverLevel.getServer(), serverLevel);
+                }
             });
         }
     }
@@ -1065,7 +1068,7 @@ public final class OWRNetwork {
         }
     }
 
-    public record RankingBoardMessage(List<OWRLapRecords.DriverBest> entries) implements CustomPacketPayload {
+    public record RankingBoardMessage(String sessionName, List<OWRLapRecords.DriverBest> entries) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<RankingBoardMessage> TYPE = payloadType("ranking_board_message");
 
         @Override
@@ -1074,6 +1077,7 @@ public final class OWRNetwork {
         }
 
         private static void encode(RankingBoardMessage message, FriendlyByteBuf buffer) {
+            buffer.writeUtf(message.sessionName);
             buffer.writeVarInt(message.entries.size());
             for (OWRLapRecords.DriverBest entry : message.entries) {
                 buffer.writeUtf(entry.name());
@@ -1082,16 +1086,17 @@ public final class OWRNetwork {
         }
 
         private static RankingBoardMessage decode(FriendlyByteBuf buffer) {
+            String sessionName = buffer.readUtf();
             int size = buffer.readVarInt();
             java.util.ArrayList<OWRLapRecords.DriverBest> entries = new java.util.ArrayList<>(size);
             for (int i = 0; i < size; i++) {
                 entries.add(new OWRLapRecords.DriverBest(buffer.readUtf(), buffer.readInt()));
             }
-            return new RankingBoardMessage(entries);
+            return new RankingBoardMessage(sessionName, entries);
         }
 
         private static void handle(RankingBoardMessage message, IPayloadContext context) {
-            context.enqueueWork(() -> LapRankingClient.setRanking(message.entries));
+            context.enqueueWork(() -> LapRankingClient.setRanking(message.sessionName, message.entries));
         }
     }
 

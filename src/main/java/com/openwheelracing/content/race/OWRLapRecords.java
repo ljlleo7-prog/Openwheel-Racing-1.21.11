@@ -139,6 +139,22 @@ public class OWRLapRecords extends SavedData {
             .toList();
     }
 
+    public List<DriverBest> getActiveSessionBestLapsSorted() {
+        Map<UUID, DriverBest> bests = new HashMap<>();
+        for (LapRecord lap : laps) {
+            if (lap.sessionId() != activeSessionId || lap.invalidated() || lap.lapTicks() <= 0) {
+                continue;
+            }
+            DriverBest previous = bests.get(lap.driverId());
+            if (previous == null || lap.lapTicks() < previous.ticks()) {
+                bests.put(lap.driverId(), new DriverBest(lap.driverName(), lap.lapTicks()));
+            }
+        }
+        return bests.values().stream()
+            .sorted(Comparator.comparingInt(DriverBest::ticks))
+            .toList();
+    }
+
     public LapRecord recordLap(UUID driverId, String driverName, int lapTicks, long completedGameTime, String dimensionId, long startFinishPos, int checkpointCount, CarSnapshot car) {
         LapRecord record = new LapRecord(nextLapId++, driverId, driverName, lapTicks, completedGameTime, dimensionId, startFinishPos, checkpointCount, car, false, "", "", activeSessionId, activeSessionName);
         laps.add(record);

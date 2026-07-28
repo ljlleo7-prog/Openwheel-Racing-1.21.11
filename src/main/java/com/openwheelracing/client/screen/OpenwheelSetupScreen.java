@@ -2,6 +2,7 @@ package com.openwheelracing.client.screen;
 
 import com.openwheelracing.client.input.OWRClientInputHandler;
 import com.openwheelracing.client.input.WheelInputSettings;
+import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import java.util.Locale;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -19,7 +20,13 @@ import org.lwjgl.glfw.GLFW;
 
 public class OpenwheelSetupScreen extends Screen {
     private static final int PANEL_WIDTH = 380;
-    private static final int CONTENT_HEIGHT = 560;
+    private static final int CONTENT_HEIGHT = 754;
+    private static final int GRAPH_WIDTH = 156;
+    private static final int GRAPH_HEIGHT = 74;
+    private static final int GRAPH_TEMP_MIN = 50;
+    private static final int GRAPH_TEMP_MAX = 140;
+    private static final int TYRE_MU_COLOR = 0xFF99DDFF;
+    private static final int TYRE_WEAR_COLOR = 0xFFFFDD66;
     private final Screen parent;
     private WheelInputSettings settings;
     private int scrollOffset;
@@ -75,7 +82,7 @@ public class OpenwheelSetupScreen extends Screen {
         addRenderableWidget(new PowerBox(left, ersY + 320, true, PowerTarget.LICO_ATTACK));
         addRenderableWidget(new BatterySlider(left, ersY + 364, PANEL_WIDTH - 32, 20));
 
-        int controlsY = y + 470;
+        int controlsY = y + 664;
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.wheel_setup"), button -> Minecraft.getInstance().setScreen(new WheelSetupScreen(this)))
             .bounds(left, controlsY + 24, PANEL_WIDTH - 32, 20)
             .build());
@@ -84,10 +91,10 @@ public class OpenwheelSetupScreen extends Screen {
             .build());
 
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.done"), button -> saveAndClose())
-            .bounds(x + 106, y + 532, 76, 20)
+            .bounds(x + 106, y + 726, 76, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.cancel"), button -> closeToParent())
-            .bounds(x + 198, y + 532, 76, 20)
+            .bounds(x + 198, y + 726, 76, 20)
             .build());
         updateWidgetVisibility();
     }
@@ -109,7 +116,8 @@ public class OpenwheelSetupScreen extends Screen {
         graphics.fill(x, Math.max(8, y), x + PANEL_WIDTH, Math.min(height - 8, y + CONTENT_HEIGHT), 0xDD1F2328);
         fillPanel(graphics, x + 6, y + 22, y + 86, 0xFF2A3038);
         fillPanel(graphics, x + 6, y + 102, y + 440, 0xFF293443);
-        fillPanel(graphics, x + 6, y + 456, y + 520, 0xFF2F3640);
+        fillPanel(graphics, x + 6, y + 456, y + 634, 0xFF242D38);
+        fillPanel(graphics, x + 6, y + 650, y + 714, 0xFF2F3640);
         drawIfVisible(graphics, title, x + 10, y + 8, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.visual"), x + 12, y + 24, 0xFFC9D1D9);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers"), x + 12, y + 104, 0xFFC9D1D9);
@@ -121,7 +129,8 @@ public class OpenwheelSetupScreen extends Screen {
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_harvest"), x + 16, y + 382, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_balanced"), x + 204, y + 382, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_attack"), x + 16, y + 432, 0xFFE8EDF2);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.controls"), x + 12, y + 458, 0xFFC9D1D9);
+        drawTyreThermalGraphs(graphics, x + 18, y + 478);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.controls"), x + 12, y + 652, 0xFFC9D1D9);
         super.render(graphics, mouseX, mouseY, partialTick);
         renderScrollbar(graphics, x + PANEL_WIDTH + 4);
     }
@@ -137,6 +146,97 @@ public class OpenwheelSetupScreen extends Screen {
     private void drawIfVisible(GuiGraphics graphics, Component text, int x, int y, int color) {
         if (y >= 8 && y <= height - 18) {
             graphics.drawString(font, text, x, y, color, false);
+        }
+    }
+
+    private void drawTyreThermalGraphs(GuiGraphics graphics, int x, int y) {
+        if (y + 152 < 8 || y > height - 8) {
+            return;
+        }
+        int left = x;
+        int right = x + 184;
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.setup.tyre_thermal"), x, y, 0xFFC9D1D9, false);
+        drawTyreGraph(graphics, left, y + 18, Component.translatable("screen.openwheelracing.setup.tyre_mu_graph"), true);
+        drawTyreGraph(graphics, right, y + 18, Component.translatable("screen.openwheelracing.setup.tyre_wear_graph"), false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.setup.tyre_graph_legend"), x, y + 110, 0xFF8B949E, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.setup.tyre_graph_note"), x, y + 124, 0xFF8B949E, false);
+    }
+
+    private void drawTyreGraph(GuiGraphics graphics, int x, int y, Component title, boolean muGraph) {
+        int bottom = y + GRAPH_HEIGHT;
+        graphics.fill(x, y, x + GRAPH_WIDTH, bottom, 0xCC101820);
+        graphics.renderOutline(x, y, GRAPH_WIDTH, GRAPH_HEIGHT, 0xFF3F464F);
+        graphics.drawString(font, title, x, y - 11, 0xFFE8EDF2, false);
+        for (int i = 1; i < 4; i++) {
+            int gy = y + i * GRAPH_HEIGHT / 4;
+            graphics.hLine(x + 1, x + GRAPH_WIDTH - 2, gy, 0x333F464F);
+        }
+        int color = muGraph ? TYRE_MU_COLOR : TYRE_WEAR_COLOR;
+        for (int compound = 0; compound < 5; compound++) {
+            int minX = graphX(x, OpenwheelCarEntity.tyreWorkingTemperatureMin(compound));
+            int maxX = graphX(x, OpenwheelCarEntity.tyreWorkingTemperatureMax(compound));
+            graphics.fill(minX, y + 1, maxX, bottom - 1, compound == 2 ? 0x2234D058 : 0x111F6FEB);
+        }
+        for (int compound = 0; compound < 5; compound++) {
+            int previousX = x;
+            int previousY = graphY(y, sampleTyreGraph(compound, GRAPH_TEMP_MIN, muGraph), muGraph);
+            for (int temperature = GRAPH_TEMP_MIN + 2; temperature <= GRAPH_TEMP_MAX; temperature += 2) {
+                int nextX = graphX(x, temperature);
+                int nextY = graphY(y, sampleTyreGraph(compound, temperature, muGraph), muGraph);
+                drawLine(graphics, previousX, previousY, nextX, nextY, color);
+                if (compound % 2 == 0) {
+                    drawLine(graphics, previousX, previousY + 1, nextX, nextY + 1, color);
+                }
+                previousX = nextX;
+                previousY = nextY;
+            }
+            graphics.drawString(font, "C" + (compound + 1), graphX(x, OpenwheelCarEntity.tyreWorkingTemperatureMin(compound)) + 1, y + 5 + compound * 9, color, false);
+        }
+        graphics.drawString(font, GRAPH_TEMP_MIN + "C", x, bottom + 3, 0xFF8B949E, false);
+        String maxLabel = GRAPH_TEMP_MAX + "C";
+        graphics.drawString(font, maxLabel, x + GRAPH_WIDTH - font.width(maxLabel), bottom + 3, 0xFF8B949E, false);
+    }
+
+    private double sampleTyreGraph(int compound, double temperature, boolean muGraph) {
+        return muGraph
+            ? OpenwheelCarEntity.tyreTemperatureMuMultiplier(compound, temperature)
+            : OpenwheelCarEntity.tyreTemperatureWearMultiplier(compound, temperature);
+    }
+
+    private int graphX(int x, double temperature) {
+        double t = (temperature - GRAPH_TEMP_MIN) / (double) (GRAPH_TEMP_MAX - GRAPH_TEMP_MIN);
+        return x + (int) Math.round(Math.max(0.0, Math.min(1.0, t)) * (GRAPH_WIDTH - 1));
+    }
+
+    private int graphY(int y, double value, boolean muGraph) {
+        double min = muGraph ? 0.60 : 1.0;
+        double max = muGraph ? 1.05 : 2.3;
+        double t = (value - min) / (max - min);
+        return y + GRAPH_HEIGHT - 2 - (int) Math.round(Math.max(0.0, Math.min(1.0, t)) * (GRAPH_HEIGHT - 4));
+    }
+
+    private void drawLine(GuiGraphics graphics, int x0, int y0, int x1, int y1, int color) {
+        int dx = Math.abs(x1 - x0);
+        int dy = Math.abs(y1 - y0);
+        int sx = x0 < x1 ? 1 : -1;
+        int sy = y0 < y1 ? 1 : -1;
+        int err = dx - dy;
+        int x = x0;
+        int y = y0;
+        while (true) {
+            graphics.fill(x, y, x + 1, y + 1, color);
+            if (x == x1 && y == y1) {
+                return;
+            }
+            int e2 = err * 2;
+            if (e2 > -dy) {
+                err -= dy;
+                x += sx;
+            }
+            if (e2 < dx) {
+                err += dx;
+                y += sy;
+            }
         }
     }
 
