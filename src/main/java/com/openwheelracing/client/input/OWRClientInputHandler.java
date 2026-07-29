@@ -7,12 +7,13 @@ import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRSoundEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.sounds.SoundSource;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.network.PacketDistributor;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import org.lwjgl.glfw.GLFW;
 
 public final class OWRClientInputHandler {
     private static boolean shiftUpWasDown;
     private static boolean shiftDownWasDown;
+    private static final boolean[] onboardNumberWasDown = new boolean[9];
     private static boolean sentIdleDriveInput;
     private static int lastSyncedCarId = Integer.MIN_VALUE;
     private static int sentBalancedClipStart = Integer.MIN_VALUE;
@@ -23,6 +24,12 @@ public final class OWRClientInputHandler {
     private static int sentBalancedEndPower = Integer.MIN_VALUE;
     private static int sentHarvestStartPower = Integer.MIN_VALUE;
     private static int sentHarvestEndPower = Integer.MIN_VALUE;
+    private static int sentLicoSpeedThreshold = Integer.MIN_VALUE;
+    private static double sentLicoSteeringThreshold = Double.NaN;
+    private static double sentLicoLateralGThreshold = Double.NaN;
+    private static int sentLicoHarvestPower = Integer.MIN_VALUE;
+    private static int sentLicoBalancedPower = Integer.MIN_VALUE;
+    private static int sentLicoAttackPower = Integer.MIN_VALUE;
     private static double sentCapacityMj = Double.NaN;
 
     private OWRClientInputHandler() {
@@ -32,7 +39,7 @@ public final class OWRClientInputHandler {
         lastSyncedCarId = Integer.MIN_VALUE;
     }
 
-    public static void onClientTick(TickEvent.ClientTickEvent.Post event) {
+    public static void onClientTick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.screen != null) {
             return;
@@ -47,10 +54,10 @@ public final class OWRClientInputHandler {
 
         WheelInputManager.Output wheel = WheelInputManager.poll(WheelInputSettings.get());
         while (!(mc.player.getVehicle() instanceof OpenwheelCarEntity) && OWRKeyMappings.MOUNT_CAR.consumeClick()) {
-            OWRNetwork.CHANNEL.send(new OWRNetwork.MountCarMessage(), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.MountCarMessage());
         }
         if (!(mc.player.getVehicle() instanceof OpenwheelCarEntity) && wheel.pressed(WheelInputSettings.ButtonRole.MOUNT_CAR)) {
-            OWRNetwork.CHANNEL.send(new OWRNetwork.MountCarMessage(), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.MountCarMessage());
         }
 
         if (!(mc.player.getVehicle() instanceof OpenwheelCarEntity)) {
@@ -76,56 +83,133 @@ public final class OWRClientInputHandler {
         boolean shiftUpDown = isDown(OWRKeyMappings.SHIFT_UP) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_UP);
         boolean shiftDownDown = isDown(OWRKeyMappings.SHIFT_DOWN) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_DOWN);
         if (shiftUpDown && !shiftUpWasDown) {
-            car.shiftLocal(1);
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ShiftMessage(1), PacketDistributor.SERVER.noArg());
+            shiftUp();
         }
         if (shiftDownDown && !shiftDownWasDown) {
-            car.shiftLocal(-1);
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ShiftMessage(-1), PacketDistributor.SERVER.noArg());
+            shiftDown();
         }
         shiftUpWasDown = shiftUpDown;
         shiftDownWasDown = shiftDownDown;
+        handleOnboardNumberKeys();
         while (OWRKeyMappings.EXIT_CAR.consumeClick()) {
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ExitCarMessage(), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.ExitCarMessage());
         }
         if (wheel.pressed(WheelInputSettings.ButtonRole.EXIT_CAR)) {
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ExitCarMessage(), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.ExitCarMessage());
         }
         while (OWRKeyMappings.TOGGLE_ABS.consumeClick()) {
             car.toggleAbs();
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ToggleAbsMessage(), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.ToggleAbsMessage());
         }
         if (wheel.pressed(WheelInputSettings.ButtonRole.TOGGLE_ABS)) {
             car.toggleAbs();
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ToggleAbsMessage(), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.ToggleAbsMessage());
         }
         while (OWRKeyMappings.TOGGLE_TC.consumeClick()) {
             car.toggleTractionControl();
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ToggleTractionControlMessage(), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.ToggleTractionControlMessage());
         }
         if (wheel.pressed(WheelInputSettings.ButtonRole.TOGGLE_TC)) {
             car.toggleTractionControl();
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ToggleTractionControlMessage(), PacketDistributor.SERVER.noArg());
+            OWRNetwork.sendToServer(new OWRNetwork.ToggleTractionControlMessage());
         }
         while (OWRKeyMappings.TOGGLE_DRS.consumeClick()) {
-            car.toggleDrs();
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ToggleDrsMessage(), PacketDistributor.SERVER.noArg());
-            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 1.0f, 1.0f);
+            toggleDrs();
         }
         if (wheel.pressed(WheelInputSettings.ButtonRole.TOGGLE_DRS)) {
-            car.toggleDrs();
-            OWRNetwork.CHANNEL.send(new OWRNetwork.ToggleDrsMessage(), PacketDistributor.SERVER.noArg());
-            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 1.0f, 1.0f);
+            toggleDrs();
         }
         while (OWRKeyMappings.ERS_MODE_PREVIOUS.consumeClick()) {
-            car.cycleErsModeLocal(-1);
-            OWRNetwork.CHANNEL.send(new OWRNetwork.CycleErsModeMessage(-1), PacketDistributor.SERVER.noArg());
-            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, 0.85f);
+            cycleErsMode(-1);
         }
         while (OWRKeyMappings.ERS_MODE_NEXT.consumeClick()) {
-            car.cycleErsModeLocal(1);
-            OWRNetwork.CHANNEL.send(new OWRNetwork.CycleErsModeMessage(1), PacketDistributor.SERVER.noArg());
-            mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, 1.15f);
+            cycleErsMode(1);
+        }
+    }
+
+    public static boolean shiftUp() {
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null) {
+            return false;
+        }
+        car.shiftLocal(1);
+        OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(1));
+        return true;
+    }
+
+    public static boolean shiftDown() {
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null) {
+            return false;
+        }
+        car.shiftLocal(-1);
+        OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(-1));
+        return true;
+    }
+
+    public static boolean toggleDrs() {
+        Minecraft mc = Minecraft.getInstance();
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null || mc.player == null) {
+            return false;
+        }
+        car.toggleDrs();
+        OWRNetwork.sendToServer(new OWRNetwork.ToggleDrsMessage());
+        mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 1.0f, 1.0f);
+        return true;
+    }
+
+    public static boolean cycleErsMode(int direction) {
+        Minecraft mc = Minecraft.getInstance();
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null || mc.player == null || direction == 0) {
+            return false;
+        }
+        car.cycleErsModeLocal(direction);
+        OWRNetwork.sendToServer(new OWRNetwork.CycleErsModeMessage(direction));
+        mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, direction > 0 ? 1.15f : 0.85f);
+        return true;
+    }
+
+    public static boolean setErsMode(int mode) {
+        Minecraft mc = Minecraft.getInstance();
+        OpenwheelCarEntity car = onboardCar();
+        if (car == null || mc.player == null) {
+            return false;
+        }
+        int clampedMode = Math.max(OpenwheelCarEntity.ERS_MODE_HARVEST, Math.min(OpenwheelCarEntity.ERS_MODE_ATTACK, mode));
+        car.setErsMode(clampedMode);
+        OWRNetwork.sendToServer(new OWRNetwork.SetErsModeMessage(clampedMode));
+        mc.player.playSound(OWRSoundEvents.DRS_BEEP.get(), 0.75f, clampedMode == OpenwheelCarEntity.ERS_MODE_ATTACK ? 1.15f : clampedMode == OpenwheelCarEntity.ERS_MODE_HARVEST ? 0.85f : 1.0f);
+        return true;
+    }
+
+    public static boolean handleOnboardNumberKey(int keyCode) {
+        int slot = keyCode - GLFW.GLFW_KEY_1;
+        if (slot < 0 || slot >= 9 || onboardCar() == null) {
+            return false;
+        }
+        if (slot < 3) {
+            setErsMode(slot);
+        }
+        return true;
+    }
+
+    public static OpenwheelCarEntity onboardCar() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null && mc.screen == null && mc.player.getVehicle() instanceof OpenwheelCarEntity car) {
+            return car;
+        }
+        return null;
+    }
+
+    private static void handleOnboardNumberKeys() {
+        for (int i = 0; i < onboardNumberWasDown.length; i++) {
+            boolean down = isRawKeyDown(GLFW.GLFW_KEY_1 + i);
+            if (down && !onboardNumberWasDown[i]) {
+                handleOnboardNumberKey(GLFW.GLFW_KEY_1 + i);
+            }
+            onboardNumberWasDown[i] = down;
         }
     }
 
@@ -140,6 +224,12 @@ public final class OWRClientInputHandler {
                 && settings.ersBalancedEndPowerKw == sentBalancedEndPower
                 && settings.ersHarvestStartPowerKw == sentHarvestStartPower
                 && settings.ersHarvestEndPowerKw == sentHarvestEndPower
+                && settings.ersLicoSpeedThresholdKmh == sentLicoSpeedThreshold
+                && settings.ersLicoSteeringThresholdDegrees == sentLicoSteeringThreshold
+                && settings.ersLicoLateralGThreshold == sentLicoLateralGThreshold
+                && settings.ersLicoHarvestPowerKw == sentLicoHarvestPower
+                && settings.ersLicoBalancedPowerKw == sentLicoBalancedPower
+                && settings.ersLicoAttackPowerKw == sentLicoAttackPower
                 && settings.ersCapacityMj == sentCapacityMj) {
             return;
         }
@@ -152,8 +242,14 @@ public final class OWRClientInputHandler {
         sentBalancedEndPower = settings.ersBalancedEndPowerKw;
         sentHarvestStartPower = settings.ersHarvestStartPowerKw;
         sentHarvestEndPower = settings.ersHarvestEndPowerKw;
+        sentLicoSpeedThreshold = settings.ersLicoSpeedThresholdKmh;
+        sentLicoSteeringThreshold = settings.ersLicoSteeringThresholdDegrees;
+        sentLicoLateralGThreshold = settings.ersLicoLateralGThreshold;
+        sentLicoHarvestPower = settings.ersLicoHarvestPowerKw;
+        sentLicoBalancedPower = settings.ersLicoBalancedPowerKw;
+        sentLicoAttackPower = settings.ersLicoAttackPowerKw;
         sentCapacityMj = settings.ersCapacityMj;
-        OWRNetwork.CHANNEL.send(new OWRNetwork.SetErsThresholdsMessage(
+        OWRNetwork.sendToServer(new OWRNetwork.SetErsThresholdsMessage(
             sentBalancedClipStart,
             sentBalancedClipEnd,
             sentHarvestNegativeStart,
@@ -162,8 +258,14 @@ public final class OWRClientInputHandler {
             sentBalancedEndPower,
             sentHarvestStartPower,
             sentHarvestEndPower,
-            sentCapacityMj
-        ), PacketDistributor.SERVER.noArg());
+            sentCapacityMj,
+            sentLicoSpeedThreshold,
+            sentLicoSteeringThreshold,
+            sentLicoLateralGThreshold,
+            sentLicoHarvestPower,
+            sentLicoBalancedPower,
+            sentLicoAttackPower
+        ));
     }
 
     private static void sendDriveInputIfNeeded(float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering) {
@@ -172,7 +274,7 @@ public final class OWRClientInputHandler {
             return;
         }
         sentIdleDriveInput = idle;
-        OWRNetwork.CHANNEL.send(new OWRNetwork.DriveInputMessage(keyboardThrottle, keyboardBrake, keyboardSteering, wheelThrottle, wheelBrake, wheelSteering), PacketDistributor.SERVER.noArg());
+        OWRNetwork.sendToServer(new OWRNetwork.DriveInputMessage(keyboardThrottle, keyboardBrake, keyboardSteering, wheelThrottle, wheelBrake, wheelSteering));
     }
 
     /** Poll the raw GLFW key state regardless of Minecraft conflict context. */

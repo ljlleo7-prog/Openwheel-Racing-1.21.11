@@ -14,12 +14,13 @@ import com.openwheelracing.registry.OWRItems;
 import com.openwheelracing.registry.OWRMenus;
 import com.openwheelracing.registry.OWRRecipes;
 import com.openwheelracing.registry.OWRSoundEvents;
-import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.furnace.FurnaceFuelBurnTimeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.furnace.FurnaceFuelBurnTimeEvent;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import org.slf4j.Logger;
 
 @Mod(OpenwheelRacing.MODID)
@@ -28,27 +29,25 @@ public final class OpenwheelRacing {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    public OpenwheelRacing(FMLJavaModLoadingContext context) {
-        var modBusGroup = context.getModBusGroup();
-
-        FMLCommonSetupEvent.getBus(modBusGroup).addListener(this::commonSetup);
-        OWRDataComponents.register(modBusGroup);
-        OWREntities.register(modBusGroup);
-        OWRFluids.register(modBusGroup);
-        OWRItems.register(modBusGroup);
-        OWRBlocks.register(modBusGroup);
-        OWRBlockEntities.register(modBusGroup);
-        OWRMenus.register(modBusGroup);
-        OWRRecipes.register(modBusGroup);
-        OWRSoundEvents.register(modBusGroup);
-        OWRCreativeTabs.register(modBusGroup);
-        FurnaceFuelBurnTimeEvent.BUS.addListener(OWRFuelHandler::onFuelBurnTime);
-        RegisterCommandsEvent.BUS.addListener(OWRCommands::register);
-        PlayerEvent.PlayerLoggedInEvent.BUS.addListener(this::onPlayerLoggedIn);
+    public OpenwheelRacing(IEventBus modBus) {
+        modBus.addListener(this::commonSetup);
+        modBus.addListener(OWRNetwork::register);
+        OWRDataComponents.register(modBus);
+        OWREntities.register(modBus);
+        OWRFluids.register(modBus);
+        OWRItems.register(modBus);
+        OWRBlocks.register(modBus);
+        OWRBlockEntities.register(modBus);
+        OWRMenus.register(modBus);
+        OWRRecipes.register(modBus);
+        OWRSoundEvents.register(modBus);
+        OWRCreativeTabs.register(modBus);
+        NeoForge.EVENT_BUS.addListener(OWRFuelHandler::onFuelBurnTime);
+        NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> OWRCommands.register(event));
+        NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
-        OWRNetwork.register();
         LOGGER.info("Openwheel Racing initialized");
     }
 

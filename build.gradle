@@ -1,15 +1,13 @@
-// This is a minimal setup of a Forge mod workspace.
-// For complex examples (including AccessTransformers, Jar-in-Jar, and Mixin), see our examples repository.
-// https://github.com/MinecraftForge/MDKExamples
+// This is a minimal setup of a NeoForge mod workspace.
 
 plugins {
     id 'java'
     id 'idea'
     id 'eclipse'
-    id 'net.minecraftforge.gradle' version '[7.0.3,8)'
+    id 'net.neoforged.moddev' version '2.0.142'
 }
 
-version = '1.9.1'
+version = '1.10.4'
 group = 'com.openwheelracing'
 
 // Mojang ships Java 21 to end users in 1.20.5+, so every Gradle Java task should use Java 21.
@@ -40,44 +38,49 @@ configurations {
     liveryPrototypeTestRuntimeOnly.extendsFrom testRuntimeOnly
 }
 
-minecraft {
-    mappings channel: 'official', version: '1.21.11'
+neoForge {
+    version = '21.11.44'
 
     runs {
         configureEach {
-            workingDir = layout.projectDirectory.dir('run')
+            gameDirectory = layout.projectDirectory.dir('run')
             systemProperty 'eventbus.api.strictRuntimeChecks', 'true'
-            systemProperty 'forge.enabledGameTestNamespaces', 'openwheelracing'
-
-            jvmArgs '-XstartOnFirstThread'
+            systemProperty 'neoforge.enabledGameTestNamespaces', 'openwheelracing'
+            jvmArgument '-XstartOnFirstThread'
         }
 
-        register('client')
-
-        register('server') {
-            args '--nogui'
+        client {
+            client()
         }
 
-        register('gameTestServer')
+        server {
+            server()
+            programArgument '--nogui'
+        }
 
-        register('data') {
-            workingDir = layout.projectDirectory.dir('run-data')
+        gameTestServer {
+            type = 'gameTestServer'
+        }
 
-            args '--mod', 'openwheelracing', '--all', '--output', layout.projectDirectory.dir('src/generated/resources'), '--existing', layout.projectDirectory.dir('src/main/resources')
+        data {
+            data()
+            gameDirectory = layout.projectDirectory.dir('run-data')
+            programArguments.addAll '--mod', 'openwheelracing', '--all', '--output', layout.projectDirectory.dir('src/generated/resources').asFile.absolutePath, '--existing', layout.projectDirectory.dir('src/main/resources').asFile.absolutePath
+        }
+    }
+
+    mods {
+        openwheelracing {
+            sourceSet sourceSets.main
         }
     }
 }
 
 repositories {
-    minecraft.mavenizer(it) // In Kotlin, it = this
-    maven fg.forgeMaven
-    maven fg.minecraftLibsMaven
     mavenCentral()
 }
 
 dependencies {
-    implementation minecraft.dependency('net.minecraftforge:forge:1.21.11-61.1.0')
-    annotationProcessor 'net.minecraftforge:eventbus-validator:7.0.1'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

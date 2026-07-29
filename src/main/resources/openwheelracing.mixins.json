@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.openwheelracing.mixin",
+  "mixins": [],
+  "client": [
+    "client.CameraMixin",
+    "client.MinecraftMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "minVersion": "0.8"
+}

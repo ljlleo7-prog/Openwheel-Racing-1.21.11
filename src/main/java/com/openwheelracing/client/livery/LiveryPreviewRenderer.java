@@ -65,18 +65,33 @@ public final class LiveryPreviewRenderer {
             Uv duv = toUv(LiveryUvMapping.uvForVertex(face.group(), face.x3(), face.y3(), face.z3()));
             int fallback = fallbackColor(face, fallbackColors);
             boolean paintable = LiveryUvMapping.isPaintableMaterial(face.materialRgb()) && auv != null && buv != null && cuv != null && duv != null;
-            rasterize(image, depth, hitU, hitV, livery, a, b, c, auv, buv, cuv, fallback, paintable);
-            rasterize(image, depth, hitU, hitV, livery, a, c, d, auv, cuv, duv, fallback, paintable);
+            int color = previewFaceColor(face, livery, fallback, paintable);
+            rasterize(image, depth, hitU, hitV, a, b, c, auv, buv, cuv, color, paintable);
+            rasterize(image, depth, hitU, hitV, a, c, d, auv, cuv, duv, color, paintable);
         }
         return new Preview(image, hitU, hitV, width, height);
     }
 
+    private static int previewFaceColor(ColoredObjModel.Face face, NativeImage livery, int fallback, boolean paintable) {
+        if (!paintable) {
+            return fallback;
+        }
+        float x = (face.x0() + face.x1() + face.x2()) / 3.0f;
+        float y = (face.y0() + face.y1() + face.y2()) / 3.0f;
+        float z = (face.z0() + face.z1() + face.z2()) / 3.0f;
+        LiveryUvMapping.Uv uv = LiveryUvMapping.uvForVertex(face.group(), x, y, z);
+        if (uv == null) {
+            return fallback;
+        }
+        int u = clamp(Math.round(uv.u()), 0, ClientLiveryTextures.SIZE - 1);
+        int v = clamp(Math.round(uv.v()), 0, ClientLiveryTextures.SIZE - 1);
+        int sampled = livery.getPixel(u, v);
+        return ((sampled >>> 24) & 255) > 0 ? sampled : fallback;
+    }
+
     private static boolean isFrontFacing(float nx, float ny, float nz, float sinYaw, float cosYaw, float sinPitch, float cosPitch) {
-        // Rotate the face normal by the same yaw+pitch as the vertices
         float yawNX = nx * cosYaw + nz * sinYaw;
         float yawNZ = -nx * sinYaw + nz * cosYaw;
-        // After pitch: view-space Z is y*sinPitch + yawNZ*cosPitch
-        // Camera looks in the -Z direction so a face is front if viewZ > 0
         float viewZ = ny * sinPitch + yawNZ * cosPitch;
         return viewZ > 0.0f;
     }
@@ -92,7 +107,7 @@ public final class LiveryPreviewRenderer {
         return new Vertex(width * 0.5f + yawX * scale, height * 0.54f - pitchY * scale, pitchZ);
     }
 
-    private static void rasterize(NativeImage image, float[] depth, int[] hitU, int[] hitV, NativeImage livery, Vertex a, Vertex b, Vertex c, Uv auv, Uv buv, Uv cuv, int fallback, boolean paintable) {
+    private static void rasterize(NativeImage image, float[] depth, int[] hitU, int[] hitV, Vertex a, Vertex b, Vertex c, Uv auv, Uv buv, Uv cuv, int color, boolean paintable) {
         int minX = clamp((int) Math.floor(Math.min(a.x, Math.min(b.x, c.x))), 0, image.getWidth() - 1);
         int maxX = clamp((int) Math.ceil(Math.max(a.x, Math.max(b.x, c.x))), 0, image.getWidth() - 1);
         int minY = clamp((int) Math.floor(Math.min(a.y, Math.min(b.y, c.y))), 0, image.getHeight() - 1);
@@ -117,16 +132,9 @@ public final class LiveryPreviewRenderer {
                     continue;
                 }
                 depth[index] = z;
-                int color = fallback;
                 if (paintable) {
-                    int u = clamp(Math.round(auv.u * w0 + buv.u * w1 + cuv.u * w2), 0, ClientLiveryTextures.SIZE - 1);
-                    int v = clamp(Math.round(auv.v * w0 + buv.v * w1 + cuv.v * w2), 0, ClientLiveryTextures.SIZE - 1);
-                    int sampled = livery.getPixel(u, v);
-                    if (((sampled >>> 24) & 255) > 0) {
-                        color = sampled;
-                    }
-                    hitU[index] = u;
-                    hitV[index] = v;
+                    hitU[index] = clamp(Math.round(auv.u * w0 + buv.u * w1 + cuv.u * w2), 0, ClientLiveryTextures.SIZE - 1);
+                    hitV[index] = clamp(Math.round(auv.v * w0 + buv.v * w1 + cuv.v * w2), 0, ClientLiveryTextures.SIZE - 1);
                 }
                 image.setPixel(x, y, shadeByDepth(color, z));
             }

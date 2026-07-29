@@ -13,6 +13,8 @@ import net.minecraft.network.chat.Component;
 public final class CarHudOverlay {
     private static final int PANEL_WIDTH = 142;
     private static final int PANEL_HEIGHT = 100;
+    private static int lastTemperatureCarId = -1;
+    private static float displayedTyreTemperatureC = Float.NaN;
 
     private CarHudOverlay() {
     }
@@ -47,6 +49,9 @@ public final class CarHudOverlay {
             graphics.drawString(font, "LAP  " + formatLapTime(displayedLapTicks), x + 8, y + 51, lapColor, false);
             graphics.drawString(font, "CP   " + (car.hasCheckpoint() ? "OK" : "--"), x + 8, y + 62, car.hasCheckpoint() ? 0xFFB7FFB7 : 0xFFFFDD66, false);
             graphics.drawString(font, "BEST " + formatLapTime(car.getBestLapTicks()), x + 8, y + 73, 0xFFFFFF99, false);
+            float tyreTemperature = displayedTyreTemperature(car);
+            String tyreTemp = String.format("TEMP %3.0fC", tyreTemperature);
+            graphics.drawString(font, tyreTemp, x + PANEL_WIDTH - 8 - font.width(tyreTemp), y + 86, tyreTemperatureColor(car, tyreTemperature), false);
 
             if (car.isInPitStop()) {
                 int remaining = car.getPitStopTicks();
@@ -136,8 +141,9 @@ public final class CarHudOverlay {
 
     private static void renderRankingBoard(GuiGraphics graphics, Font font) {
         List<OWRLapRecords.DriverBest> ranking = LapRankingClient.getRanking();
+        String sessionName = LapRankingClient.getSessionName();
         int rowCount = ranking.size();
-        int headerHeight = 11;
+        int headerHeight = 20;
         int rowHeight = 9;
         int panelWidth = 148;
         int panelHeight = headerHeight + rowHeight * Math.max(1, rowCount) + 3;
@@ -146,7 +152,8 @@ public final class CarHudOverlay {
 
         graphics.fill(px, py, px + panelWidth, py + panelHeight, 0xBB000000);
         graphics.renderOutline(px, py, panelWidth, panelHeight, 0xFF444444);
-        graphics.drawString(font, "FASTEST LAPS", px + 6, py + 2, 0xFFAAAAAA, false);
+        graphics.drawString(font, fit(font, sessionName, 130), px + 6, py + 2, 0xFFE8E8E8, false);
+        graphics.drawString(font, "FASTEST LAPS", px + 6, py + 11, 0xFFAAAAAA, false);
 
         if (rowCount == 0) {
             graphics.drawString(font, "No laps yet", px + 6, py + headerHeight + 1, 0xFF666666, false);
@@ -177,6 +184,13 @@ public final class CarHudOverlay {
         return s + "." + String.format("%02d", frac);
     }
 
+    private static String fit(Font font, String text, int width) {
+        if (font.width(text) <= width) {
+            return text;
+        }
+        return font.plainSubstrByWidth(text, width - font.width("...")) + "...";
+    }
+
     private static void renderPhysicsDebug(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {
         int x = 4;
         int y = 4;
@@ -195,6 +209,12 @@ public final class CarHudOverlay {
         debugLine(graphics, font, x, row, 0xFFDDDDDD, String.format("    RL %5.0f RR %5.0f", car.getDebugRlLoad(), car.getDebugRrLoad())); row += lineHeight;
         debugLine(graphics, font, x, row, demandColor(maxDemand(car)), String.format("dem FL %.2f FR %.2f", car.getDebugFlDemand(), car.getDebugFrDemand())); row += lineHeight;
         debugLine(graphics, font, x, row, demandColor(maxDemand(car)), String.format("    RL %.2f RR %.2f", car.getDebugRlDemand(), car.getDebugRrDemand())); row += lineHeight;
+        float flTemp = car.getTyreTemperatureFlCelsius();
+        float frTemp = car.getTyreTemperatureFrCelsius();
+        float rlTemp = car.getTyreTemperatureRlCelsius();
+        float rrTemp = car.getTyreTemperatureRrCelsius();
+        debugLine(graphics, font, x, row, tyreTemperatureColor(car, (flTemp + frTemp) * 0.5f), String.format("Tmp FL %.1f FR %.1f", flTemp, frTemp)); row += lineHeight;
+        debugLine(graphics, font, x, row, tyreTemperatureColor(car, (rlTemp + rrTemp) * 0.5f), String.format("    RL %.1f RR %.1f", rlTemp, rrTemp)); row += lineHeight;
         debugLine(graphics, font, x, row, 0xFFFFAAAA, String.format("slp FL %.1f FR %.1f", car.getDebugFlSlipAngleDegrees(), car.getDebugFrSlipAngleDegrees())); row += lineHeight;
         debugLine(graphics, font, x, row, 0xFFFFAAAA, String.format("    RL %.1f RR %.1f", car.getDebugRlSlipAngleDegrees(), car.getDebugRrSlipAngleDegrees()));
     }
@@ -222,11 +242,40 @@ public final class CarHudOverlay {
         return 0xFFB7FFB7;
     }
 
+    private static int tyreTemperatureColor(OpenwheelCarEntity car, float temperature) {
+        float min = car.getTyreWorkingTemperatureMinCelsius();
+        float max = car.getTyreWorkingTemperatureMaxCelsius();
+        if (temperature < min - 10.0f) {
+            return 0xFF66CCFF;
+        }
+        if (temperature < min) {
+            return 0xFF99DDFF;
+        }
+        if (temperature <= max) {
+            return 0xFFB7FFB7;
+        }
+        if (temperature <= max + 10.0f) {
+            return 0xFFFFDD66;
+        }
+        return 0xFFFF7777;
+    }
+
     private static double maxDemand(OpenwheelCarEntity car) {
         return Math.max(
             Math.max(car.getDebugFlDemand(), car.getDebugFrDemand()),
             Math.max(car.getDebugRlDemand(), car.getDebugRrDemand())
         );
+    }
+
+    private static float displayedTyreTemperature(OpenwheelCarEntity car) {
+        float target = car.getTyreTemperatureCelsius();
+        if (lastTemperatureCarId != car.getId() || Float.isNaN(displayedTyreTemperatureC)) {
+            lastTemperatureCarId = car.getId();
+            displayedTyreTemperatureC = target;
+        } else {
+            displayedTyreTemperatureC += (target - displayedTyreTemperatureC) * 0.35f;
+        }
+        return displayedTyreTemperatureC;
     }
 
     private static String formatLapTime(int ticks) {

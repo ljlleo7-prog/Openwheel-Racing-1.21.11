@@ -1,6 +1,6 @@
 package com.openwheelracing.registry;
 
-import net.minecraftforge.event.furnace.FurnaceFuelBurnTimeEvent;
+import net.neoforged.neoforge.event.furnace.FurnaceFuelBurnTimeEvent;
 
 public final class OWRFuelHandler {
     private OWRFuelHandler() {
