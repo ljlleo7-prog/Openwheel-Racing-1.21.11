@@ -54,7 +54,7 @@ public final class OWRCameraMode {
         double x = lerp(partialTick, car.xOld, car.getX());
         double y = lerp(partialTick, car.yOld, car.getY());
         double z = lerp(partialTick, car.zOld, car.getZ());
-        float yaw = car.getYRot();
+        float yaw = car.getYRot(partialTick);
         double radians = Math.toRadians(yaw);
         double forwardX = -Math.sin(radians);
         double forwardZ = Math.cos(radians);

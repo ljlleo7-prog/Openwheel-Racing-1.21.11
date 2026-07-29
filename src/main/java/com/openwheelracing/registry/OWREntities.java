@@ -16,7 +16,7 @@ public final class OWREntities {
 
     public static final DeferredHolder<EntityType<?>, EntityType<OpenwheelCarEntity>> PROTOTYPE_CAR = ENTITY_TYPES.register("prototype_car",
         () -> EntityType.Builder.of(OpenwheelCarEntity::new, MobCategory.MISC)
-            .sized(1.9f, 1.05f)
+            .sized(1.4f, 1.05f)
             .clientTrackingRange(10)
             .updateInterval(2)
             .build(ResourceKey.create(Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "prototype_car")))
