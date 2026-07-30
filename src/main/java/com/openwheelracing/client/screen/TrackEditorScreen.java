@@ -5,6 +5,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
+import com.mojang.blaze3d.platform.NativeImage;
+import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.track.TrackEditorMaterial;
 import com.openwheelracing.content.track.TrackEditorMode;
 import com.openwheelracing.content.track.TrackEditorOperation;
@@ -18,10 +20,13 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -38,12 +43,16 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 public class TrackEditorScreen extends Screen {
     private static final TrackEditorMode[] MODES = TrackEditorMode.values();
@@ -91,16 +100,36 @@ public class TrackEditorScreen extends Screen {
     private static final int MAX_TERRAIN_TILE_CACHE_SIZE = 8192;
     private static final int TERRAIN_CACHE_FLUSH_TILE_LIMIT = 2;
     private static final int TERRAIN_CACHE_FLUSH_TICKS = 600;
+    private static final int TERRAIN_TILE_SAMPLE_BURST = 32;
+    private static final int TERRAIN_IO_COMPLETIONS_PER_TICK = 4;
+    private static final int TERRAIN_TEXTURE_UPLOADS_PER_FRAME = 12;
+    private static final int MAX_TERRAIN_IO_QUEUE_SIZE = 512;
     private static final double IMPORT_SAMPLE_SPACING = 1.0;
     private static final String IMPORT_PATH = "openwheelracing/imports/lap-simulator-track.json";
     private static final List<PendingEditorOperation> PENDING_QUEUE = new ArrayList<>();
+    private static final ThreadFactory TERRAIN_IO_THREAD_FACTORY = task -> {
+        Thread thread = new Thread(task, "OWR Terrain Tile IO");
+        thread.setDaemon(true);
+        return thread;
+    };
+    private static final ExecutorService TERRAIN_IO_EXECUTOR = Executors.newSingleThreadExecutor(TERRAIN_IO_THREAD_FACTORY);
+    private static final ArrayDeque<TerrainTileLoadResult> TERRAIN_TILE_LOAD_RESULTS = new ArrayDeque<>();
+    private static final Set<Long> TERRAIN_TILE_LOADING = new HashSet<>();
+    private static final Set<Long> TERRAIN_TILE_IO_MISSES = new HashSet<>();
     private static final Map<Long, TerrainTile> TERRAIN_TILES = new LinkedHashMap<>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<Long, TerrainTile> eldest) {
-            return size() > MAX_TERRAIN_TILE_CACHE_SIZE;
+            if (size() <= MAX_TERRAIN_TILE_CACHE_SIZE) {
+                return false;
+            }
+            TerrainTile tile = eldest.getValue();
+            if (tile.dirty) {
+                queueTerrainTileSave(Minecraft.getInstance(), tile);
+            }
+            tile.closeTexture(Minecraft.getInstance());
+            return true;
         }
     };
-    private static final Set<Long> TERRAIN_TILE_DISK_MISSES = new HashSet<>();
     private static int savedModeIndex;
     private static int savedPavementIndex;
     private static int savedEdgeIndex;
@@ -171,7 +200,7 @@ public class TrackEditorScreen extends Screen {
         savedCenterZ = centerZ;
         savedEditY = editY;
         if (minecraft != null) {
-            flushDirtyTerrainTiles(minecraft.gameDirectory.toPath(), TERRAIN_CACHE_FLUSH_TILE_LIMIT);
+            flushDirtyTerrainTiles(minecraft, TERRAIN_CACHE_FLUSH_TILE_LIMIT);
         }
         super.onClose();
     }
@@ -363,6 +392,7 @@ public class TrackEditorScreen extends Screen {
     @Override
     public void tick() {
         flushPendingQueue();
+        processTerrainIoResults(TERRAIN_IO_COMPLETIONS_PER_TICK);
         sampleVisibleTerrain(TERRAIN_SAMPLES_PER_FRAME);
         flushTerrainCacheIfDue();
         if (notice != null && notice.ticksRemaining() > 0) {
@@ -411,6 +441,7 @@ public class TrackEditorScreen extends Screen {
         int centerTileX = tileCoord((int) Math.floor(centerX));
         int centerTileZ = tileCoord((int) Math.floor(centerZ));
         int maxRadius = Math.max(Math.max(Math.abs(centerTileX - minTileX), Math.abs(centerTileX - maxTileX)), Math.max(Math.abs(centerTileZ - minTileZ), Math.abs(centerTileZ - maxTileZ)));
+        int uploadsRemaining = TERRAIN_TEXTURE_UPLOADS_PER_FRAME;
         for (int radius = 0; radius <= maxRadius; radius++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dx = -radius; dx <= radius; dx++) {
@@ -422,46 +453,31 @@ public class TrackEditorScreen extends Screen {
                     if (tileX < minTileX || tileX > maxTileX || tileZ < minTileZ || tileZ > maxTileZ) {
                         continue;
                     }
-                    renderTerrainTile(graphics, map, terrainTile(tileX, tileZ, editY));
+                    uploadsRemaining = renderTerrainTile(graphics, map, terrainTile(tileX, tileZ, editY), uploadsRemaining);
                 }
             }
         }
     }
 
-    private void renderTerrainTile(GuiGraphics graphics, MapBounds map, TerrainTile tile) {
-        int renderStepBlocks = Math.max(1, (int) Math.ceil(blocksPerPixel()));
-        for (int localZ = 0; localZ < TERRAIN_TILE_BLOCKS; localZ += renderStepBlocks) {
-            int rowTop = worldToScreenY(tile.baseZ + localZ);
-            int rowBottom = worldToScreenY(tile.baseZ + Math.min(TERRAIN_TILE_BLOCKS, localZ + renderStepBlocks));
-            int top = Math.max(map.top, Math.min(rowTop, rowBottom));
-            int bottom = Math.min(map.bottom, Math.max(rowTop, rowBottom));
-            if (bottom <= top) {
-                bottom = Math.min(map.bottom, top + 1);
-            }
-            if (top >= map.bottom || bottom <= map.top) {
-                continue;
-            }
-            int runStart = 0;
-            int runColor = tile.colorAt(0, localZ);
-            for (int localX = renderStepBlocks; localX <= TERRAIN_TILE_BLOCKS; localX += renderStepBlocks) {
-                int color = localX < TERRAIN_TILE_BLOCKS ? tile.colorAt(localX, localZ) : Integer.MIN_VALUE;
-                if (color == runColor) {
-                    continue;
-                }
-                int runLeft = worldToScreenX(tile.baseX + runStart);
-                int runRight = worldToScreenX(tile.baseX + Math.min(TERRAIN_TILE_BLOCKS, localX));
-                int left = Math.max(map.left, Math.min(runLeft, runRight));
-                int right = Math.min(map.right, Math.max(runLeft, runRight));
-                if (right <= left) {
-                    right = Math.min(map.right, left + 1);
-                }
-                if (left < map.right && right > map.left) {
-                    graphics.fill(left, top, right, bottom, runColor);
-                }
-                runStart = localX;
-                runColor = color;
-            }
+    private int renderTerrainTile(GuiGraphics graphics, MapBounds map, TerrainTile tile, int uploadsRemaining) {
+        int left = Math.max(map.left, Math.min(worldToScreenX(tile.baseX), worldToScreenX(tile.baseX + TERRAIN_TILE_BLOCKS)));
+        int right = Math.min(map.right, Math.max(worldToScreenX(tile.baseX), worldToScreenX(tile.baseX + TERRAIN_TILE_BLOCKS)));
+        int top = Math.max(map.top, Math.min(worldToScreenY(tile.baseZ), worldToScreenY(tile.baseZ + TERRAIN_TILE_BLOCKS)));
+        int bottom = Math.min(map.bottom, Math.max(worldToScreenY(tile.baseZ), worldToScreenY(tile.baseZ + TERRAIN_TILE_BLOCKS)));
+        if (right <= left || bottom <= top) {
+            return uploadsRemaining;
         }
+        if (!tile.hasTexture() && !tile.hasSamples()) {
+            return uploadsRemaining;
+        }
+        if (uploadsRemaining > 0 && tile.uploadTexture(Minecraft.getInstance())) {
+            uploadsRemaining--;
+        }
+        Identifier location = tile.textureLocation();
+        if (location != null) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, location, left, top, 0.0f, 0.0f, right - left, bottom - top, TERRAIN_TILE_BLOCKS, TERRAIN_TILE_BLOCKS, TERRAIN_TILE_BLOCKS, TERRAIN_TILE_BLOCKS);
+        }
+        return uploadsRemaining;
     }
 
     private void renderGrid(GuiGraphics graphics, MapBounds map) {
@@ -995,25 +1011,28 @@ public class TrackEditorScreen extends Screen {
                     if (tileX < minTileX || tileX > maxTileX || tileZ < minTileZ || tileZ > maxTileZ) {
                         continue;
                     }
-                    remaining -= terrainTile(tileX, tileZ, fallbackY).sample(level, fallbackY, remaining);
+                    TerrainTile tile = terrainTile(tileX, tileZ, fallbackY);
+                    if (tile.loadingFromDisk()) {
+                        continue;
+                    }
+                    int tileBudget = Math.min(remaining, TERRAIN_TILE_SAMPLE_BURST);
+                    remaining -= tile.sample(level, fallbackY, tileBudget);
                 }
             }
         }
     }
 
     private static TerrainTile terrainTile(int tileX, int tileZ, int fallbackY) {
-        ensureTerrainCacheNamespace(Minecraft.getInstance());
+        Minecraft minecraft = Minecraft.getInstance();
+        ensureTerrainCacheNamespace(minecraft);
         long key = tileKey(tileX, tileZ);
         TerrainTile tile = TERRAIN_TILES.get(key);
         if (tile != null) {
             return tile;
         }
         tile = new TerrainTile(tileX, tileZ, fallbackY);
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft != null && !TERRAIN_TILE_DISK_MISSES.contains(key) && !loadTerrainTile(minecraft.gameDirectory.toPath(), tile)) {
-            TERRAIN_TILE_DISK_MISSES.add(key);
-        }
         TERRAIN_TILES.put(key, tile);
+        queueTerrainTileLoad(minecraft, tile);
         return tile;
     }
 
@@ -1050,7 +1069,7 @@ public class TrackEditorScreen extends Screen {
         }
         ensureTerrainCacheNamespace(minecraft);
         terrainCacheFlushTicks = 0;
-        flushDirtyTerrainTiles(minecraft.gameDirectory.toPath(), TERRAIN_CACHE_FLUSH_TILE_LIMIT);
+        flushDirtyTerrainTiles(minecraft, TERRAIN_CACHE_FLUSH_TILE_LIMIT);
     }
 
     private void rerenderNearbyTerrain() {
@@ -1281,6 +1300,7 @@ public class TrackEditorScreen extends Screen {
             preloadCenterZ = centerZ;
             preloadCenterY = centerY;
         }
+        processTerrainIoResults(TERRAIN_IO_COMPLETIONS_PER_TICK);
         int radiusTiles = Math.max(1, TERRAIN_PRELOAD_RADIUS_BLOCKS / TERRAIN_TILE_BLOCKS);
         int centerTileX = tileCoord(preloadCenterX);
         int centerTileZ = tileCoord(preloadCenterZ);
@@ -1297,8 +1317,15 @@ public class TrackEditorScreen extends Screen {
             return;
         }
         terrainCacheNamespace = namespace;
+        for (TerrainTile tile : TERRAIN_TILES.values()) {
+            tile.closeTexture(minecraft);
+        }
         TERRAIN_TILES.clear();
-        TERRAIN_TILE_DISK_MISSES.clear();
+        TERRAIN_TILE_LOADING.clear();
+        TERRAIN_TILE_IO_MISSES.clear();
+        synchronized (TERRAIN_TILE_LOAD_RESULTS) {
+            TERRAIN_TILE_LOAD_RESULTS.clear();
+        }
         terrainCacheLoaded = false;
         terrainCacheDirty = false;
         terrainCacheFlushTicks = 0;
@@ -1331,7 +1358,7 @@ public class TrackEditorScreen extends Screen {
 
     private static void saveTerrainCache(Path gameDir) {
         ensureTerrainCacheNamespace(Minecraft.getInstance());
-        flushDirtyTerrainTiles(gameDir, Integer.MAX_VALUE);
+        flushDirtyTerrainTiles(Minecraft.getInstance(), Integer.MAX_VALUE);
     }
 
     private static void loadTerrainCache(Path gameDir) {
@@ -1339,35 +1366,87 @@ public class TrackEditorScreen extends Screen {
         terrainCacheFlushTicks = 0;
     }
 
-    private static boolean loadTerrainTile(Path gameDir, TerrainTile tile) {
-        Path file = terrainTileFile(gameDir, tile.tileX, tile.tileZ);
-        if (!Files.exists(file)) {
-            return false;
+    private static void queueTerrainTileLoad(Minecraft minecraft, TerrainTile tile) {
+        if (minecraft == null || minecraft.gameDirectory == null) {
+            return;
         }
+        long key = tileKey(tile.tileX, tile.tileZ);
+        if (TERRAIN_TILE_IO_MISSES.contains(key) || TERRAIN_TILE_LOADING.contains(key) || TERRAIN_TILE_LOADING.size() >= MAX_TERRAIN_IO_QUEUE_SIZE) {
+            return;
+        }
+        TERRAIN_TILE_LOADING.add(key);
+        Path gameDir = minecraft.gameDirectory.toPath();
+        int tileX = tile.tileX;
+        int tileZ = tile.tileZ;
+        String namespace = terrainCacheNamespace;
+        TERRAIN_IO_EXECUTOR.execute(() -> {
+            TerrainTileLoadResult result = loadTerrainTileSnapshot(gameDir, namespace, tileX, tileZ);
+            synchronized (TERRAIN_TILE_LOAD_RESULTS) {
+                TERRAIN_TILE_LOAD_RESULTS.add(result);
+            }
+        });
+    }
+
+    private static TerrainTileLoadResult loadTerrainTileSnapshot(Path gameDir, String namespace, int tileX, int tileZ) {
+        Path file = terrainTileFile(gameDir, namespace, tileX, tileZ);
+        if (!Files.exists(file)) {
+            return TerrainTileLoadResult.missing(tileX, tileZ);
+        }
+        byte[] colorId = new byte[TERRAIN_TILE_BLOCKS * TERRAIN_TILE_BLOCKS];
+        short[] surfaceY = new short[TERRAIN_TILE_BLOCKS * TERRAIN_TILE_BLOCKS];
         try (DataInputStream in = new DataInputStream(new GZIPInputStream(Files.newInputStream(file)))) {
             if (in.readInt() != TERRAIN_TILE_CACHE_MAGIC || in.readInt() != TERRAIN_TILE_CACHE_VERSION) {
-                return false;
+                return TerrainTileLoadResult.missing(tileX, tileZ);
             }
-            if (in.readInt() != tile.tileX || in.readInt() != tile.tileZ) {
-                return false;
+            if (in.readInt() != tileX || in.readInt() != tileZ) {
+                return TerrainTileLoadResult.missing(tileX, tileZ);
             }
             int count = in.readInt();
             if (count < 0 || count > TERRAIN_TILE_BLOCKS * TERRAIN_TILE_BLOCKS) {
-                return false;
+                return TerrainTileLoadResult.missing(tileX, tileZ);
             }
             for (int i = 0; i < count; i++) {
                 int localX = in.readUnsignedByte();
                 int localZ = in.readUnsignedByte();
-                TerrainSample sample = new TerrainSample(in.readShort(), in.readByte(), true);
-                tile.loadSample(localX, localZ, sample);
+                int index = terrainTileIndex(localX, localZ);
+                surfaceY[index] = in.readShort();
+                colorId[index] = in.readByte();
             }
-            return true;
+            return TerrainTileLoadResult.loaded(tileX, tileZ, colorId, surfaceY);
         } catch (IOException ignored) {
-            return false;
+            return TerrainTileLoadResult.missing(tileX, tileZ);
         }
     }
 
-    private static int flushDirtyTerrainTiles(Path gameDir, int maxTiles) {
+    private static void processTerrainIoResults(int maxResults) {
+        int processed = 0;
+        while (processed < maxResults) {
+            TerrainTileLoadResult result;
+            synchronized (TERRAIN_TILE_LOAD_RESULTS) {
+                result = TERRAIN_TILE_LOAD_RESULTS.pollFirst();
+            }
+            if (result == null) {
+                return;
+            }
+            long key = tileKey(result.tileX(), result.tileZ());
+            TERRAIN_TILE_LOADING.remove(key);
+            if (!result.loaded()) {
+                TERRAIN_TILE_IO_MISSES.add(key);
+                processed++;
+                continue;
+            }
+            TerrainTile tile = TERRAIN_TILES.get(key);
+            if (tile != null) {
+                tile.loadSnapshot(result.colorId(), result.surfaceY());
+            }
+            processed++;
+        }
+    }
+
+    private static int flushDirtyTerrainTiles(Minecraft minecraft, int maxTiles) {
+        if (minecraft == null || minecraft.gameDirectory == null) {
+            return 0;
+        }
         int flushed = 0;
         boolean remainingDirty = false;
         for (TerrainTile tile : TERRAIN_TILES.values()) {
@@ -1378,12 +1457,9 @@ public class TrackEditorScreen extends Screen {
                 remainingDirty = true;
                 continue;
             }
-            if (saveTerrainTile(gameDir, tile)) {
-                tile.dirty = false;
-                flushed++;
-            } else {
-                remainingDirty = true;
-            }
+            queueTerrainTileSave(minecraft, tile);
+            tile.dirty = false;
+            flushed++;
         }
         terrainCacheDirty = remainingDirty;
         if (!terrainCacheDirty) {
@@ -1392,22 +1468,31 @@ public class TrackEditorScreen extends Screen {
         return flushed;
     }
 
-    private static boolean saveTerrainTile(Path gameDir, TerrainTile tile) {
-        int count = tile.sampleCount();
-        if (count <= 0) {
-            return true;
+    private static void queueTerrainTileSave(Minecraft minecraft, TerrainTile tile) {
+        if (minecraft == null || minecraft.gameDirectory == null) {
+            return;
         }
-        Path file = terrainTileFile(gameDir, tile.tileX, tile.tileZ);
+        TerrainTileSnapshot snapshot = tile.snapshot();
+        if (snapshot.count() <= 0) {
+            return;
+        }
+        Path gameDir = minecraft.gameDirectory.toPath();
+        String namespace = terrainCacheNamespace;
+        TERRAIN_IO_EXECUTOR.execute(() -> saveTerrainTileSnapshot(gameDir, namespace, snapshot));
+    }
+
+    private static boolean saveTerrainTileSnapshot(Path gameDir, String namespace, TerrainTileSnapshot snapshot) {
+        Path file = terrainTileFile(gameDir, namespace, snapshot.tileX(), snapshot.tileZ());
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
         try {
             Files.createDirectories(file.getParent());
             try (DataOutputStream out = new DataOutputStream(new GZIPOutputStream(Files.newOutputStream(tmp)))) {
                 out.writeInt(TERRAIN_TILE_CACHE_MAGIC);
                 out.writeInt(TERRAIN_TILE_CACHE_VERSION);
-                out.writeInt(tile.tileX);
-                out.writeInt(tile.tileZ);
-                out.writeInt(count);
-                tile.writeSamples(out);
+                out.writeInt(snapshot.tileX());
+                out.writeInt(snapshot.tileZ());
+                out.writeInt(snapshot.count());
+                snapshot.writeSamples(out);
             }
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
             return true;
@@ -1417,7 +1502,15 @@ public class TrackEditorScreen extends Screen {
     }
 
     private static Path terrainTileFile(Path gameDir, int tileX, int tileZ) {
-        return gameDir.resolve(TERRAIN_TILE_CACHE_DIR).resolve(terrainCacheNamespace).resolve(tileX + "," + tileZ + ".dat");
+        return terrainTileFile(gameDir, terrainCacheNamespace, tileX, tileZ);
+    }
+
+    private static Path terrainTileFile(Path gameDir, String namespace, int tileX, int tileZ) {
+        return gameDir.resolve(TERRAIN_TILE_CACHE_DIR).resolve(namespace).resolve(tileX + "," + tileZ + ".dat");
+    }
+
+    private static int terrainTileIndex(int localX, int localZ) {
+        return localZ * TERRAIN_TILE_BLOCKS + localX;
     }
 
     private record PendingEditorOperation(TrackEditorOperation operation, QueueReason reason) {
@@ -1455,7 +1548,12 @@ public class TrackEditorScreen extends Screen {
         private final short[] surfaceY = new short[TERRAIN_TILE_BLOCKS * TERRAIN_TILE_BLOCKS];
         private int nextSample;
         private boolean dirty;
+        private boolean textureDirty;
+        private boolean locallySampled;
         private boolean rerenderRequested;
+        private NativeImage textureImage;
+        private Identifier textureLocation;
+        private DynamicTexture texture;
 
         private TerrainTile(int tileX, int tileZ, int fallbackY) {
             this.tileX = tileX;
@@ -1507,6 +1605,10 @@ public class TrackEditorScreen extends Screen {
             return colorId[index] == 0 ? null : new TerrainSample(surfaceY[index], colorId[index], true);
         }
 
+        private boolean loadingFromDisk() {
+            return TERRAIN_TILE_LOADING.contains(tileKey(tileX, tileZ));
+        }
+
         private int colorAt(int localX, int localZ) {
             int index = index(Math.max(0, Math.min(TERRAIN_TILE_BLOCKS - 1, localX)), Math.max(0, Math.min(TERRAIN_TILE_BLOCKS - 1, localZ)));
             return colorForId(colorId[index]);
@@ -1525,42 +1627,131 @@ public class TrackEditorScreen extends Screen {
             surfaceY[index] = (short) sample.surfaceY();
             colorId[index] = sample.colorId();
             dirty = true;
+            textureDirty = true;
+            locallySampled = true;
             if (index == nextSample) {
                 advanceNextSample();
             }
         }
 
-        private void loadSample(int localX, int localZ, TerrainSample sample) {
-            if (localX < 0 || localX >= TERRAIN_TILE_BLOCKS || localZ < 0 || localZ >= TERRAIN_TILE_BLOCKS) {
+        private void advanceNextSample() {
+            if (rerenderRequested) {
                 return;
             }
-            int index = index(localX, localZ);
-            surfaceY[index] = (short) sample.surfaceY();
-            colorId[index] = sample.colorId();
-            if (index == nextSample) {
-                advanceNextSample();
+            int checked = 0;
+            while (checked < colorId.length && colorId[nextSample] != 0) {
+                nextSample = (nextSample + 1) % colorId.length;
+                checked++;
             }
+        }
+
+        private boolean hasSamples() {
+            for (byte color : colorId) {
+                if (color != 0) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean hasTexture() {
+            return textureLocation != null;
+        }
+
+        private Identifier textureLocation() {
+            return textureLocation;
+        }
+
+        private boolean uploadTexture(Minecraft minecraft) {
+            if (minecraft == null || !textureDirty || !hasSamples()) {
+                return false;
+            }
+            if (textureImage == null) {
+                textureImage = new NativeImage(TERRAIN_TILE_BLOCKS, TERRAIN_TILE_BLOCKS, true);
+            }
+            for (int localZ = 0; localZ < TERRAIN_TILE_BLOCKS; localZ++) {
+                for (int localX = 0; localX < TERRAIN_TILE_BLOCKS; localX++) {
+                    textureImage.setPixel(localX, localZ, colorForId(colorId[index(localX, localZ)]));
+                }
+            }
+            Identifier location = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "dynamic/track_editor/terrain/" + terrainTextureId(tileX, tileZ));
+            if (texture == null) {
+                textureLocation = location;
+                texture = new DynamicTexture(() -> "openwheelracing-track-editor-terrain-" + terrainTextureId(tileX, tileZ), textureImage);
+                minecraft.getTextureManager().register(textureLocation, texture);
+            }
+            texture.upload();
+            textureDirty = false;
+            return true;
+        }
+
+        private void closeTexture(Minecraft minecraft) {
+            if (minecraft != null && textureLocation != null) {
+                minecraft.getTextureManager().release(textureLocation);
+            }
+            textureLocation = null;
+            texture = null;
+            if (textureImage != null) {
+                textureImage.close();
+                textureImage = null;
+            }
+            textureDirty = false;
+        }
+
+        private TerrainTileSnapshot snapshot() {
+            byte[] colorCopy = colorId.clone();
+            short[] surfaceCopy = surfaceY.clone();
+            int count = 0;
+            for (byte color : colorCopy) {
+                if (color != 0) {
+                    count++;
+                }
+            }
+            return new TerrainTileSnapshot(tileX, tileZ, colorCopy, surfaceCopy, count);
+        }
+
+        private void loadSnapshot(byte[] loadedColorId, short[] loadedSurfaceY) {
+            boolean changed = false;
+            for (int i = 0; i < colorId.length && i < loadedColorId.length && i < loadedSurfaceY.length; i++) {
+                if (loadedColorId[i] == 0 || (locallySampled && colorId[i] != 0)) {
+                    continue;
+                }
+                if (colorId[i] != loadedColorId[i] || surfaceY[i] != loadedSurfaceY[i]) {
+                    colorId[i] = loadedColorId[i];
+                    surfaceY[i] = loadedSurfaceY[i];
+                    changed = true;
+                }
+            }
+            advanceNextSample();
+            textureDirty |= changed;
         }
 
         private void requestRerender() {
             rerenderRequested = true;
             nextSample = 0;
+            textureDirty = true;
         }
 
-        private int sampleCount() {
-            int count = 0;
-            for (byte color : colorId) {
-                if (color != 0) {
-                    count++;
-                }
-            }
-            return count;
+        private int index(int localX, int localZ) {
+            return terrainTileIndex(localX, localZ);
+        }
+    }
+
+    private record TerrainTileLoadResult(int tileX, int tileZ, boolean loaded, byte[] colorId, short[] surfaceY) {
+        private static TerrainTileLoadResult missing(int tileX, int tileZ) {
+            return new TerrainTileLoadResult(tileX, tileZ, false, null, null);
         }
 
+        private static TerrainTileLoadResult loaded(int tileX, int tileZ, byte[] colorId, short[] surfaceY) {
+            return new TerrainTileLoadResult(tileX, tileZ, true, colorId, surfaceY);
+        }
+    }
+
+    private record TerrainTileSnapshot(int tileX, int tileZ, byte[] colorId, short[] surfaceY, int count) {
         private void writeSamples(DataOutputStream out) throws IOException {
             for (int localZ = 0; localZ < TERRAIN_TILE_BLOCKS; localZ++) {
                 for (int localX = 0; localX < TERRAIN_TILE_BLOCKS; localX++) {
-                    int index = index(localX, localZ);
+                    int index = terrainTileIndex(localX, localZ);
                     if (colorId[index] == 0) {
                         continue;
                     }
@@ -1571,18 +1762,15 @@ public class TrackEditorScreen extends Screen {
                 }
             }
         }
+    }
 
-        private void advanceNextSample() {
-            int checked = 0;
-            while (checked < colorId.length && colorId[nextSample] != 0) {
-                nextSample = (nextSample + 1) % colorId.length;
-                checked++;
-            }
-        }
+    private static String terrainTextureId(int tileX, int tileZ) {
+        return sanitizeResourcePath(terrainCacheNamespace) + "/" + tileX + "_" + tileZ;
+    }
 
-        private int index(int localX, int localZ) {
-            return localZ * TERRAIN_TILE_BLOCKS + localX;
-        }
+    private static String sanitizeResourcePath(String value) {
+        String sanitized = value.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9/._-]+", "_");
+        return sanitized.isEmpty() ? "unknown" : sanitized;
     }
 
     private class ClearHeightSlider extends AbstractSliderButton {

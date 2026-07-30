@@ -20,8 +20,13 @@ public final class OWRCreativeTabs {
         .icon(PrototypeCarItem::createWithDefaultSetup)
         .displayItems((parameters, output) -> {
             output.accept(OWRBlocks.CAR_ASSEMBLY_WORKSTATION_ITEM.get());
+            output.accept(OWRBlocks.CAR_CONSTRUCTION_STATION_ITEM.get());
+            output.accept(OWRBlocks.CAR_SETUP_STATION_ITEM.get());
+            output.accept(OWRBlocks.CAR_LIVERY_STATION_ITEM.get());
             output.accept(OWRBlocks.REFINERY_ITEM.get());
             output.accept(OWRBlocks.RACE_DIRECTOR_ITEM.get());
+            output.accept(OWRBlocks.RACE_BOARD_TERMINAL_ITEM.get());
+            output.accept(OWRBlocks.TEAM_TERMINAL_ITEM.get());
             output.accept(OWRBlocks.ASPHALT_TRACK_ITEM.get());
             output.accept(OWRBlocks.ASPHALT_TRACK_SLAB_ITEM.get());
             output.accept(OWRBlocks.KERB_ITEM.get());

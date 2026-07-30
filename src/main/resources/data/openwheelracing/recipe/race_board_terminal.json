@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IGI",
+    "RBR",
+    "III"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "G": "minecraft:glass_pane",
+    "R": "minecraft:redstone",
+    "B": "openwheelracing:race_director"
+  },
+  "result": {
+    "id": "openwheelracing:race_board_terminal",
+    "count": 1
+  }
+}

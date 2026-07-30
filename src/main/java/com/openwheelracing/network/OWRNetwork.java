@@ -2,25 +2,23 @@ package com.openwheelracing.network;
 
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.OpenwheelRacing;
-import com.openwheelracing.content.car.CarLivery;
-import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.car.CarLiveryTexture;
-import com.openwheelracing.content.car.PrototypeCarSetup;
-import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
+import com.openwheelracing.content.race.RaceFlagMode;
+import com.openwheelracing.content.race.TeamCarRow;
 import com.openwheelracing.client.hud.LapRankingClient;
+import com.openwheelracing.client.hud.RaceFlagClient;
 import com.openwheelracing.content.track.TrackEditorMaterial;
 import com.openwheelracing.content.track.TrackEditorMode;
 import com.openwheelracing.content.track.TrackEditorOperation;
 import com.openwheelracing.content.track.TrackEditorPlacementService;
 import com.openwheelracing.content.track.TrackEditorPreset;
 import com.openwheelracing.content.track.TrackEditorUndoStore;
-import com.openwheelracing.registry.OWRDataComponents;
 import com.openwheelracing.registry.OWRItems;
 import java.lang.reflect.Method;
 import java.util.List;
@@ -45,7 +43,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "3";
+    private static final String PROTOCOL = "4";
 
     private OWRNetwork() {
     }
@@ -72,12 +70,15 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorToggleRuleMessage.TYPE, codec(RaceDirectorToggleRuleMessage::encode, RaceDirectorToggleRuleMessage::decode), RaceDirectorToggleRuleMessage::handle);
         registrar.playToServer(RaceDirectorSetMinLapTicksMessage.TYPE, codec(RaceDirectorSetMinLapTicksMessage::encode, RaceDirectorSetMinLapTicksMessage::decode), RaceDirectorSetMinLapTicksMessage::handle);
         registrar.playToServer(RaceDirectorSetErsLimitMessage.TYPE, codec(RaceDirectorSetErsLimitMessage::encode, RaceDirectorSetErsLimitMessage::decode), RaceDirectorSetErsLimitMessage::handle);
+        registrar.playToServer(RaceDirectorSetGlobalFlagMessage.TYPE, codec(RaceDirectorSetGlobalFlagMessage::encode, RaceDirectorSetGlobalFlagMessage::decode), RaceDirectorSetGlobalFlagMessage::handle);
         registrar.playToServer(RaceDirectorCycleConditionModifierMessage.TYPE, codec(RaceDirectorCycleConditionModifierMessage::encode, RaceDirectorCycleConditionModifierMessage::decode), RaceDirectorCycleConditionModifierMessage::handle);
         registrar.playToServer(RaceDirectorStartSessionMessage.TYPE, codec(RaceDirectorStartSessionMessage::encode, RaceDirectorStartSessionMessage::decode), RaceDirectorStartSessionMessage::handle);
         registrar.playToServer(RaceDirectorSetArchiveModeMessage.TYPE, codec(RaceDirectorSetArchiveModeMessage::encode, RaceDirectorSetArchiveModeMessage::decode), RaceDirectorSetArchiveModeMessage::handle);
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
+        registrar.playToServer(TeamTerminalSenseCarsMessage.TYPE, codec(TeamTerminalSenseCarsMessage::encode, TeamTerminalSenseCarsMessage::decode), TeamTerminalSenseCarsMessage::handle);
         registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
         registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
+        registrar.playToClient(RaceFlagUpdateMessage.TYPE, codec(RaceFlagUpdateMessage::encode, RaceFlagUpdateMessage::decode), RaceFlagUpdateMessage::handle);
         registrar.playToClient(RankingBoardMessage.TYPE, codec(RankingBoardMessage::encode, RankingBoardMessage::decode), RankingBoardMessage::handle);
     }
 
@@ -152,23 +153,12 @@ public final class OWRNetwork {
         private static void handle(TuneCarMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu) || !menu.allowsSetup()) {
                     return;
                 }
-                ItemStack stack = menu.getOutputStack();
-                if (!stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get())) {
-                    return;
+                if (menu.queueSetupTune(message.slot, message.delta)) {
+                    menu.slotsChanged(menu.getContainer());
                 }
-                PrototypeCarSetup setup = PrototypeCarItem.getSetup(stack);
-                PrototypeCarSetup updated = switch (message.slot) {
-                    case 0 -> new PrototypeCarSetup(setup.power() + message.delta, setup.grip(), setup.aero(), setup.gearing());
-                    case 1 -> new PrototypeCarSetup(setup.power(), setup.grip() + message.delta, setup.aero(), setup.gearing());
-                    case 2 -> new PrototypeCarSetup(setup.power(), setup.grip(), setup.aero() + message.delta, setup.gearing());
-                    case 3 -> new PrototypeCarSetup(setup.power(), setup.grip(), setup.aero(), setup.gearing() + message.delta);
-                    default -> setup;
-                };
-                stack.set(OWRDataComponents.CAR_SETUP.get(), updated);
-                menu.slotsChanged(menu.getContainer());
             });
         }
     }
@@ -191,20 +181,16 @@ public final class OWRNetwork {
         private static void handle(RepairCarMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu) || !menu.allowsSetup()) {
                     return;
                 }
-                ItemStack stack = menu.getOutputStack();
-                if (!stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get())) {
+                if (!player.getInventory().contains(new ItemStack(OWRItems.RUBBER.get()))) {
                     return;
                 }
-                int damage = PrototypeCarItem.getCarDamage(stack);
-                if (damage <= 0 || !player.getInventory().contains(new ItemStack(OWRItems.RUBBER.get()))) {
-                    return;
+                if (menu.queueRepair()) {
+                    player.getInventory().clearOrCountMatchingItems(item -> item.is(OWRItems.RUBBER.get()), 1, player.inventoryMenu.getCraftSlots());
+                    menu.slotsChanged(menu.getContainer());
                 }
-                player.getInventory().clearOrCountMatchingItems(item -> item.is(OWRItems.RUBBER.get()), 1, player.inventoryMenu.getCraftSlots());
-                stack.set(OWRDataComponents.CAR_DAMAGE.get(), Math.max(0, damage - 25));
-                menu.slotsChanged(menu.getContainer());
             });
         }
     }
@@ -228,19 +214,12 @@ public final class OWRNetwork {
         private static void handle(CycleLiveryMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu) || !menu.allowsLivery()) {
                     return;
                 }
-                ItemStack stack = menu.getOutputStack();
-                if (!stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get())) {
-                    return;
+                if (menu.queueLiveryPreset(message.delta)) {
+                    menu.slotsChanged(menu.getContainer());
                 }
-                int current = PrototypeCarItem.getLivery(stack);
-                int livery = CarLivery.wrapIndex(current + message.delta);
-                CarLiveryColors colors = CarLiveryColors.fromPreset(CarLivery.fromIndex(livery));
-                stack.set(OWRDataComponents.CAR_LIVERY.get(), livery);
-                PrototypeCarItem.setLiveryColors(stack, colors);
-                menu.slotsChanged(menu.getContainer());
             });
         }
     }
@@ -265,15 +244,12 @@ public final class OWRNetwork {
         private static void handle(SetLiveryColorMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu) || !menu.allowsLivery()) {
                     return;
                 }
-                ItemStack stack = menu.getOutputStack();
-                if (!stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get())) {
-                    return;
+                if (menu.queueLiveryColor(message.channel, message.color)) {
+                    menu.slotsChanged(menu.getContainer());
                 }
-                PrototypeCarItem.setLiveryColors(stack, PrototypeCarItem.getLiveryColors(stack).withChannel(message.channel, message.color));
-                menu.slotsChanged(menu.getContainer());
             });
         }
     }
@@ -297,15 +273,12 @@ public final class OWRNetwork {
         private static void handle(SetLiveryTextureMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu) || !menu.allowsLivery()) {
                     return;
                 }
-                ItemStack stack = menu.getOutputStack();
-                if (!stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get())) {
-                    return;
+                if (menu.queueLiveryTexture(message.textureId)) {
+                    menu.slotsChanged(menu.getContainer());
                 }
-                PrototypeCarItem.setLiveryTexture(stack, new CarLiveryTexture(message.textureId));
-                menu.slotsChanged(menu.getContainer());
             });
         }
     }
@@ -760,6 +733,13 @@ public final class OWRNetwork {
         PacketDistributor.sendToPlayer(player, new RaceDirectorSnapshotMessage(snapshot));
     }
 
+    public static void broadcastRaceFlag(ServerLevel level, RaceFlagMode flag, boolean announce) {
+        RaceFlagUpdateMessage message = new RaceFlagUpdateMessage(flag.ordinal(), announce);
+        for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
+            PacketDistributor.sendToPlayer(player, message);
+        }
+    }
+
     public static void broadcastRankingBoard(net.minecraft.server.MinecraftServer server, net.minecraft.server.level.ServerLevel level) {
         OWRLapRecords records = OWRLapRecords.get(level);
         RankingBoardMessage msg = new RankingBoardMessage(records.getActiveSessionName(), records.getActiveSessionBestLapsSorted());
@@ -789,6 +769,7 @@ public final class OWRNetwork {
             buffer.writeInt(snapshot.maxBalancedDeployKw());
             buffer.writeInt(snapshot.maxAttackDeployKw());
             buffer.writeInt(snapshot.maxHarvestNegativeKw());
+            buffer.writeInt(snapshot.globalFlag().ordinal());
             buffer.writeDouble(snapshot.carDamageModifier());
             buffer.writeDouble(snapshot.tyreWearModifier());
             buffer.writeLong(snapshot.activeSessionId());
@@ -797,6 +778,10 @@ public final class OWRNetwork {
             buffer.writeVarInt(snapshot.laps().size());
             for (RaceDirectorLapRow row : snapshot.laps()) {
                 RaceDirectorLapRow.encode(row, buffer);
+            }
+            buffer.writeVarInt(snapshot.teamCars().size());
+            for (TeamCarRow row : snapshot.teamCars()) {
+                TeamCarRow.encode(row, buffer);
             }
         }
 
@@ -812,6 +797,7 @@ public final class OWRNetwork {
             int maxBalancedDeployKw = buffer.readInt();
             int maxAttackDeployKw = buffer.readInt();
             int maxHarvestNegativeKw = buffer.readInt();
+            RaceFlagMode globalFlag = RaceFlagMode.fromOrdinal(buffer.readInt());
             double carDamageModifier = buffer.readDouble();
             double tyreWearModifier = buffer.readDouble();
             long activeSessionId = buffer.readLong();
@@ -822,11 +808,38 @@ public final class OWRNetwork {
             for (int index = 0; index < lapCount; index++) {
                 laps.add(RaceDirectorLapRow.decode(buffer));
             }
-            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, carDamageModifier, tyreWearModifier, activeSessionId, activeSessionName, archiveMode, laps));
+            int carCount = buffer.readVarInt();
+            java.util.ArrayList<TeamCarRow> teamCars = new java.util.ArrayList<>(carCount);
+            for (int index = 0; index < carCount; index++) {
+                teamCars.add(TeamCarRow.decode(buffer));
+            }
+            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier, activeSessionId, activeSessionName, archiveMode, laps, teamCars));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {
             context.enqueueWork(() -> applyRaceDirectorSnapshot(message.snapshot));
+        }
+    }
+
+    public record RaceFlagUpdateMessage(int flag, boolean announce) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceFlagUpdateMessage> TYPE = payloadType("race_flag_update_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RaceFlagUpdateMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.flag);
+            buffer.writeBoolean(message.announce);
+        }
+
+        private static RaceFlagUpdateMessage decode(FriendlyByteBuf buffer) {
+            return new RaceFlagUpdateMessage(buffer.readInt(), buffer.readBoolean());
+        }
+
+        private static void handle(RaceFlagUpdateMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> RaceFlagClient.setGlobalFlag(RaceFlagMode.fromOrdinal(message.flag), message.announce));
         }
     }
 
@@ -852,7 +865,7 @@ public final class OWRNetwork {
         private static void handle(RaceDirectorToggleRuleMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu)) {
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
                     return;
                 }
                 OWRRaceControlState state = OWRRaceControlState.get(player.level());
@@ -884,7 +897,7 @@ public final class OWRNetwork {
         private static void handle(RaceDirectorSetMinLapTicksMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu)) {
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
                     return;
                 }
                 OWRRaceControlState.get(player.level()).setMinimumValidLapTicks(message.ticks);
@@ -917,7 +930,7 @@ public final class OWRNetwork {
         private static void handle(RaceDirectorSetErsLimitMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
                     return;
                 }
                 OWRRaceControlState state = OWRRaceControlState.get(player.level());
@@ -931,6 +944,40 @@ public final class OWRNetwork {
                 }
                 if (player.getVehicle() instanceof OpenwheelCarEntity car) {
                     car.applyErsLimits(state.getMaxErsCapacityMj(), state.getMaxBalancedDeployKw(), state.getMaxAttackDeployKw(), state.getMaxHarvestNegativeKw());
+                }
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
+    public record RaceDirectorSetGlobalFlagMessage(int flag) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSetGlobalFlagMessage> TYPE = payloadType("race_director_set_global_flag_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RaceDirectorSetGlobalFlagMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.flag);
+        }
+
+        private static RaceDirectorSetGlobalFlagMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorSetGlobalFlagMessage(buffer.readInt());
+        }
+
+        private static void handle(RaceDirectorSetGlobalFlagMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
+                    return;
+                }
+                OWRRaceControlState state = OWRRaceControlState.get(player.level());
+                RaceFlagMode requested = RaceFlagMode.fromOrdinal(message.flag);
+                RaceFlagMode next = state.getGlobalFlag() == requested ? RaceFlagMode.GREEN : requested;
+                state.setGlobalFlag(next);
+                if (player.level() instanceof ServerLevel serverLevel) {
+                    broadcastRaceFlag(serverLevel, next, true);
                 }
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });
@@ -960,7 +1007,7 @@ public final class OWRNetwork {
         private static void handle(RaceDirectorCycleConditionModifierMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
                     return;
                 }
                 OWRRaceControlState state = OWRRaceControlState.get(player.level());
@@ -993,7 +1040,7 @@ public final class OWRNetwork {
         private static void handle(RaceDirectorStartSessionMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
                     return;
                 }
                 menu.setArchiveMode(false);
@@ -1026,7 +1073,7 @@ public final class OWRNetwork {
         private static void handle(RaceDirectorSetArchiveModeMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
                     return;
                 }
                 menu.setArchiveMode(message.archiveMode);
@@ -1054,10 +1101,36 @@ public final class OWRNetwork {
         private static void handle(RaceDirectorSetPageMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
                     return;
                 }
                 menu.setPage(message.page);
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
+    public record TeamTerminalSenseCarsMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<TeamTerminalSenseCarsMessage> TYPE = payloadType("team_terminal_sense_cars_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(TeamTerminalSenseCarsMessage message, FriendlyByteBuf buffer) {
+        }
+
+        private static TeamTerminalSenseCarsMessage decode(FriendlyByteBuf buffer) {
+            return new TeamTerminalSenseCarsMessage();
+        }
+
+        private static void handle(TeamTerminalSenseCarsMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.showsTeamTerminal()) {
+                    return;
+                }
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });
         }
@@ -1082,7 +1155,7 @@ public final class OWRNetwork {
         private static void handle(RaceDirectorInvalidateLapMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
-                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu)) {
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
                     return;
                 }
                 OWRLapRecords records = OWRLapRecords.get(player.level());

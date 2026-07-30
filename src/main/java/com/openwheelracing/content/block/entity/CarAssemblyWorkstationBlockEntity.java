@@ -1,5 +1,6 @@
 package com.openwheelracing.content.block.entity;
 
+import com.openwheelracing.content.block.CarAssemblyWorkstationBlock;
 import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.item.TyreItem;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
@@ -8,6 +9,7 @@ import com.openwheelracing.content.recipe.CarAssemblyRecipe;
 import com.openwheelracing.registry.OWRBlockEntities;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
+import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.openwheelracing.registry.OWRItems;
 import com.openwheelracing.registry.OWRRecipes;
@@ -40,9 +42,22 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
     public static final int SLOT_OUTPUT = 6;
     public static final int SLOT_COUNT = 7;
     private static final int MAX_PROGRESS = 100;
+    private static final int OPERATION_NONE = 0;
+    private static final int OPERATION_SETUP = 1;
+    private static final int OPERATION_REPAIR = 2;
+    private static final int OPERATION_LIVERY = 3;
+    private static final int LIVERY_ACTION_PRESET = 0;
+    private static final int LIVERY_ACTION_COLOR = 1;
+    private static final int LIVERY_ACTION_TEXTURE = 2;
 
     private final NonNullList<ItemStack> items = NonNullList.withSize(SLOT_COUNT, ItemStack.EMPTY);
+    private final CarWorkstationType workstationType;
     private int progress;
+    private int pendingOperation;
+    private int pendingAction;
+    private int pendingValue;
+    private int pendingExtra;
+    private String pendingText = "";
 
     private final ContainerData data = new ContainerData() {
         @Override
@@ -68,32 +83,126 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
     };
 
     public CarAssemblyWorkstationBlockEntity(BlockPos pos, BlockState state) {
-        super(OWRBlockEntities.CAR_ASSEMBLY_WORKSTATION.get(), pos, state);
+        this(pos, state, CarWorkstationType.LEGACY);
+    }
+
+    public CarAssemblyWorkstationBlockEntity(BlockPos pos, BlockState state, CarWorkstationType workstationType) {
+        super(OWRBlockEntities.typeFor(workstationType).get(), pos, state);
+        this.workstationType = workstationType;
     }
 
     public static void serverTick(Level level, BlockPos pos, BlockState state, CarAssemblyWorkstationBlockEntity workstation) {
+        boolean running = false;
+        if (workstation.pendingOperation != OPERATION_NONE) {
+            if (!workstation.canRunPendingOperation()) {
+                workstation.clearPendingOperation();
+            } else {
+                running = true;
+                workstation.progress++;
+                if (workstation.progress >= workstation.getAssemblyTime()) {
+                    workstation.applyPendingOperation();
+                    workstation.clearPendingOperation();
+                    running = false;
+                }
+            }
+            workstation.setWorkingState(level, pos, state, running);
+            workstation.setChanged();
+            return;
+        }
+        if (!workstation.workstationType.allowsConstruction()) {
+            workstation.progress = 0;
+            workstation.setWorkingState(level, pos, state, false);
+            return;
+        }
         CarAssemblyRecipe recipe = workstation.getRecipe(level);
         if (workstation.canAssemble(recipe)) {
+            running = true;
             workstation.progress++;
-            if (workstation.progress >= recipe.assemblyTime()) {
+            if (workstation.progress >= workstation.getAssemblyTime()) {
                 workstation.assembleCar(recipe);
                 workstation.progress = 0;
+                running = false;
             }
         } else {
             workstation.progress = 0;
         }
+        workstation.setWorkingState(level, pos, state, running);
         workstation.setChanged();
+    }
+
+    public CarWorkstationType getWorkstationType() {
+        return workstationType;
     }
 
     public ContainerData getData() {
         return data;
     }
 
+    public boolean queueSetupTune(int slot, int delta) {
+        if (!workstationType.allowsSetup() || pendingOperation != OPERATION_NONE || !hasCarOutput() || slot < 0 || slot > 3 || delta == 0) {
+            return false;
+        }
+        pendingOperation = OPERATION_SETUP;
+        pendingAction = slot;
+        pendingValue = delta;
+        progress = 0;
+        setChanged();
+        return true;
+    }
+
+    public boolean queueRepair() {
+        ItemStack stack = getItem(SLOT_OUTPUT);
+        if (!workstationType.allowsSetup() || pendingOperation != OPERATION_NONE || !hasCarOutput() || PrototypeCarItem.getCarDamage(stack) <= 0) {
+            return false;
+        }
+        pendingOperation = OPERATION_REPAIR;
+        progress = 0;
+        setChanged();
+        return true;
+    }
+
+    public boolean queueLiveryPreset(int delta) {
+        if (!workstationType.allowsLivery() || pendingOperation != OPERATION_NONE || !hasCarOutput() || delta == 0) {
+            return false;
+        }
+        pendingOperation = OPERATION_LIVERY;
+        pendingAction = LIVERY_ACTION_PRESET;
+        pendingValue = delta;
+        progress = 0;
+        setChanged();
+        return true;
+    }
+
+    public boolean queueLiveryColor(int channel, int color) {
+        if (!workstationType.allowsLivery() || pendingOperation != OPERATION_NONE || !hasCarOutput() || channel < 0 || channel > 2) {
+            return false;
+        }
+        pendingOperation = OPERATION_LIVERY;
+        pendingAction = LIVERY_ACTION_COLOR;
+        pendingValue = channel;
+        pendingExtra = color;
+        progress = 0;
+        setChanged();
+        return true;
+    }
+
+    public boolean queueLiveryTexture(String textureId) {
+        if (!workstationType.allowsLivery() || pendingOperation != OPERATION_NONE || !hasCarOutput()) {
+            return false;
+        }
+        pendingOperation = OPERATION_LIVERY;
+        pendingAction = LIVERY_ACTION_TEXTURE;
+        pendingText = CarLiveryTexture.sanitize(textureId);
+        progress = 0;
+        setChanged();
+        return true;
+    }
+
     public boolean isValidForSlot(int slot, ItemStack stack) {
         if (slot == SLOT_OUTPUT) {
-            return stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get()) && stack.getCount() == 1;
+            return workstationType != CarWorkstationType.CONSTRUCTION && stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get()) && stack.getCount() == 1;
         }
-        return stack.is(requiredItemForSlot(slot));
+        return workstationType.allowsConstruction() && stack.is(requiredItemForSlot(slot));
     }
 
     private boolean canAssemble(CarAssemblyRecipe recipe) {
@@ -137,8 +246,80 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
         }
     }
 
+    private boolean hasCarOutput() {
+        return getItem(SLOT_OUTPUT).is(OWRItems.PROTOTYPE_CAR_SPAWN.get());
+    }
+
+    private boolean canRunPendingOperation() {
+        if (!hasCarOutput()) {
+            return false;
+        }
+        return switch (pendingOperation) {
+            case OPERATION_SETUP -> workstationType.allowsSetup();
+            case OPERATION_REPAIR -> workstationType.allowsSetup() && PrototypeCarItem.getCarDamage(getItem(SLOT_OUTPUT)) > 0;
+            case OPERATION_LIVERY -> workstationType.allowsLivery();
+            default -> false;
+        };
+    }
+
+    private void applyPendingOperation() {
+        ItemStack stack = getItem(SLOT_OUTPUT);
+        switch (pendingOperation) {
+            case OPERATION_SETUP -> applySetupTune(stack);
+            case OPERATION_REPAIR -> stack.set(OWRDataComponents.CAR_DAMAGE.get(), Math.max(0, PrototypeCarItem.getCarDamage(stack) - 25));
+            case OPERATION_LIVERY -> applyLiveryOperation(stack);
+            default -> {
+            }
+        }
+    }
+
+    private void applySetupTune(ItemStack stack) {
+        PrototypeCarSetup setup = PrototypeCarItem.getSetup(stack);
+        PrototypeCarSetup updated = switch (pendingAction) {
+            case 0 -> new PrototypeCarSetup(setup.power() + pendingValue, setup.grip(), setup.aero(), setup.gearing());
+            case 1 -> new PrototypeCarSetup(setup.power(), setup.grip() + pendingValue, setup.aero(), setup.gearing());
+            case 2 -> new PrototypeCarSetup(setup.power(), setup.grip(), setup.aero() + pendingValue, setup.gearing());
+            case 3 -> new PrototypeCarSetup(setup.power(), setup.grip(), setup.aero(), setup.gearing() + pendingValue);
+            default -> setup;
+        };
+        stack.set(OWRDataComponents.CAR_SETUP.get(), updated);
+    }
+
+    private void applyLiveryOperation(ItemStack stack) {
+        switch (pendingAction) {
+            case LIVERY_ACTION_PRESET -> {
+                int livery = CarLivery.wrapIndex(PrototypeCarItem.getLivery(stack) + pendingValue);
+                CarLiveryColors colors = CarLiveryColors.fromPreset(CarLivery.fromIndex(livery));
+                stack.set(OWRDataComponents.CAR_LIVERY.get(), livery);
+                PrototypeCarItem.setLiveryColors(stack, colors);
+            }
+            case LIVERY_ACTION_COLOR -> PrototypeCarItem.setLiveryColors(stack, PrototypeCarItem.getLiveryColors(stack).withChannel(pendingValue, pendingExtra));
+            case LIVERY_ACTION_TEXTURE -> PrototypeCarItem.setLiveryTexture(stack, new CarLiveryTexture(pendingText));
+            default -> {
+            }
+        }
+    }
+
+    private void clearPendingOperation() {
+        pendingOperation = OPERATION_NONE;
+        pendingAction = 0;
+        pendingValue = 0;
+        pendingExtra = 0;
+        pendingText = "";
+        progress = 0;
+    }
+
+    private void setWorkingState(Level level, BlockPos pos, BlockState state, boolean running) {
+        if (state.hasProperty(CarAssemblyWorkstationBlock.LIT) && state.getValue(CarAssemblyWorkstationBlock.LIT) != running) {
+            level.setBlock(pos, state.setValue(CarAssemblyWorkstationBlock.LIT, running), 3);
+        }
+    }
+
     private int getAssemblyTime() {
-        return level == null ? MAX_PROGRESS : Math.max(1, getRecipe(level) == null ? MAX_PROGRESS : getRecipe(level).assemblyTime());
+        if (pendingOperation != OPERATION_NONE) {
+            return pendingOperation == OPERATION_SETUP && workstationType.allowsSetup() || pendingOperation == OPERATION_REPAIR && workstationType.allowsSetup() || pendingOperation == OPERATION_LIVERY && workstationType.allowsLivery() ? workstationType.progressTicks() : MAX_PROGRESS;
+        }
+        return workstationType.allowsConstruction() ? workstationType.progressTicks() : MAX_PROGRESS;
     }
 
     private @Nullable CarAssemblyRecipe getRecipe(Level level) {
@@ -218,7 +399,7 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
 
     @Override
     public Component getDisplayName() {
-        return Component.translatable("container.openwheelracing.car_assembly_workstation");
+        return Component.translatable(workstationType.containerKey());
     }
 
     @Override
@@ -231,6 +412,11 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
         super.saveAdditional(output);
         ContainerHelper.saveAllItems(output, items);
         output.putInt("Progress", progress);
+        output.putInt("PendingOperation", pendingOperation);
+        output.putInt("PendingAction", pendingAction);
+        output.putInt("PendingValue", pendingValue);
+        output.putInt("PendingExtra", pendingExtra);
+        output.putString("PendingText", pendingText);
     }
 
     @Override
@@ -238,5 +424,10 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
         super.loadAdditional(input);
         ContainerHelper.loadAllItems(input, items);
         progress = input.getIntOr("Progress", 0);
+        pendingOperation = input.getIntOr("PendingOperation", OPERATION_NONE);
+        pendingAction = input.getIntOr("PendingAction", 0);
+        pendingValue = input.getIntOr("PendingValue", 0);
+        pendingExtra = input.getIntOr("PendingExtra", 0);
+        pendingText = input.getStringOr("PendingText", "");
     }
 }

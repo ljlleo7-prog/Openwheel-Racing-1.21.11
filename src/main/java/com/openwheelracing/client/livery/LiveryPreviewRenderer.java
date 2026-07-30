@@ -59,12 +59,12 @@ public final class LiveryPreviewRenderer {
             Vertex b = project(face.x1(), face.y1(), face.z1(), sinYaw, cosYaw, sinPitch, cosPitch, scale, width, height);
             Vertex c = project(face.x2(), face.y2(), face.z2(), sinYaw, cosYaw, sinPitch, cosPitch, scale, width, height);
             Vertex d = project(face.x3(), face.y3(), face.z3(), sinYaw, cosYaw, sinPitch, cosPitch, scale, width, height);
-            Uv auv = toUv(LiveryUvMapping.uvForVertex(face.group(), face.x0(), face.y0(), face.z0()));
-            Uv buv = toUv(LiveryUvMapping.uvForVertex(face.group(), face.x1(), face.y1(), face.z1()));
-            Uv cuv = toUv(LiveryUvMapping.uvForVertex(face.group(), face.x2(), face.y2(), face.z2()));
-            Uv duv = toUv(LiveryUvMapping.uvForVertex(face.group(), face.x3(), face.y3(), face.z3()));
+            Uv auv = uvForVertex(face, face.x0(), face.y0(), face.z0());
+            Uv buv = uvForVertex(face, face.x1(), face.y1(), face.z1());
+            Uv cuv = uvForVertex(face, face.x2(), face.y2(), face.z2());
+            Uv duv = uvForVertex(face, face.x3(), face.y3(), face.z3());
             int fallback = fallbackColor(face, fallbackColors);
-            boolean paintable = LiveryUvMapping.isPaintableMaterial(face.materialRgb()) && auv != null && buv != null && cuv != null && duv != null;
+            boolean paintable = LiveryUvMapping.isPaintableMaterial(face.materialRgb()) && face.hasLiveryRegion();
             int color = previewFaceColor(face, livery, fallback, paintable);
             rasterize(image, depth, hitU, hitV, a, b, c, auv, buv, cuv, color, paintable);
             rasterize(image, depth, hitU, hitV, a, c, d, auv, cuv, duv, color, paintable);
@@ -79,10 +79,7 @@ public final class LiveryPreviewRenderer {
         float x = (face.x0() + face.x1() + face.x2()) / 3.0f;
         float y = (face.y0() + face.y1() + face.y2()) / 3.0f;
         float z = (face.z0() + face.z1() + face.z2()) / 3.0f;
-        LiveryUvMapping.Uv uv = LiveryUvMapping.uvForVertex(face.group(), x, y, z);
-        if (uv == null) {
-            return fallback;
-        }
+        Uv uv = uvForVertex(face, x, y, z);
         int u = clamp(Math.round(uv.u()), 0, ClientLiveryTextures.SIZE - 1);
         int v = clamp(Math.round(uv.v()), 0, ClientLiveryTextures.SIZE - 1);
         int sampled = livery.getPixel(u, v);
@@ -145,8 +142,8 @@ public final class LiveryPreviewRenderer {
         return (x - a.x) * (b.y - a.y) - (y - a.y) * (b.x - a.x);
     }
 
-    private static Uv toUv(LiveryUvMapping.Uv src) {
-        return src == null ? null : new Uv(src.u(), src.v());
+    private static Uv uvForVertex(ColoredObjModel.Face face, float x, float y, float z) {
+        return new Uv(face.liveryPixelX(x, y, z), face.liveryPixelY(x, y, z));
     }
 
     private static int fallbackColor(ColoredObjModel.Face face, CarLiveryColors colors) {

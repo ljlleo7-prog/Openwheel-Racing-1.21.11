@@ -8,6 +8,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -17,6 +21,8 @@ import net.minecraft.resources.Identifier;
 
 public final class ClientLiveryTextures {
     public static final int SIZE = 512;
+
+    public record TemplateRegion(String group, int x, int y, int width, int height) {}
     private static final Map<String, Identifier> LOCATIONS = new HashMap<>();
     private static final Map<String, NativeImage> IMAGES = new HashMap<>();
 
@@ -50,6 +56,23 @@ public final class ClientLiveryTextures {
         } catch (IOException ignored) {
             return Optional.empty();
         }
+    }
+
+
+    public static List<TemplateRegion> templateRegions(Minecraft minecraft) {
+        Identifier objLoc = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "objmodels/f1_car_2026.obj");
+        ColoredObjModel model = ColoredObjModel.load(minecraft.getResourceManager(), objLoc);
+        Map<String, TemplateRegion> regions = new LinkedHashMap<>();
+        for (ColoredObjModel.Face face : model.faces) {
+            if (!face.hasLiveryRegion() || !LiveryUvMapping.isPaintableMaterial(face.materialRgb())) {
+                continue;
+            }
+            String key = face.group() + ':' + face.liveryRegionX() + ':' + face.liveryRegionY() + ':' + face.liveryRegionWidth() + ':' + face.liveryRegionHeight();
+            regions.putIfAbsent(key, new TemplateRegion(face.group(), face.liveryRegionX(), face.liveryRegionY(), face.liveryRegionWidth(), face.liveryRegionHeight()));
+        }
+        List<TemplateRegion> sorted = new ArrayList<>(regions.values());
+        sorted.sort(Comparator.comparingInt(TemplateRegion::y).thenComparingInt(TemplateRegion::x));
+        return sorted;
     }
 
     public static NativeImage loadOrCreate(Minecraft minecraft, CarLiveryTexture texture, int fallbackColor) {
@@ -126,19 +149,22 @@ public final class ClientLiveryTextures {
         ColoredObjModel model = ColoredObjModel.load(minecraft.getResourceManager(), objLoc);
         image.fillRect(0, 0, SIZE, SIZE, 0x00000000);
         for (ColoredObjModel.Face face : model.faces) {
-            if (!LiveryUvMapping.isPaintableMaterial(face.materialRgb())) {
-                continue;
-            }
-            LiveryUvMapping.Uv a = LiveryUvMapping.uvForVertex(face.group(), face.x0(), face.y0(), face.z0());
-            LiveryUvMapping.Uv b = LiveryUvMapping.uvForVertex(face.group(), face.x1(), face.y1(), face.z1());
-            LiveryUvMapping.Uv c = LiveryUvMapping.uvForVertex(face.group(), face.x2(), face.y2(), face.z2());
-            LiveryUvMapping.Uv d = LiveryUvMapping.uvForVertex(face.group(), face.x3(), face.y3(), face.z3());
-            if (a == null || b == null || c == null || d == null) {
+            if (!LiveryUvMapping.isPaintableMaterial(face.materialRgb()) || !face.hasLiveryRegion()) {
                 continue;
             }
             int color = regionColor(face.group(), baseColor);
-            rasterizeTriangle(image, color, a.u(), a.v(), b.u(), b.v(), c.u(), c.v());
-            rasterizeTriangle(image, color, a.u(), a.v(), c.u(), c.v(), d.u(), d.v());
+            rasterizeTriangle(image, color,
+                face.liveryPixelX(face.x0(), face.y0(), face.z0()), face.liveryPixelY(face.x0(), face.y0(), face.z0()),
+                face.liveryPixelX(face.x1(), face.y1(), face.z1()), face.liveryPixelY(face.x1(), face.y1(), face.z1()),
+                face.liveryPixelX(face.x2(), face.y2(), face.z2()), face.liveryPixelY(face.x2(), face.y2(), face.z2())
+            );
+            if (face.vertexCount() == 4) {
+                rasterizeTriangle(image, color,
+                    face.liveryPixelX(face.x0(), face.y0(), face.z0()), face.liveryPixelY(face.x0(), face.y0(), face.z0()),
+                    face.liveryPixelX(face.x2(), face.y2(), face.z2()), face.liveryPixelY(face.x2(), face.y2(), face.z2()),
+                    face.liveryPixelX(face.x3(), face.y3(), face.z3()), face.liveryPixelY(face.x3(), face.y3(), face.z3())
+                );
+            }
         }
     }
 

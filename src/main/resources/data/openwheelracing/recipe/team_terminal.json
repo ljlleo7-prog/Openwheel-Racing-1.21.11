@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IEI",
+    "RBR",
+    "III"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "E": "openwheelracing:racing_electronics",
+    "R": "minecraft:redstone",
+    "B": "minecraft:crafting_table"
+  },
+  "result": {
+    "id": "openwheelracing:team_terminal",
+    "count": 1
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IPI",
+    "DBD",
+    "III"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "P": "openwheelracing:plastic",
+    "D": "minecraft:red_dye",
+    "B": "minecraft:crafting_table"
+  },
+  "result": {
+    "id": "openwheelracing:car_livery_station",
+    "count": 1
+  }
+}

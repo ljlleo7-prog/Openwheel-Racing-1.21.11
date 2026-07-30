@@ -1,6 +1,7 @@
 package com.openwheelracing.content.menu;
 
 import com.openwheelracing.content.block.entity.CarAssemblyWorkstationBlockEntity;
+import com.openwheelracing.content.block.entity.CarWorkstationType;
 import com.openwheelracing.registry.OWRBlocks;
 import com.openwheelracing.registry.OWRItems;
 import com.openwheelracing.registry.OWRMenus;
@@ -61,6 +62,42 @@ public class CarAssemblyMenu extends AbstractContainerMenu {
         return container.getItem(CarAssemblyWorkstationBlockEntity.SLOT_OUTPUT);
     }
 
+    public boolean queueSetupTune(int slot, int delta) {
+        return container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.queueSetupTune(slot, delta);
+    }
+
+    public boolean queueRepair() {
+        return container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.queueRepair();
+    }
+
+    public boolean queueLiveryPreset(int delta) {
+        return container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.queueLiveryPreset(delta);
+    }
+
+    public boolean queueLiveryColor(int channel, int color) {
+        return container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.queueLiveryColor(channel, color);
+    }
+
+    public boolean queueLiveryTexture(String textureId) {
+        return container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.queueLiveryTexture(textureId);
+    }
+
+    public CarWorkstationType getWorkstationType() {
+        return container instanceof CarAssemblyWorkstationBlockEntity workstation ? workstation.getWorkstationType() : CarWorkstationType.LEGACY;
+    }
+
+    public boolean allowsConstruction() {
+        return getWorkstationType().allowsConstruction();
+    }
+
+    public boolean allowsSetup() {
+        return getWorkstationType().allowsSetup();
+    }
+
+    public boolean allowsLivery() {
+        return getWorkstationType().allowsLivery();
+    }
+
     @Override
     public ItemStack quickMoveStack(Player player, int index) {
         ItemStack result = ItemStack.EMPTY;
@@ -108,7 +145,16 @@ public class CarAssemblyMenu extends AbstractContainerMenu {
 
     @Override
     public boolean stillValid(Player player) {
-        return stillValid(access, player, OWRBlocks.CAR_ASSEMBLY_WORKSTATION.get());
+        return access.evaluate((level, pos) -> level.getBlockState(pos).getBlock() == stationBlock() && player.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) <= 64.0, true);
+    }
+
+    private net.minecraft.world.level.block.Block stationBlock() {
+        return switch (getWorkstationType()) {
+            case CONSTRUCTION -> OWRBlocks.CAR_CONSTRUCTION_STATION.get();
+            case SETUP -> OWRBlocks.CAR_SETUP_STATION.get();
+            case LIVERY -> OWRBlocks.CAR_LIVERY_STATION.get();
+            case LEGACY -> OWRBlocks.CAR_ASSEMBLY_WORKSTATION.get();
+        };
     }
 
     private void addWorkstationSlots(Container container) {

@@ -2,6 +2,7 @@ package com.openwheelracing;
 
 import com.mojang.logging.LogUtils;
 import com.openwheelracing.content.command.OWRCommands;
+import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRBlockEntities;
 import com.openwheelracing.registry.OWRBlocks;
@@ -62,6 +63,7 @@ public final class OpenwheelRacing {
         net.minecraft.server.level.ServerLevel overworld = server.getLevel(net.minecraft.world.level.Level.OVERWORLD);
         if (overworld != null) {
             OWRNetwork.broadcastRankingBoard(server, overworld);
+            OWRNetwork.broadcastRaceFlag(overworld, OWRRaceControlState.get(overworld).getGlobalFlag(), false);
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.openwheelracing.registry;
 
 import com.openwheelracing.OpenwheelRacing;
+import com.openwheelracing.content.block.entity.RaceMonitorType;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.menu.RefineryMenu;
@@ -23,8 +24,24 @@ public final class OWRMenus {
     );
 
     public static final DeferredHolder<MenuType<?>, MenuType<RaceDirectorMenu>> RACE_DIRECTOR = MENUS.register("race_director",
-        () -> IMenuTypeExtension.create(RaceDirectorMenu::new)
+        () -> IMenuTypeExtension.create((containerId, playerInventory, extraData) -> new RaceDirectorMenu(containerId, playerInventory, RaceMonitorType.DIRECTOR))
     );
+
+    public static final DeferredHolder<MenuType<?>, MenuType<RaceDirectorMenu>> RACE_BOARD_TERMINAL = MENUS.register("race_board_terminal",
+        () -> IMenuTypeExtension.create((containerId, playerInventory, extraData) -> new RaceDirectorMenu(containerId, playerInventory, RaceMonitorType.BOARD))
+    );
+
+    public static final DeferredHolder<MenuType<?>, MenuType<RaceDirectorMenu>> TEAM_TERMINAL = MENUS.register("team_terminal",
+        () -> IMenuTypeExtension.create((containerId, playerInventory, extraData) -> new RaceDirectorMenu(containerId, playerInventory, RaceMonitorType.TEAM))
+    );
+
+    public static DeferredHolder<MenuType<?>, MenuType<RaceDirectorMenu>> typeFor(RaceMonitorType monitorType) {
+        return switch (monitorType) {
+            case DIRECTOR -> RACE_DIRECTOR;
+            case BOARD -> RACE_BOARD_TERMINAL;
+            case TEAM -> TEAM_TERMINAL;
+        };
+    }
 
     private OWRMenus() {
     }

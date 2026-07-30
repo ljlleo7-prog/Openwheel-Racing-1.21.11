@@ -1,6 +1,8 @@
 {
-  "parent": "minecraft:block/cube_all",
+  "parent": "minecraft:block/orientable",
   "textures": {
-    "all": "openwheelracing:block/refinery"
+    "front": "openwheelracing:block/race_director_front",
+    "side": "openwheelracing:block/race_director_side",
+    "top": "openwheelracing:block/race_director_top"
   }
 }

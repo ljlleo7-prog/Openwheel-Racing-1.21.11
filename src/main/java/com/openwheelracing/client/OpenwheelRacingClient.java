@@ -40,5 +40,7 @@ public final class OpenwheelRacingClient {
         event.register(OWRMenus.CAR_ASSEMBLY.get(), CarAssemblyScreen::new);
         event.register(OWRMenus.REFINERY.get(), RefineryScreen::new);
         event.register(OWRMenus.RACE_DIRECTOR.get(), RaceDirectorScreen::new);
+        event.register(OWRMenus.RACE_BOARD_TERMINAL.get(), RaceDirectorScreen::new);
+        event.register(OWRMenus.TEAM_TERMINAL.get(), RaceDirectorScreen::new);
     }
 }

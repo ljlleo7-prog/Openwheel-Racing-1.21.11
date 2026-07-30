@@ -1,7 +1,19 @@
 {
   "variants": {
-    "": {
+    "facing=north": {
       "model": "openwheelracing:block/race_director"
+    },
+    "facing=east": {
+      "model": "openwheelracing:block/race_director",
+      "y": 90
+    },
+    "facing=south": {
+      "model": "openwheelracing:block/race_director",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "openwheelracing:block/race_director",
+      "y": 270
     }
   }
 }

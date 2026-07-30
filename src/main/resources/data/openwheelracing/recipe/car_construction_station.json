@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "ICI",
+    "RBR",
+    "III"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "C": "openwheelracing:carbon_fiber",
+    "R": "minecraft:redstone",
+    "B": "minecraft:crafting_table"
+  },
+  "result": {
+    "id": "openwheelracing:car_construction_station",
+    "count": 1
+  }
+}

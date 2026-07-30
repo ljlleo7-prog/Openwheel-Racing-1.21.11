@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IPI",
+    "RBR",
+    "III"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "P": "openwheelracing:racing_electronics",
+    "R": "minecraft:redstone",
+    "B": "minecraft:crafting_table"
+  },
+  "result": {
+    "id": "openwheelracing:car_setup_station",
+    "count": 1
+  }
+}

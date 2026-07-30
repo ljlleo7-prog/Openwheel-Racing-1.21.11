@@ -35,18 +35,22 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
             addColorPickerWidgets();
             return;
         }
-        addTuneButtons(0, 28);
-        addTuneButtons(1, 43);
-        addTuneButtons(2, 58);
-        addTuneButtons(3, 73);
-        addLiveryButtons(88);
-        addRenderableWidget(Button.builder(Component.literal("Edit Livery"), button -> openLiveryEditor())
-            .bounds(leftPos + 184, topPos + 112, 62, 14)
-            .build());
-        addLiveryColorButtons(132);
-        addRenderableWidget(Button.builder(Component.literal("Repair"), button -> OWRNetwork.sendToServer(new OWRNetwork.RepairCarMessage()))
-            .bounds(leftPos + 190, topPos + 98, 52, 14)
-            .build());
+        if (menu.allowsSetup()) {
+            addTuneButtons(0, 28);
+            addTuneButtons(1, 43);
+            addTuneButtons(2, 58);
+            addTuneButtons(3, 73);
+            addRenderableWidget(Button.builder(Component.literal("Repair"), button -> OWRNetwork.sendToServer(new OWRNetwork.RepairCarMessage()))
+                .bounds(leftPos + 190, topPos + 98, 52, 14)
+                .build());
+        }
+        if (menu.allowsLivery()) {
+            addLiveryButtons(88);
+            addRenderableWidget(Button.builder(Component.literal("Edit Livery"), button -> openLiveryEditor())
+                .bounds(leftPos + 184, topPos + 112, 62, 14)
+                .build());
+            addLiveryColorButtons(132);
+        }
     }
 
     @Override
@@ -55,12 +59,20 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
         int y = topPos;
 
         graphics.fill(x, y, x + imageWidth, y + imageHeight, 0xFFC6C6C6);
-        graphics.fill(x + 6, y + 6, x + 172, y + 114, 0xFFDADADA);
-        graphics.fill(x + 178, y + 6, x + 250, y + 114, 0xFFE0E0E0);
+        if (menu.allowsConstruction()) {
+            graphics.fill(x + 6, y + 6, x + 172, y + 114, 0xFFDADADA);
+        }
+        if (menu.allowsSetup() || menu.allowsLivery()) {
+            graphics.fill(x + 178, y + 6, x + 250, y + 114, 0xFFE0E0E0);
+        }
         graphics.fill(x + 6, y + 120, x + 250, y + 210, 0xFFD0D0D0);
-        graphics.fill(x + 70, y + 44, x + 95, y + 49, 0xFF55555A);
+        if (menu.allowsConstruction()) {
+            graphics.fill(x + 70, y + 44, x + 95, y + 49, 0xFF55555A);
+        }
         for (int slot = 0; slot < WORKSTATION_SLOT_X.length; slot++) {
-            drawSlot(graphics, x + WORKSTATION_SLOT_X[slot], y + WORKSTATION_SLOT_Y[slot]);
+            if (slot == 6 || menu.allowsConstruction()) {
+                drawSlot(graphics, x + WORKSTATION_SLOT_X[slot], y + WORKSTATION_SLOT_Y[slot]);
+            }
         }
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < 9; column++) {
@@ -77,15 +89,21 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
         }
 
         graphics.drawString(font, title, x + 10, y + 10, 0xFF404040, false);
-        graphics.drawString(font, "Assembly", x + 98, y + 32, 0xFF404040, false);
-        graphics.drawString(font, "Setup", x + 190, y + 10, 0xFF404040, false);
-        graphics.drawString(font, "P", x + 190, y + 30, 0xFF404040, false);
-        graphics.drawString(font, "T", x + 190, y + 45, 0xFF404040, false);
-        graphics.drawString(font, "A", x + 190, y + 60, 0xFF404040, false);
-        graphics.drawString(font, "G", x + 190, y + 75, 0xFF404040, false);
-        graphics.drawString(font, "Livery", x + 190, y + 90, 0xFF404040, false);
+        if (menu.allowsConstruction()) {
+            graphics.drawString(font, "Construction", x + 88, y + 32, 0xFF404040, false);
+        }
+        if (menu.allowsSetup()) {
+            graphics.drawString(font, "Setup", x + 190, y + 10, 0xFF404040, false);
+            graphics.drawString(font, "P", x + 190, y + 30, 0xFF404040, false);
+            graphics.drawString(font, "T", x + 190, y + 45, 0xFF404040, false);
+            graphics.drawString(font, "A", x + 190, y + 60, 0xFF404040, false);
+            graphics.drawString(font, "G", x + 190, y + 75, 0xFF404040, false);
+        }
+        if (menu.allowsLivery()) {
+            graphics.drawString(font, "Livery", x + 190, y + 90, 0xFF404040, false);
+        }
         graphics.drawString(font, playerInventoryTitle, x + 8, y + inventoryLabelY, 0xFF404040, false);
-        if (!menu.getOutputStack().isEmpty()) {
+        if (!menu.getOutputStack().isEmpty() && menu.allowsLivery()) {
             String name = CarLivery.fromIndex(PrototypeCarItem.getLivery(menu.getOutputStack())).displayName();
             graphics.drawString(font, name, x + 190, y + 104, 0xFF404040, false);
             CarLiveryColors colors = PrototypeCarItem.getLiveryColors(menu.getOutputStack());

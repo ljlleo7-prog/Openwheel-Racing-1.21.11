@@ -3,6 +3,7 @@ package com.openwheelracing.client.hud;
 import com.openwheelracing.client.input.WheelInputSettings;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.race.OWRLapRecords;
+import com.openwheelracing.content.race.RaceFlagMode;
 import java.util.List;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
@@ -32,6 +33,7 @@ public final class CarHudOverlay {
 
         if (settings.showDrivingHud) {
             renderErsMeter(graphics, font, car);
+            renderGlobalFlagMarker(graphics);
 
             int outlineColor = car.isDrsActive() ? 0xFF00DD44 : 0xFFDA1A20;
             graphics.fill(x, y, x + PANEL_WIDTH, y + PANEL_HEIGHT, 0x99000000);
@@ -86,6 +88,31 @@ public final class CarHudOverlay {
         if (settings.showRankingHud) {
             renderRankingBoard(graphics, font);
         }
+    }
+
+    private static void renderGlobalFlagMarker(GuiGraphics graphics) {
+        RaceFlagMode flag = RaceFlagClient.getGlobalFlag();
+        if (flag == RaceFlagMode.GREEN) {
+            return;
+        }
+        int x = (graphics.guiWidth() - 22) / 2;
+        int y = 14;
+        int color = flagColor(flag);
+        graphics.fill(x, y, x + 22, y + 14, 0xCC000000);
+        graphics.fill(x + 3, y + 3, x + 17, y + 11, color);
+        graphics.fill(x + 17, y + 3, x + 19, y + 14, 0xFFE8E8E8);
+        if (flag == RaceFlagMode.SAFETY_CAR || flag == RaceFlagMode.VIRTUAL_SAFETY_CAR) {
+            graphics.fill(x + 6, y + 5, x + 14, y + 9, 0xFF1F2328);
+        }
+    }
+
+    private static int flagColor(RaceFlagMode flag) {
+        return switch (flag) {
+            case GREEN -> 0xFF34D058;
+            case YELLOW, VIRTUAL_SAFETY_CAR -> 0xFFFFD044;
+            case RED -> 0xFFDA1A20;
+            case SAFETY_CAR -> 0xFF79C0FF;
+        };
     }
 
     private static void renderErsMeter(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {

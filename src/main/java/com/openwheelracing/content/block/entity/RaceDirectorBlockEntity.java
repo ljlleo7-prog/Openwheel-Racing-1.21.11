@@ -13,13 +13,24 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.jspecify.annotations.Nullable;
 
 public class RaceDirectorBlockEntity extends BlockEntity implements MenuProvider {
+    private final RaceMonitorType monitorType;
+
     public RaceDirectorBlockEntity(BlockPos pos, BlockState state) {
-        super(OWRBlockEntities.RACE_DIRECTOR.get(), pos, state);
+        this(pos, state, RaceMonitorType.DIRECTOR);
+    }
+
+    public RaceDirectorBlockEntity(BlockPos pos, BlockState state, RaceMonitorType monitorType) {
+        super(OWRBlockEntities.typeFor(monitorType).get(), pos, state);
+        this.monitorType = monitorType;
+    }
+
+    public RaceMonitorType getMonitorType() {
+        return monitorType;
     }
 
     @Override
     public Component getDisplayName() {
-        return Component.translatable("container.openwheelracing.race_director");
+        return Component.translatable(monitorType.containerKey());
     }
 
     @Override

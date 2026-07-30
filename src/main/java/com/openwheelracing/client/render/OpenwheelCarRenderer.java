@@ -192,19 +192,15 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
     }
 
     private static boolean isLiveryPaintable(ColoredObjModel.Face face) {
-        return LiveryUvMapping.isPaintable(face.group()) && LiveryUvMapping.isPaintableMaterial(face.materialRgb());
+        return face.hasLiveryRegion() && LiveryUvMapping.isPaintableMaterial(face.materialRgb());
     }
 
     private static int sampleLivery(ColoredObjModel.Face face, NativeImage image) {
         float x = (face.x0() + face.x1() + face.x2()) / 3.0f;
         float y = (face.y0() + face.y1() + face.y2()) / 3.0f;
         float z = (face.z0() + face.z1() + face.z2()) / 3.0f;
-        LiveryUvMapping.Uv uv = LiveryUvMapping.uvForVertex(face.group(), x, y, z);
-        if (uv == null) {
-            return 0;
-        }
-        int u = Math.max(0, Math.min(image.getWidth() - 1, Math.round(uv.u())));
-        int v = Math.max(0, Math.min(image.getHeight() - 1, Math.round(uv.v())));
+        int u = Math.max(0, Math.min(image.getWidth() - 1, Math.round(face.liveryPixelX(x, y, z))));
+        int v = Math.max(0, Math.min(image.getHeight() - 1, Math.round(face.liveryPixelY(x, y, z))));
         return image.getPixel(u, v);
     }
 

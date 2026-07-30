@@ -20,6 +20,7 @@ public class OWRRaceControlState extends SavedData {
         Codec.INT.optionalFieldOf("max_balanced_deploy_kw", 200).forGetter(OWRRaceControlState::getMaxBalancedDeployKw),
         Codec.INT.optionalFieldOf("max_attack_deploy_kw", 350).forGetter(OWRRaceControlState::getMaxAttackDeployKw),
         Codec.INT.optionalFieldOf("max_harvest_negative_kw", 350).forGetter(OWRRaceControlState::getMaxHarvestNegativeKw),
+        Codec.INT.optionalFieldOf("global_flag", RaceFlagMode.DEFAULT.ordinal()).forGetter(state -> state.getGlobalFlag().ordinal()),
         Codec.DOUBLE.optionalFieldOf("car_damage_modifier", 1.0).forGetter(OWRRaceControlState::getCarDamageModifier),
         Codec.DOUBLE.optionalFieldOf("tyre_wear_modifier", 1.0).forGetter(OWRRaceControlState::getTyreWearModifier)
     ).apply(instance, OWRRaceControlState::new));
@@ -39,16 +40,17 @@ public class OWRRaceControlState extends SavedData {
     private int maxBalancedDeployKw;
     private int maxAttackDeployKw;
     private int maxHarvestNegativeKw;
+    private RaceFlagMode globalFlag;
     private double carDamageModifier;
     private double tyreWearModifier;
     private int revision;
 
     public OWRRaceControlState() {
-        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true, 4, 200, 350, 350, 1.0, 1.0);
+        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true, 4, 200, 350, 350, RaceFlagMode.DEFAULT.ordinal(), 1.0, 1.0);
     }
 
     private OWRRaceControlState(boolean checkpointCheckEnabled, boolean offTrackCheckEnabled, int minimumValidLapTicks, boolean wheelInputAllowed,
-            int maxErsCapacityMj, int maxBalancedDeployKw, int maxAttackDeployKw, int maxHarvestNegativeKw, double carDamageModifier, double tyreWearModifier) {
+            int maxErsCapacityMj, int maxBalancedDeployKw, int maxAttackDeployKw, int maxHarvestNegativeKw, int globalFlag, double carDamageModifier, double tyreWearModifier) {
         this.checkpointCheckEnabled = checkpointCheckEnabled;
         this.offTrackCheckEnabled = offTrackCheckEnabled;
         this.minimumValidLapTicks = Math.max(1, minimumValidLapTicks);
@@ -57,6 +59,7 @@ public class OWRRaceControlState extends SavedData {
         this.maxBalancedDeployKw = clamp(maxBalancedDeployKw, 0, 350);
         this.maxAttackDeployKw = clamp(maxAttackDeployKw, 0, 350);
         this.maxHarvestNegativeKw = clamp(maxHarvestNegativeKw, 0, 350);
+        this.globalFlag = RaceFlagMode.fromOrdinal(globalFlag);
         this.carDamageModifier = snapConditionModifier(carDamageModifier);
         this.tyreWearModifier = snapConditionModifier(tyreWearModifier);
     }
@@ -99,6 +102,10 @@ public class OWRRaceControlState extends SavedData {
 
     public int getMaxHarvestNegativeKw() {
         return maxHarvestNegativeKw;
+    }
+
+    public RaceFlagMode getGlobalFlag() {
+        return globalFlag;
     }
 
     public double getCarDamageModifier() {
@@ -171,6 +178,15 @@ public class OWRRaceControlState extends SavedData {
             return;
         }
         maxHarvestNegativeKw = clamped;
+        markChanged();
+    }
+
+    public void setGlobalFlag(RaceFlagMode flag) {
+        RaceFlagMode next = flag == null ? RaceFlagMode.DEFAULT : flag;
+        if (globalFlag == next) {
+            return;
+        }
+        globalFlag = next;
         markChanged();
     }
 
