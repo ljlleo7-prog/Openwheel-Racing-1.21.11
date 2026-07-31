@@ -8,6 +8,7 @@ import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.PrototypeCarSetup;
+import com.openwheelracing.content.car.ServerLiveryTextures;
 import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.item.TyreItem;
 import com.openwheelracing.content.race.OWRLapRecords;
@@ -462,6 +463,12 @@ public class OpenwheelCarEntity extends Entity {
 
     public CarLiveryTexture getLiveryTexture() {
         return new CarLiveryTexture(entityData.get(LIVERY_TEXTURE));
+    }
+
+    @Override
+    public void startSeenByPlayer(ServerPlayer player) {
+        super.startSeenByPlayer(player);
+        ServerLiveryTextures.syncToPlayer(this, player);
     }
 
     public int getGear() {

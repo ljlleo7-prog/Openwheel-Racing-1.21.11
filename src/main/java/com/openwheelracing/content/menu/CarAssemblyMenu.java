@@ -29,13 +29,13 @@ public class CarAssemblyMenu extends AbstractContainerMenu {
     private final ContainerLevelAccess access;
 
     public CarAssemblyMenu(int containerId, Inventory playerInventory, FriendlyByteBuf extraData) {
-        this(containerId, playerInventory, new SimpleContainer(WORKSTATION_SLOT_COUNT), new SimpleContainerData(2));
+        this(containerId, playerInventory, new SimpleContainer(WORKSTATION_SLOT_COUNT), new SimpleContainerData(3));
     }
 
     public CarAssemblyMenu(int containerId, Inventory playerInventory, Container container, ContainerData data) {
         super(OWRMenus.CAR_ASSEMBLY.get(), containerId);
         checkContainerSize(container, WORKSTATION_SLOT_COUNT);
-        checkContainerDataCount(data, 2);
+        checkContainerDataCount(data, 3);
         this.container = container;
         this.data = data;
         this.access = container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.getLevel() != null
@@ -83,7 +83,7 @@ public class CarAssemblyMenu extends AbstractContainerMenu {
     }
 
     public CarWorkstationType getWorkstationType() {
-        return container instanceof CarAssemblyWorkstationBlockEntity workstation ? workstation.getWorkstationType() : CarWorkstationType.LEGACY;
+        return container instanceof CarAssemblyWorkstationBlockEntity workstation ? workstation.getWorkstationType() : CarWorkstationType.fromOrdinal(data.get(2));
     }
 
     public boolean allowsConstruction() {
@@ -157,6 +157,18 @@ public class CarAssemblyMenu extends AbstractContainerMenu {
         };
     }
 
+    private net.minecraft.world.item.Item requiredItemForSlot(int slot) {
+        return switch (slot) {
+            case CarAssemblyWorkstationBlockEntity.SLOT_CHASSIS -> OWRItems.CHASSIS.get();
+            case CarAssemblyWorkstationBlockEntity.SLOT_ENGINE -> OWRItems.ENGINE.get();
+            case CarAssemblyWorkstationBlockEntity.SLOT_TIRES -> OWRItems.TIRES.get();
+            case CarAssemblyWorkstationBlockEntity.SLOT_AERO_KIT -> OWRItems.AERO_KIT.get();
+            case CarAssemblyWorkstationBlockEntity.SLOT_GEARBOX -> OWRItems.GEARBOX.get();
+            case CarAssemblyWorkstationBlockEntity.SLOT_STEERING_CONTROLS -> OWRItems.STEERING_CONTROLS.get();
+            default -> OWRItems.PROTOTYPE_CAR_SPAWN.get();
+        };
+    }
+
     private void addWorkstationSlots(Container container) {
         addSlot(new ComponentSlot(container, CarAssemblyWorkstationBlockEntity.SLOT_CHASSIS, 52, 36));
         addSlot(new ComponentSlot(container, CarAssemblyWorkstationBlockEntity.SLOT_ENGINE, 52, 70));
@@ -182,11 +194,17 @@ public class CarAssemblyMenu extends AbstractContainerMenu {
     }
 
     private boolean moveToCarTuningSlot(ItemStack stack) {
+        if (!allowsSetup() && !allowsLivery()) {
+            return false;
+        }
         Slot tuningSlot = slots.get(CarAssemblyWorkstationBlockEntity.SLOT_OUTPUT);
         return tuningSlot.mayPlace(stack) && moveItemStackTo(stack, CarAssemblyWorkstationBlockEntity.SLOT_OUTPUT, CarAssemblyWorkstationBlockEntity.SLOT_OUTPUT + 1, false);
     }
 
     private boolean moveToMatchingInput(ItemStack stack) {
+        if (!allowsConstruction()) {
+            return false;
+        }
         for (int slot = 0; slot <= CarAssemblyWorkstationBlockEntity.SLOT_STEERING_CONTROLS; slot++) {
             Slot inputSlot = slots.get(slot);
             if (inputSlot.mayPlace(stack) && moveItemStackTo(stack, slot, slot + 1, false)) {
@@ -196,25 +214,30 @@ public class CarAssemblyMenu extends AbstractContainerMenu {
         return false;
     }
 
-    private static class ComponentSlot extends Slot {
+    private class ComponentSlot extends Slot {
         ComponentSlot(Container container, int slot, int x, int y) {
             super(container, slot, x, y);
         }
 
         @Override
         public boolean mayPlace(ItemStack stack) {
-            return container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.isValidForSlot(getSlotIndex(), stack);
+            return allowsConstruction() && stack.is(requiredItemForSlot(getSlotIndex()));
+        }
+
+        @Override
+        public boolean isActive() {
+            return allowsConstruction();
         }
     }
 
-    private static class CarTuningSlot extends Slot {
+    private class CarTuningSlot extends Slot {
         CarTuningSlot(Container container, int slot, int x, int y) {
             super(container, slot, x, y);
         }
 
         @Override
         public boolean mayPlace(ItemStack stack) {
-            return container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.isValidForSlot(getSlotIndex(), stack);
+            return (allowsSetup() || allowsLivery()) && stack.is(OWRItems.PROTOTYPE_CAR_SPAWN.get()) && stack.getCount() == 1;
         }
 
         @Override

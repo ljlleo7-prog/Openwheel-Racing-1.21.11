@@ -143,6 +143,8 @@
   "screen.openwheelracing.team_terminal.title": "Team Terminal",
   "screen.openwheelracing.team_terminal.bind_hint": "Sense available cars by ID, livery, and rider",
   "screen.openwheelracing.team_terminal.sense_cars": "Sense Cars",
+  "screen.openwheelracing.team_terminal.bind_left": "Bind L",
+  "screen.openwheelracing.team_terminal.bind_right": "Bind R",
   "screen.openwheelracing.team_terminal.no_cars": "No cars sensed nearby",
   "screen.openwheelracing.team_terminal.empty_slot": "No car bound",
   "screen.openwheelracing.team_terminal.rider": "Rider: %s",

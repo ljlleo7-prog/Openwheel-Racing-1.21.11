@@ -4,6 +4,7 @@ import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
+import com.openwheelracing.content.block.entity.CarWorkstationType;
 import com.openwheelracing.network.OWRNetwork;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -17,6 +18,7 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
     private static final int[] WORKSTATION_SLOT_X = {52, 52, 18, 52, 86, 86, 130};
     private static final int[] WORKSTATION_SLOT_Y = {36, 70, 53, 16, 70, 36, 45};
     private int colorPickerChannel = -1;
+    private CarWorkstationType visibleWorkstationType;
     private int pickerRed;
     private int pickerGreen;
     private int pickerBlue;
@@ -31,6 +33,7 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
     @Override
     protected void init() {
         super.init();
+        visibleWorkstationType = menu.getWorkstationType();
         if (colorPickerChannel >= 0) {
             addColorPickerWidgets();
             return;
@@ -55,6 +58,9 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
 
     @Override
     protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
+        if (visibleWorkstationType != menu.getWorkstationType()) {
+            rebuildWidgets();
+        }
         int x = leftPos;
         int y = topPos;
 

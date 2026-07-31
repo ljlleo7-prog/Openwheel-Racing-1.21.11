@@ -10,10 +10,14 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
 
 public class RaceDirectorBlockEntity extends BlockEntity implements MenuProvider {
     private final RaceMonitorType monitorType;
+    private int leftTeamCarId = -1;
+    private int rightTeamCarId = -1;
 
     public RaceDirectorBlockEntity(BlockPos pos, BlockState state) {
         this(pos, state, RaceMonitorType.DIRECTOR);
@@ -26,6 +30,37 @@ public class RaceDirectorBlockEntity extends BlockEntity implements MenuProvider
 
     public RaceMonitorType getMonitorType() {
         return monitorType;
+    }
+
+    public int getLeftTeamCarId() {
+        return leftTeamCarId;
+    }
+
+    public int getRightTeamCarId() {
+        return rightTeamCarId;
+    }
+
+    public void setTeamCarId(int side, int entityId) {
+        if (side == 0) {
+            leftTeamCarId = entityId;
+        } else if (side == 1) {
+            rightTeamCarId = entityId;
+        }
+        setChanged();
+    }
+
+    @Override
+    protected void saveAdditional(ValueOutput output) {
+        super.saveAdditional(output);
+        output.putInt("LeftTeamCarId", leftTeamCarId);
+        output.putInt("RightTeamCarId", rightTeamCarId);
+    }
+
+    @Override
+    protected void loadAdditional(ValueInput input) {
+        super.loadAdditional(input);
+        leftTeamCarId = input.getIntOr("LeftTeamCarId", -1);
+        rightTeamCarId = input.getIntOr("RightTeamCarId", -1);
     }
 
     @Override

@@ -143,6 +143,8 @@
   "screen.openwheelracing.team_terminal.title": "车队终端",
   "screen.openwheelracing.team_terminal.bind_hint": "感应可用赛车：ID、涂装与车手",
   "screen.openwheelracing.team_terminal.sense_cars": "感应赛车",
+  "screen.openwheelracing.team_terminal.bind_left": "绑定左侧",
+  "screen.openwheelracing.team_terminal.bind_right": "绑定右侧",
   "screen.openwheelracing.team_terminal.no_cars": "附近未感应到赛车",
   "screen.openwheelracing.team_terminal.empty_slot": "未绑定赛车",
   "screen.openwheelracing.team_terminal.rider": "车手：%s",

@@ -48,7 +48,17 @@ final class CarTyreSoundInstance extends AbstractTickableSoundInstance {
     }
 
     void replaceCar(OpenwheelCarEntity car) {
+        if (this.car != null && this.car.getId() == car.getId()) {
+            this.car = car;
+            return;
+        }
+
         this.car = car;
+        Vec3 position = car.getWheelSoundPosition(wheel.sideOffset, wheel.lengthOffset);
+        x = position.x;
+        y = position.y;
+        z = position.z;
+        previousSourcePosition = position;
     }
 
     void updateListener(Vec3 listenerPosition) {

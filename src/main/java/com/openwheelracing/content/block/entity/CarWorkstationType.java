@@ -39,4 +39,12 @@ public enum CarWorkstationType {
     public boolean allowsLivery() {
         return this == LIVERY || this == LEGACY;
     }
+
+    public static CarWorkstationType fromOrdinal(int ordinal) {
+        CarWorkstationType[] values = values();
+        if (ordinal < 0 || ordinal >= values.length) {
+            return LEGACY;
+        }
+        return values[ordinal];
+    }
 }

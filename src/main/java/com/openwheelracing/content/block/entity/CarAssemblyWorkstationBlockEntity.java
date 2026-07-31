@@ -65,6 +65,7 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
             return switch (index) {
                 case 0 -> progress;
                 case 1 -> getAssemblyTime();
+                case 2 -> workstationType.ordinal();
                 default -> 0;
             };
         }
@@ -78,7 +79,7 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
 
         @Override
         public int getCount() {
-            return 2;
+            return 3;
         }
     };
 

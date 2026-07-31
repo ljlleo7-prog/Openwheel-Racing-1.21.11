@@ -69,7 +69,20 @@ final class CarEngineSoundInstance extends AbstractTickableSoundInstance {
     }
 
     void replaceCar(OpenwheelCarEntity car) {
+        if (this.car != null && this.car.getId() == car.getId()) {
+            this.car = car;
+            return;
+        }
+
         this.car = car;
+        x = car.getX();
+        y = car.getY() + 0.35;
+        z = car.getZ();
+        previousSourcePosition = new Vec3(x, y, z);
+        predictedRpm = car.getRpm();
+        lastGear = car.getGear();
+        shiftCutTicks = 0;
+        clutchReleaseTicks = 0;
     }
 
     void updateListener(Vec3 listenerPosition) {

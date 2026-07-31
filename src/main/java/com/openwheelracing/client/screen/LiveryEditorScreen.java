@@ -496,6 +496,8 @@ public class LiveryEditorScreen extends Screen {
             } else {
                 ClientLiveryTextures.save(Minecraft.getInstance(), texture.id(), liveryImage);
             }
+            byte[] pngBytes = ClientLiveryTextures.readPngBytes(Minecraft.getInstance(), texture.id());
+            OWRNetwork.sendToServer(new OWRNetwork.UploadLiveryTextureMessage(texture.id(), pngBytes));
             OWRNetwork.sendToServer(new OWRNetwork.SetLiveryTextureMessage(texture.id()));
             OpenwheelCarRenderer.invalidateLiveryCache(texture.id());
             status = "Saved " + texture.id() + ".png";

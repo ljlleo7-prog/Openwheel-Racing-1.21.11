@@ -25,6 +25,7 @@ public final class ClientLiveryTextures {
     public record TemplateRegion(String group, int x, int y, int width, int height) {}
     private static final Map<String, Identifier> LOCATIONS = new HashMap<>();
     private static final Map<String, NativeImage> IMAGES = new HashMap<>();
+    private static final java.util.Set<String> MISSING = new java.util.HashSet<>();
 
     private ClientLiveryTextures() {}
 
@@ -37,6 +38,9 @@ public final class ClientLiveryTextures {
             return Optional.empty();
         }
         String id = texture.id();
+        if (MISSING.contains(id)) {
+            return Optional.empty();
+        }
         Identifier cached = LOCATIONS.get(id);
         if (cached != null) {
             return Optional.of(cached);
@@ -44,6 +48,7 @@ public final class ClientLiveryTextures {
         Minecraft minecraft = Minecraft.getInstance();
         Path file = file(minecraft, id);
         if (!Files.isRegularFile(file)) {
+            MISSING.add(id);
             return Optional.empty();
         }
         try (InputStream input = Files.newInputStream(file)) {
@@ -75,9 +80,35 @@ public final class ClientLiveryTextures {
         return sorted;
     }
 
+    public static NativeImage loadExisting(Minecraft minecraft, CarLiveryTexture texture) {
+        if (texture == null || !texture.isPresent()) {
+            return null;
+        }
+        String id = texture.id();
+        NativeImage cached = IMAGES.get(id);
+        if (cached != null) {
+            return cached;
+        }
+        if (MISSING.contains(id)) {
+            return null;
+        }
+        NativeImage loaded = loadImage(minecraft, id);
+        if (loaded != null) {
+            register(minecraft, id, loaded);
+            return loaded;
+        }
+        MISSING.add(id);
+        return null;
+    }
+
     public static NativeImage loadOrCreate(Minecraft minecraft, CarLiveryTexture texture, int fallbackColor) {
         if (texture != null && texture.isPresent()) {
             String id = texture.id();
+            if (MISSING.contains(id)) {
+                NativeImage image = new NativeImage(SIZE, SIZE, true);
+                fillTemplate(image, fallbackColor);
+                return image;
+            }
             NativeImage cached = IMAGES.get(id);
             if (cached != null) {
                 return cached;
@@ -87,6 +118,7 @@ public final class ClientLiveryTextures {
                 register(minecraft, id, loaded);
                 return loaded;
             }
+            MISSING.add(id);
         }
         NativeImage image = new NativeImage(SIZE, SIZE, true);
         fillTemplate(image, fallbackColor);
@@ -106,12 +138,32 @@ public final class ClientLiveryTextures {
         register(minecraft, safe, copy(image));
     }
 
+    public static void saveSynced(Minecraft minecraft, String id, byte[] pngBytes) throws IOException {
+        String safe = CarLiveryTexture.sanitize(id);
+        if (safe.isEmpty() || pngBytes.length == 0) {
+            return;
+        }
+        NativeImage image = NativeImage.read(pngBytes);
+        if (image.getWidth() != SIZE || image.getHeight() != SIZE) {
+            image.close();
+            return;
+        }
+        Files.createDirectories(directory(minecraft));
+        Files.write(file(minecraft, safe), pngBytes);
+        register(minecraft, safe, image);
+    }
+
+    public static byte[] readPngBytes(Minecraft minecraft, String id) throws IOException {
+        return Files.readAllBytes(file(minecraft, id));
+    }
+
     public static Path file(Minecraft minecraft, String id) {
         return directory(minecraft).resolve(CarLiveryTexture.sanitize(id) + ".png");
     }
 
     public static Identifier register(Minecraft minecraft, String id, NativeImage image) {
         String safe = CarLiveryTexture.sanitize(id);
+        MISSING.remove(safe);
         Identifier location = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "dynamic/livery/" + safe);
         Identifier old = LOCATIONS.put(safe, location);
         if (old != null) {

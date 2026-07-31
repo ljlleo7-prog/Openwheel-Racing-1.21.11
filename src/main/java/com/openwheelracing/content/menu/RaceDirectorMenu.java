@@ -20,7 +20,6 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerLevelAccess;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.phys.AABB;
 
 public class RaceDirectorMenu extends AbstractContainerMenu {
     public static final int LAPS_PER_PAGE = 7;
@@ -28,6 +27,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private final ContainerLevelAccess access;
     private final Player player;
     private final RaceMonitorType monitorType;
+    private final RaceDirectorBlockEntity raceDirector;
     private int page;
     private boolean archiveMode;
     private int lastRaceControlRevision = Integer.MIN_VALUE;
@@ -42,6 +42,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         super(OWRMenus.typeFor(monitorType).get(), containerId);
         this.player = playerInventory.player;
         this.monitorType = monitorType;
+        this.raceDirector = null;
         this.access = ContainerLevelAccess.NULL;
     }
 
@@ -49,6 +50,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         super(OWRMenus.typeFor(raceDirector.getMonitorType()).get(), containerId);
         this.player = playerInventory.player;
         this.monitorType = raceDirector.getMonitorType();
+        this.raceDirector = raceDirector;
         this.access = raceDirector.getLevel() != null
             ? ContainerLevelAccess.create(raceDirector.getLevel(), raceDirector.getBlockPos())
             : ContainerLevelAccess.NULL;
@@ -107,7 +109,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         }
         OWRRaceControlState controlState = OWRRaceControlState.get(serverLevel);
         OWRLapRecords records = OWRLapRecords.get(serverLevel);
-        if (controlState.getRevision() == lastRaceControlRevision && records.getRevision() == lastLapRecordsRevision) {
+        if (!showsTeamTerminal() && controlState.getRevision() == lastRaceControlRevision && records.getRevision() == lastLapRecordsRevision) {
             return;
         }
         lastRaceControlRevision = controlState.getRevision();
@@ -142,6 +144,8 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             records.getActiveSessionId(),
             records.getActiveSessionName(),
             archiveMode,
+            leftTeamCarId(),
+            rightTeamCarId(),
             laps,
             senseTeamCars(level)
         );
@@ -152,17 +156,46 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         return ItemStack.EMPTY;
     }
 
+    public void bindTeamCar(int side, int entityId) {
+        if (!showsTeamTerminal() || raceDirector == null || side < 0 || side > 1) {
+            return;
+        }
+        raceDirector.setTeamCarId(side, entityId);
+    }
+
+    public int leftTeamCarId() {
+        return raceDirector == null ? -1 : raceDirector.getLeftTeamCarId();
+    }
+
+    public int rightTeamCarId() {
+        return raceDirector == null ? -1 : raceDirector.getRightTeamCarId();
+    }
+
     private List<TeamCarRow> senseTeamCars(ServerLevel level) {
         if (!showsTeamTerminal()) {
             return List.of();
         }
-        AABB search = player.getBoundingBox().inflate(96.0);
-        return level.getEntities(player, search, entity -> entity instanceof OpenwheelCarEntity)
-            .stream()
-            .sorted(java.util.Comparator.comparingDouble(entity -> entity.distanceToSqr(player)))
-            .map(entity -> TeamCarRow.fromCar((OpenwheelCarEntity) entity))
-            .limit(8)
+        java.util.ArrayList<OpenwheelCarEntity> cars = new java.util.ArrayList<>();
+        for (net.minecraft.world.entity.Entity entity : level.getAllEntities()) {
+            if (entity instanceof OpenwheelCarEntity car) {
+                cars.add(car);
+            }
+        }
+        return cars.stream()
+            .sorted(java.util.Comparator.comparingInt(car -> selectionRank(car.getId())))
+            .map(TeamCarRow::fromCar)
+            .limit(24)
             .toList();
+    }
+
+    private int selectionRank(int entityId) {
+        if (entityId == leftTeamCarId()) {
+            return 0;
+        }
+        if (entityId == rightTeamCarId()) {
+            return 1;
+        }
+        return 2;
     }
 
     @Override

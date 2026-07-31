@@ -19,11 +19,20 @@ public final class RaceFlagClient {
         globalFlag = next;
         if (announce && changed) {
             Minecraft minecraft = Minecraft.getInstance();
-            minecraft.gui.setTitle(Component.translatable("screen.openwheelracing.race_director.flag." + next.key()));
+            minecraft.gui.setTitle(Component.translatable("screen.openwheelracing.race_director.flag." + next.key()).withColor(flagColor(next)));
         }
     }
 
     public static RaceFlagMode getGlobalFlag() {
         return globalFlag;
+    }
+
+    private static int flagColor(RaceFlagMode flag) {
+        return switch (flag) {
+            case GREEN -> 0x7EE787;
+            case YELLOW, VIRTUAL_SAFETY_CAR -> 0xFFD866;
+            case RED -> 0xFF7777;
+            case SAFETY_CAR -> 0x79C0FF;
+        };
     }
 }

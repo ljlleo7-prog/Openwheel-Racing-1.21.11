@@ -3,6 +3,7 @@ package com.openwheelracing.network;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.car.CarLiveryTexture;
+import com.openwheelracing.content.car.ServerLiveryTextures;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.race.OWRLapRecords;
@@ -11,6 +12,7 @@ import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.content.race.RaceFlagMode;
 import com.openwheelracing.content.race.TeamCarRow;
+import com.openwheelracing.client.livery.ClientLiveryTextures;
 import com.openwheelracing.client.hud.LapRankingClient;
 import com.openwheelracing.client.hud.RaceFlagClient;
 import com.openwheelracing.content.track.TrackEditorMaterial;
@@ -54,6 +56,7 @@ public final class OWRNetwork {
         registrar.playToServer(RepairCarMessage.TYPE, codec(RepairCarMessage::encode, RepairCarMessage::decode), RepairCarMessage::handle);
         registrar.playToServer(CycleLiveryMessage.TYPE, codec(CycleLiveryMessage::encode, CycleLiveryMessage::decode), CycleLiveryMessage::handle);
         registrar.playToServer(SetLiveryColorMessage.TYPE, codec(SetLiveryColorMessage::encode, SetLiveryColorMessage::decode), SetLiveryColorMessage::handle);
+        registrar.playToServer(UploadLiveryTextureMessage.TYPE, codec(UploadLiveryTextureMessage::encode, UploadLiveryTextureMessage::decode), UploadLiveryTextureMessage::handle);
         registrar.playToServer(SetLiveryTextureMessage.TYPE, codec(SetLiveryTextureMessage::encode, SetLiveryTextureMessage::decode), SetLiveryTextureMessage::handle);
         registrar.playToServer(ShiftMessage.TYPE, codec(ShiftMessage::encode, ShiftMessage::decode), ShiftMessage::handle);
         registrar.playToServer(ExitCarMessage.TYPE, codec(ExitCarMessage::encode, ExitCarMessage::decode), ExitCarMessage::handle);
@@ -76,10 +79,25 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorSetArchiveModeMessage.TYPE, codec(RaceDirectorSetArchiveModeMessage::encode, RaceDirectorSetArchiveModeMessage::decode), RaceDirectorSetArchiveModeMessage::handle);
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
         registrar.playToServer(TeamTerminalSenseCarsMessage.TYPE, codec(TeamTerminalSenseCarsMessage::encode, TeamTerminalSenseCarsMessage::decode), TeamTerminalSenseCarsMessage::handle);
+        registrar.playToServer(TeamTerminalBindCarMessage.TYPE, codec(TeamTerminalBindCarMessage::encode, TeamTerminalBindCarMessage::decode), TeamTerminalBindCarMessage::handle);
         registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
         registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
+        registrar.playToClient(LiveryTextureCacheMessage.TYPE, codec(LiveryTextureCacheMessage::encode, LiveryTextureCacheMessage::decode), LiveryTextureCacheMessage::handle);
         registrar.playToClient(RaceFlagUpdateMessage.TYPE, codec(RaceFlagUpdateMessage::encode, RaceFlagUpdateMessage::decode), RaceFlagUpdateMessage::handle);
         registrar.playToClient(RankingBoardMessage.TYPE, codec(RankingBoardMessage::encode, RankingBoardMessage::decode), RankingBoardMessage::handle);
+    }
+
+    public static void sendLiveryTexture(ServerPlayer player, String textureId, byte[] pngBytes) {
+        PacketDistributor.sendToPlayer(player, new LiveryTextureCacheMessage(textureId, pngBytes));
+    }
+
+    private static void syncLiveryToTrackingCars(ServerLevel level, String textureId, byte[] pngBytes) {
+        String safe = CarLiveryTexture.sanitize(textureId);
+        for (Entity entity : level.getAllEntities()) {
+            if (entity instanceof OpenwheelCarEntity car && car.getLiveryTexture().id().equals(safe)) {
+                PacketDistributor.sendToPlayersTrackingEntity(car, new LiveryTextureCacheMessage(safe, pngBytes));
+            }
+        }
     }
 
     public static void sendToServer(CustomPacketPayload payload) {
@@ -254,6 +272,38 @@ public final class OWRNetwork {
         }
     }
 
+    public record UploadLiveryTextureMessage(String textureId, byte[] pngBytes) implements CustomPacketPayload {
+        private static final int MAX_BYTES = 1_048_576;
+        public static final CustomPacketPayload.Type<UploadLiveryTextureMessage> TYPE = payloadType("upload_livery_texture_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(UploadLiveryTextureMessage message, FriendlyByteBuf buffer) {
+            buffer.writeUtf(CarLiveryTexture.sanitize(message.textureId));
+            buffer.writeByteArray(message.pngBytes);
+        }
+
+        private static UploadLiveryTextureMessage decode(FriendlyByteBuf buffer) {
+            return new UploadLiveryTextureMessage(buffer.readUtf(80), buffer.readByteArray(MAX_BYTES));
+        }
+
+        private static void handle(UploadLiveryTextureMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu) || !menu.allowsLivery()) {
+                    return;
+                }
+                try {
+                    ServerLiveryTextures.save(player.level().getServer(), message.textureId, message.pngBytes);
+                } catch (java.io.IOException ignored) {
+                }
+            });
+        }
+    }
+
     public record SetLiveryTextureMessage(String textureId) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<SetLiveryTextureMessage> TYPE = payloadType("set_livery_texture_message");
 
@@ -277,6 +327,12 @@ public final class OWRNetwork {
                     return;
                 }
                 if (menu.queueLiveryTexture(message.textureId)) {
+                    if (player.level() instanceof ServerLevel serverLevel) {
+                        byte[] pngBytes = ServerLiveryTextures.read(serverLevel.getServer(), message.textureId);
+                        if (pngBytes.length > 0) {
+                            syncLiveryToTrackingCars(serverLevel, message.textureId, pngBytes);
+                        }
+                    }
                     menu.slotsChanged(menu.getContainer());
                 }
             });
@@ -775,6 +831,8 @@ public final class OWRNetwork {
             buffer.writeLong(snapshot.activeSessionId());
             buffer.writeUtf(snapshot.activeSessionName());
             buffer.writeBoolean(snapshot.archiveMode());
+            buffer.writeInt(snapshot.leftTeamCarId());
+            buffer.writeInt(snapshot.rightTeamCarId());
             buffer.writeVarInt(snapshot.laps().size());
             for (RaceDirectorLapRow row : snapshot.laps()) {
                 RaceDirectorLapRow.encode(row, buffer);
@@ -803,6 +861,8 @@ public final class OWRNetwork {
             long activeSessionId = buffer.readLong();
             String activeSessionName = buffer.readUtf();
             boolean archiveMode = buffer.readBoolean();
+            int leftTeamCarId = buffer.readInt();
+            int rightTeamCarId = buffer.readInt();
             int lapCount = buffer.readVarInt();
             java.util.ArrayList<RaceDirectorLapRow> laps = new java.util.ArrayList<>(lapCount);
             for (int index = 0; index < lapCount; index++) {
@@ -813,11 +873,40 @@ public final class OWRNetwork {
             for (int index = 0; index < carCount; index++) {
                 teamCars.add(TeamCarRow.decode(buffer));
             }
-            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier, activeSessionId, activeSessionName, archiveMode, laps, teamCars));
+            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier, activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, laps, teamCars));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {
             context.enqueueWork(() -> applyRaceDirectorSnapshot(message.snapshot));
+        }
+    }
+
+    public record LiveryTextureCacheMessage(String textureId, byte[] pngBytes) implements CustomPacketPayload {
+        private static final int MAX_BYTES = 1_048_576;
+        public static final CustomPacketPayload.Type<LiveryTextureCacheMessage> TYPE = payloadType("livery_texture_cache_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(LiveryTextureCacheMessage message, FriendlyByteBuf buffer) {
+            buffer.writeUtf(CarLiveryTexture.sanitize(message.textureId));
+            buffer.writeByteArray(message.pngBytes);
+        }
+
+        private static LiveryTextureCacheMessage decode(FriendlyByteBuf buffer) {
+            return new LiveryTextureCacheMessage(buffer.readUtf(80), buffer.readByteArray(MAX_BYTES));
+        }
+
+        private static void handle(LiveryTextureCacheMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                try {
+                    ClientLiveryTextures.saveSynced(net.minecraft.client.Minecraft.getInstance(), message.textureId, message.pngBytes);
+                    com.openwheelracing.client.render.OpenwheelCarRenderer.invalidateLiveryCache(message.textureId);
+                } catch (java.io.IOException ignored) {
+                }
+            });
         }
     }
 
@@ -1131,6 +1220,35 @@ public final class OWRNetwork {
                 if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.showsTeamTerminal()) {
                     return;
                 }
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
+    public record TeamTerminalBindCarMessage(int side, int entityId) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<TeamTerminalBindCarMessage> TYPE = payloadType("team_terminal_bind_car_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(TeamTerminalBindCarMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.side);
+            buffer.writeInt(message.entityId);
+        }
+
+        private static TeamTerminalBindCarMessage decode(FriendlyByteBuf buffer) {
+            return new TeamTerminalBindCarMessage(buffer.readInt(), buffer.readInt());
+        }
+
+        private static void handle(TeamTerminalBindCarMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.showsTeamTerminal()) {
+                    return;
+                }
+                menu.bindTeamCar(message.side, message.entityId);
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });
         }

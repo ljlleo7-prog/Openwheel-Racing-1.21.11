@@ -82,7 +82,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         super.submit(state, poseStack, nodeCollector, cameraState);
         loadModel();
 
-        NativeImage liveryImage = state.liveryTexture.isPresent() ? ClientLiveryTextures.loadOrCreate(Minecraft.getInstance(), state.liveryTexture, state.liveryColors.body()) : null;
+        NativeImage liveryImage = state.liveryTexture.isPresent() ? ClientLiveryTextures.loadExisting(Minecraft.getInstance(), state.liveryTexture) : null;
         String liveryColorKey = liveryColorKey(state.liveryColors, state.liveryTexture);
         int[] bakedColors = BAKED_COLORS.computeIfAbsent(liveryColorKey, ignored -> carModel.bakeColors(face -> liveryColor(face, state.liveryColors, liveryImage)));
 
