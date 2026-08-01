@@ -117,6 +117,7 @@
   "screen.openwheelracing.race_director.active_session": "Session: %s",
   "screen.openwheelracing.race_director.session_name_hint": "session name",
   "screen.openwheelracing.race_director.new_session": "New Session",
+  "screen.openwheelracing.race_director.refresh": "Refresh",
   "screen.openwheelracing.race_director.archive": "Archive",
   "screen.openwheelracing.race_director.current": "Current",
   "screen.openwheelracing.race_director.checkpoints": "Checkpoints",
@@ -297,5 +298,9 @@
   "advancements.openwheelracing.build_circuit.title": "Race Director",
   "advancements.openwheelracing.build_circuit.description": "Place a start/finish line to begin timing laps",
   "advancements.openwheelracing.complete_lap.title": "Flying Lap",
-  "advancements.openwheelracing.complete_lap.description": "Complete a valid timed lap"
+  "advancements.openwheelracing.complete_lap.description": "Complete a valid timed lap",
+  "screen.openwheelracing.race_director.new_session_short": "New",
+  "screen.openwheelracing.race_director.checkpoints_short": "CP",
+  "screen.openwheelracing.race_director.off_track_short": "Track",
+  "screen.openwheelracing.team_terminal.sense_cars_short": "Scan"
 }

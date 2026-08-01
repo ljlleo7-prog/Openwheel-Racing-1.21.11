@@ -911,18 +911,18 @@ public class OpenwheelCarEntity extends Entity {
         return true;
     }
 
-    private void trySwapTyres(Player player, InteractionHand hand, ItemStack heldStack) {
+    private boolean trySwapTyres(Player player, ItemStack heldStack) {
         if (!isOnPitStopMark()) {
-            messageDriver(Component.literal("Tyre change only available on the pit stop mark"));
-            return;
+            messagePitCrew(player, Component.literal("Tyre change only available on the pit stop mark"));
+            return false;
         }
         double speed = Math.sqrt(getDeltaMovement().x * getDeltaMovement().x + getDeltaMovement().z * getDeltaMovement().z);
         if (speed > 0.05) {
-            messageDriver(Component.literal("Come to a stop before tyre change"));
-            return;
+            messagePitCrew(player, Component.literal("Come to a stop before tyre change"));
+            return false;
         }
         if (isInPitStop() || player.getCooldowns().isOnCooldown(heldStack)) {
-            return;
+            return false;
         }
 
         int newCompound = TyreItem.getCompound(heldStack);
@@ -940,7 +940,8 @@ public class OpenwheelCarEntity extends Entity {
         if (!player.addItem(oldTyres)) {
             player.drop(oldTyres, false);
         }
-        messageDriver(Component.literal("Tyres changed to C" + (newCompound + 1) + " (" + newRemainingPercent + "%)"));
+        messagePitCrew(player, Component.literal("Tyres changed to C" + (newCompound + 1) + " (" + newRemainingPercent + "%)"));
+        return true;
     }
 
     public void crossStartFinishLine(BlockPos pos, Direction markerFacing) {
@@ -1135,14 +1136,17 @@ public class OpenwheelCarEntity extends Entity {
 
     @Override
     public InteractionResult interact(Player player, InteractionHand hand) {
-        if (level().isClientSide()) {
-            return InteractionResult.PASS;
-        }
-
         ItemStack heldStack = player.getItemInHand(hand);
         if (heldStack.is(OWRItems.TIRES.get())) {
-            trySwapTyres(player, hand, heldStack);
+            if (level().isClientSide()) {
+                return InteractionResult.SUCCESS;
+            }
+            trySwapTyres(player, heldStack);
             return InteractionResult.CONSUME;
+        }
+
+        if (level().isClientSide()) {
+            return InteractionResult.PASS;
         }
 
         // Sneak + empty hand on empty car → pick up as item
@@ -2710,6 +2714,13 @@ public class OpenwheelCarEntity extends Entity {
 
     private void playShiftFeedback(float pitch) {
         level().playSound(null, getX(), getY(), getZ(), SoundEvents.METAL_PRESSURE_PLATE_CLICK_ON, SoundSource.PLAYERS, 0.35f, pitch);
+    }
+
+    private void messagePitCrew(Player pitCrew, Component message) {
+        pitCrew.displayClientMessage(message, true);
+        if (!hasPassenger(pitCrew)) {
+            messageDriver(message);
+        }
     }
 
     private void messageDriver(Component message) {

@@ -11,6 +11,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -20,12 +21,20 @@ import net.minecraft.world.entity.player.Inventory;
 
 public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu> {
     private static final int ROW_X = 12;
-    private static final int ROW_Y = 116;
+    private static final int ROW_Y = 132;
     private static final int ROW_WIDTH = 200;
     private static final int ROW_HEIGHT = 12;
     private static final int RIGHT_X = 232;
+    private static final int TEAM_LIST_X = 14;
+    private static final int TEAM_LIST_Y = 90;
+    private static final int TEAM_LIST_COLUMN_WIDTH = 176;
+    private static final int TEAM_LIST_COLUMNS = 2;
+    private static final int TEAM_LIST_ROWS = 3;
+    private static final int TEAM_PANEL_Y = 132;
+    private static final int TEAM_PANEL_WIDTH = 176;
     private long selectedLapId = -1L;
     private int selectedTeamCarId = -1;
+    private EditBox sessionNameBox;
 
     public RaceDirectorScreen(RaceDirectorMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -73,13 +82,14 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.fill(x + 6, y + 16, x + imageWidth - 6, y + 58, 0xFF2F3640);
         if (menu.showsTeamTerminal()) {
             graphics.fill(x + 6, y + 66, x + imageWidth - 6, y + 218, 0xFF2A3038);
-            graphics.fill(x + 12, y + 118, x + 190, y + 210, 0xFF242A31);
-            graphics.fill(x + 200, y + 118, x + 378, y + 210, 0xFF242A31);
+            graphics.fill(x + 12, y + 88, x + imageWidth - 12, y + 126, 0xFF242A31);
+            graphics.fill(x + 12, y + 130, x + 192, y + 218, 0xFF242A31);
+            graphics.fill(x + 198, y + 130, x + 378, y + 218, 0xFF242A31);
         } else {
             graphics.fill(x + 6, y + 66, x + 224, y + 218, 0xFF2A3038);
             graphics.fill(x + 228, y + 66, x + imageWidth - 6, y + 218, 0xFF2A3038);
-            graphics.fill(x + 232, y + 90, x + imageWidth - 10, y + 132, 0xFF242A31);
-            graphics.fill(x + 232, y + 152, x + imageWidth - 10, y + 214, 0xFF242A31);
+            graphics.fill(x + 232, y + 90, x + imageWidth - 10, y + 138, 0xFF242A31);
+            graphics.fill(x + 232, y + 158, x + imageWidth - 10, y + 218, 0xFF242A31);
         }
     }
 
@@ -112,8 +122,8 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
                 return true;
             }
         }
-        if (menu.showsTeamTerminal() && event.button() == 0 && isInsideTeamList(event.x(), event.y())) {
-            int index = (int) ((event.y() - topPos - 92) / ROW_HEIGHT);
+        if (menu.showsTeamTerminal() && event.button() == 0) {
+            int index = teamListIndex(event.x(), event.y());
             if (index >= 0 && index < menu.getSnapshot().teamCars().size()) {
                 selectedTeamCarId = menu.getSnapshot().teamCars().get(index).entityId();
                 rebuildWidgets();
@@ -127,35 +137,65 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     }
 
     private void addBoardWidgets() {
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.checkpoints"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.CHECKPOINTS)))
-            .bounds(leftPos + 232, topPos + 68, 72, 16)
+        addSessionNameBox();
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.new_session_short"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorStartSessionMessage(sessionName())))
+            .bounds(leftPos + 12, topPos + 68, 64, 16)
             .build());
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.off_track"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.OFF_TRACK)))
-            .bounds(leftPos + 310, topPos + 68, 62, 16)
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.refresh"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorRefreshSessionMessage()))
+            .bounds(leftPos + 82, topPos + 68, 48, 16)
+            .build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.archive"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetArchiveModeMessage(!menu.getSnapshot().archiveMode())))
+            .bounds(leftPos + 136, topPos + 68, 48, 16)
+            .build());
+        addRenderableWidget(Button.builder(Component.literal("<"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetPageMessage(menu.getSnapshot().page() - 1)))
+            .bounds(leftPos + 190, topPos + 68, 16, 16)
+            .build());
+        addRenderableWidget(Button.builder(Component.literal(">"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetPageMessage(menu.getSnapshot().page() + 1)))
+            .bounds(leftPos + 208, topPos + 68, 16, 16)
+            .build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.checkpoints_short"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.CHECKPOINTS)))
+            .bounds(leftPos + 232, topPos + 68, 34, 16)
+            .build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.off_track_short"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.OFF_TRACK)))
+            .bounds(leftPos + 272, topPos + 68, 58, 16)
             .build());
         addRenderableWidget(Button.builder(Component.literal("-"), button -> setMinimumLapTicks(menu.getSnapshot().minimumValidLapTicks() - 20))
-            .bounds(leftPos + 232, topPos + 138, 18, 14)
+            .bounds(leftPos + 232, topPos + 148, 18, 14)
             .build());
         addRenderableWidget(Button.builder(Component.literal("+"), button -> setMinimumLapTicks(menu.getSnapshot().minimumValidLapTicks() + 20))
-            .bounds(leftPos + 254, topPos + 138, 18, 14)
+            .bounds(leftPos + 254, topPos + 148, 18, 14)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.invalidate"), button -> {
             if (selectedLapId != -1L) {
                 OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorInvalidateLapMessage(selectedLapId));
             }
         }).bounds(leftPos + 286, topPos + 224, 86, 16).build());
-        addFlagTiles(leftPos + RIGHT_X, topPos + 90);
+        addFlagTiles(leftPos + RIGHT_X, topPos + 92);
+    }
+
+    private void addSessionNameBox() {
+        String previous = sessionNameBox == null ? menu.getSnapshot().activeSessionName() : sessionNameBox.getValue();
+        sessionNameBox = new EditBox(font, leftPos + 12, topPos + 88, 128, 16, Component.translatable("screen.openwheelracing.race_director.session_name_hint"));
+        sessionNameBox.setMaxLength(80);
+        sessionNameBox.setValue(previous == null || previous.isBlank() ? menu.getSnapshot().activeSessionName() : previous);
+        sessionNameBox.setHint(Component.translatable("screen.openwheelracing.race_director.session_name_hint"));
+        addRenderableWidget(sessionNameBox);
+    }
+
+    private String sessionName() {
+        String value = sessionNameBox == null ? "" : sessionNameBox.getValue().trim();
+        return value.isEmpty() ? "Session" : value;
     }
 
     private void addTeamWidgets() {
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.team_terminal.sense_cars"), button -> OWRNetwork.sendToServer(new OWRNetwork.TeamTerminalSenseCarsMessage()))
-            .bounds(leftPos + 16, topPos + 68, 86, 16)
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.team_terminal.sense_cars_short"), button -> OWRNetwork.sendToServer(new OWRNetwork.TeamTerminalSenseCarsMessage()))
+            .bounds(leftPos + 16, topPos + 68, 70, 16)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.team_terminal.bind_left"), button -> bindSelectedTeamCar(0))
-            .bounds(leftPos + 108, topPos + 68, 58, 16)
+            .bounds(leftPos + 94, topPos + 68, 58, 16)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.team_terminal.bind_right"), button -> bindSelectedTeamCar(1))
-            .bounds(leftPos + 172, topPos + 68, 62, 16)
+            .bounds(leftPos + 160, topPos + 68, 62, 16)
             .build());
         addRenderableWidget(Button.builder(Component.literal("-L"), button -> OWRNetwork.sendToServer(new OWRNetwork.TeamTerminalBindCarMessage(0, -1)))
             .bounds(leftPos + 304, topPos + 68, 28, 16)
@@ -180,62 +220,57 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     }
 
     private void drawBoardPage(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.session_info"), 8, 58, 0xFFE8EDF2, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.countdown_placeholder"), 12, 88, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.lap_counter_placeholder", snapshot.laps().size()), 12, 100, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable(snapshot.archiveMode() ? "screen.openwheelracing.race_director.archived_laps" : "screen.openwheelracing.race_director.recent_laps"), 12, 108, 0xFFE8EDF2, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.countdown_placeholder"), 12, 108, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.lap_counter_placeholder", snapshot.laps().size()), 12, 120, 0xFFC9D1D9, false);
         drawLapRows(graphics, snapshot);
         drawSelectedLap(graphics);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rule_setup"), RIGHT_X, 74, 0xFFE8EDF2, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rule_status", state(snapshot.checkpointCheckEnabled()), state(snapshot.offTrackCheckEnabled()), formatSeconds(snapshot.minimumValidLapTicks())), RIGHT_X, 136, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.flag_assignment"), RIGHT_X, 156, 0xFFE8EDF2, false);
-        graphics.drawString(font, fit(Component.translatable("screen.openwheelracing.race_director.driver_flags_placeholder").getString(), 148), RIGHT_X, 174, 0xFFC9D1D9, false);
+        graphics.drawString(font, fit("CP " + state(snapshot.checkpointCheckEnabled()) + "  OT " + state(snapshot.offTrackCheckEnabled()) + "  Min " + formatSeconds(snapshot.minimumValidLapTicks()), 142), RIGHT_X, 136, 0xFFC9D1D9, false);
     }
 
     private void drawTeamTerminal(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.team_terminal.title"), 12, 72, 0xFFE8EDF2, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.team_terminal.bind_hint"), 108, 88, 0xFFC9D1D9, false);
         List<TeamCarRow> cars = snapshot.teamCars();
+        drawTeamCarPanel(graphics, findTeamCar(snapshot.leftTeamCarId()), 14, TEAM_PANEL_Y, TEAM_PANEL_WIDTH, true);
+        drawTeamCarPanel(graphics, findTeamCar(snapshot.rightTeamCarId()), 200, TEAM_PANEL_Y, TEAM_PANEL_WIDTH, false);
         if (cars.isEmpty()) {
-            graphics.drawString(font, Component.translatable("screen.openwheelracing.team_terminal.no_cars"), 16, 94, 0xFFC9D1D9, false);
+            graphics.drawString(font, Component.translatable("screen.openwheelracing.team_terminal.no_cars"), TEAM_LIST_X, TEAM_LIST_Y, 0xFFC9D1D9, false);
             return;
         }
-        drawTeamCarPanel(graphics, findTeamCar(snapshot.leftTeamCarId()), 20, 120, Component.translatable("screen.openwheelracing.team_terminal.left_car"));
-        drawTeamCarPanel(graphics, findTeamCar(snapshot.rightTeamCarId()), 206, 120, Component.translatable("screen.openwheelracing.team_terminal.right_car"));
-        int listY = 94;
-        for (int index = 0; index < Math.min(8, cars.size()); index++) {
+        int visibleCars = Math.min(TEAM_LIST_ROWS * TEAM_LIST_COLUMNS, cars.size());
+        for (int index = 0; index < visibleCars; index++) {
             TeamCarRow car = cars.get(index);
-            int y = listY + index * ROW_HEIGHT;
+            int column = index % TEAM_LIST_COLUMNS;
+            int row = index / TEAM_LIST_COLUMNS;
+            int x = TEAM_LIST_X + column * (TEAM_LIST_COLUMN_WIDTH + 8);
+            int y = TEAM_LIST_Y + row * ROW_HEIGHT;
             if (car.entityId() == selectedTeamCarId) {
-                graphics.fill(14, y - 1, 196, y + ROW_HEIGHT - 1, 0xFF3F5F7F);
+                graphics.fill(x, y - 1, x + TEAM_LIST_COLUMN_WIDTH, y + ROW_HEIGHT - 1, 0xFF3F5F7F);
             }
             if (car.entityId() == snapshot.leftTeamCarId() || car.entityId() == snapshot.rightTeamCarId()) {
-                graphics.fill(16, y, 20, y + 10, 0xFF7EE787);
+                graphics.fill(x + 2, y, x + 6, y + 10, 0xFF7EE787);
             } else {
-                graphics.fill(16, y, 20, y + 10, car.liveryColor());
+                graphics.fill(x + 2, y, x + 6, y + 10, car.liveryColor());
             }
-            graphics.drawString(font, fit("#" + car.entityId() + " " + car.liveryName() + " " + car.riderName(), 168), 24, y, 0xFFE8EDF2, false);
+            graphics.drawString(font, fit("#" + car.entityId() + " " + car.liveryName() + " " + car.riderName(), TEAM_LIST_COLUMN_WIDTH - 14), x + 10, y, 0xFFE8EDF2, false);
         }
     }
 
-    private void drawTeamCarPanel(GuiGraphics graphics, TeamCarRow car, int x, int y, Component title) {
+    private void drawTeamCarPanel(GuiGraphics graphics, TeamCarRow car, int x, int y, int width, boolean leftSide) {
+        graphics.drawString(font, leftSide ? "L" : "R", x + width - 10, y + 6, 0xFF56616C, false);
         if (car == null) {
-            graphics.drawString(font, title, x, y, 0xFFE8EDF2, false);
-            graphics.drawString(font, Component.translatable("screen.openwheelracing.team_terminal.empty_slot"), x, y + 18, 0xFFC9D1D9, false);
+            graphics.drawString(font, Component.translatable("screen.openwheelracing.team_terminal.empty_slot"), x + 8, y + 34, 0xFFC9D1D9, false);
             return;
         }
-        drawTeamCar(graphics, car, x, y, title);
+        drawTeamCar(graphics, car, x, y, width);
     }
 
-    private void drawTeamCar(GuiGraphics graphics, TeamCarRow car, int x, int y, Component title) {
-        graphics.drawString(font, title, x, y, 0xFFE8EDF2, false);
-        graphics.fill(x, y + 13, x + 10, y + 21, car.liveryColor());
-        graphics.drawString(font, fit("#" + car.entityId() + " " + car.liveryName(), 126), x + 14, y + 13, 0xFFE8EDF2, false);
-        graphics.drawString(font, fit(Component.translatable("screen.openwheelracing.team_terminal.rider", car.riderName()).getString(), 142), x, y + 26, 0xFFC9D1D9, false);
-        graphics.drawString(font, String.format("SPD %3.0f  G%s  RPM %d", car.speedKmh(), gearLabel(car.gear()), car.rpm()), x, y + 40, 0xFFE8EDF2, false);
-        graphics.drawString(font, String.format("ERS %3.0f%% %+.0fkW", car.ersPercent(), car.ersPowerKw()), x, y + 52, 0xFF99DDFF, false);
-        graphics.drawString(font, String.format("TYRE %3.0f%% %3.0fC", car.tyrePercent(), car.tyreTemperatureC()), x, y + 64, 0xFFFFD866, false);
-        graphics.drawString(font, String.format("DMG %3.0f%%", car.damagePercent()), x, y + 76, car.damagePercent() > 70.0f ? 0xFFFF7777 : 0xFFC9D1D9, false);
+    private void drawTeamCar(GuiGraphics graphics, TeamCarRow car, int x, int y, int width) {
+        graphics.fill(x + 8, y + 8, x + 18, y + 18, car.liveryColor());
+        graphics.drawString(font, fit("#" + car.entityId() + " " + car.liveryName(), width - 34), x + 24, y + 8, 0xFFE8EDF2, false);
+        graphics.drawString(font, fit(Component.translatable("screen.openwheelracing.team_terminal.rider", car.riderName()).getString(), width - 16), x + 8, y + 22, 0xFFC9D1D9, false);
+        graphics.drawString(font, String.format("SPD %3.0f km/h  G%s", car.speedKmh(), gearLabel(car.gear())), x + 8, y + 36, 0xFFE8EDF2, false);
+        graphics.drawString(font, String.format("RPM %d", car.rpm()), x + 8, y + 48, 0xFFE8EDF2, false);
+        graphics.drawString(font, String.format("ERS %3.0f%%  %+.0fkW", car.ersPercent(), car.ersPowerKw()), x + 8, y + 60, 0xFF99DDFF, false);
+        graphics.drawString(font, String.format("TY %3.0f%% %3.0fC  DMG %3.0f%%", car.tyrePercent(), car.tyreTemperatureC(), car.damagePercent()), x + 8, y + 72, car.damagePercent() > 70.0f ? 0xFFFF7777 : 0xFFFFD866, false);
     }
 
     private boolean isInsideRows(double mouseX, double mouseY) {
@@ -244,10 +279,20 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         return localX >= ROW_X && localX <= ROW_X + ROW_WIDTH && localY >= ROW_Y && localY <= ROW_Y + menu.getSnapshot().laps().size() * ROW_HEIGHT;
     }
 
-    private boolean isInsideTeamList(double mouseX, double mouseY) {
+    private int teamListIndex(double mouseX, double mouseY) {
         double localX = mouseX - leftPos;
         double localY = mouseY - topPos;
-        return localX >= 14 && localX <= 196 && localY >= 92 && localY <= 92 + Math.min(8, menu.getSnapshot().teamCars().size()) * ROW_HEIGHT;
+        if (localY < TEAM_LIST_Y || localY >= TEAM_LIST_Y + TEAM_LIST_ROWS * ROW_HEIGHT) {
+            return -1;
+        }
+        int row = (int) ((localY - TEAM_LIST_Y) / ROW_HEIGHT);
+        for (int column = 0; column < TEAM_LIST_COLUMNS; column++) {
+            int x = TEAM_LIST_X + column * (TEAM_LIST_COLUMN_WIDTH + 8);
+            if (localX >= x && localX <= x + TEAM_LIST_COLUMN_WIDTH) {
+                return row * TEAM_LIST_COLUMNS + column;
+            }
+        }
+        return -1;
     }
 
     private TeamCarRow selectedTeamCar() {
@@ -288,22 +333,21 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     private void drawSelectedLap(GuiGraphics graphics) {
         RaceDirectorLapRow row = selectedRow();
-        int y = 176;
+        int y = 164;
         if (row == null) {
             graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.select_lap"), RIGHT_X, y, 0xFFC9D1D9, false);
             return;
         }
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.details"), RIGHT_X, y, 0xFFE8EDF2, false);
-        graphics.drawString(font, fit(row.driverName(), 104), RIGHT_X, y + 14, 0xFFE8EDF2, false);
-        graphics.drawString(font, formatLapTime(row.lapTicks()) + " / CP " + row.checkpointCount(), RIGHT_X, y + 26, row.invalidated() ? 0xFFFF7777 : 0xFF7EE787, false);
+        graphics.drawString(font, fit(row.driverName(), 142), RIGHT_X, y, 0xFFE8EDF2, false);
+        graphics.drawString(font, formatLapTime(row.lapTicks()) + " / CP " + row.checkpointCount(), RIGHT_X, y + 12, row.invalidated() ? 0xFFFF7777 : 0xFF7EE787, false);
         if (menu.getSnapshot().archiveMode()) {
-            graphics.drawString(font, fit(row.sessionName(), 104), RIGHT_X, y + 38, 0xFFC9D1D9, false);
+            graphics.drawString(font, fit(row.sessionName(), 142), RIGHT_X, y + 24, 0xFFC9D1D9, false);
             return;
         }
         BlockPos pos = BlockPos.of(row.startFinishPos());
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.position", pos.getX(), pos.getY(), pos.getZ()), RIGHT_X, y + 38, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.setup", row.power(), row.grip(), row.aero(), row.gearing()), RIGHT_X, y + 50, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.condition", row.damagePercent(), row.tyreWearPercent()), RIGHT_X, y + 62, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.position", pos.getX(), pos.getY(), pos.getZ()), RIGHT_X, y + 24, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.setup", row.power(), row.grip(), row.aero(), row.gearing()), RIGHT_X, y + 36, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.condition", row.damagePercent(), row.tyreWearPercent()), RIGHT_X, y + 48, 0xFFC9D1D9, false);
     }
 
     private RaceDirectorLapRow selectedRow() {

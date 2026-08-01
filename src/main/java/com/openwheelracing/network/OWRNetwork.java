@@ -76,6 +76,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorSetGlobalFlagMessage.TYPE, codec(RaceDirectorSetGlobalFlagMessage::encode, RaceDirectorSetGlobalFlagMessage::decode), RaceDirectorSetGlobalFlagMessage::handle);
         registrar.playToServer(RaceDirectorCycleConditionModifierMessage.TYPE, codec(RaceDirectorCycleConditionModifierMessage::encode, RaceDirectorCycleConditionModifierMessage::decode), RaceDirectorCycleConditionModifierMessage::handle);
         registrar.playToServer(RaceDirectorStartSessionMessage.TYPE, codec(RaceDirectorStartSessionMessage::encode, RaceDirectorStartSessionMessage::decode), RaceDirectorStartSessionMessage::handle);
+        registrar.playToServer(RaceDirectorRefreshSessionMessage.TYPE, codec(RaceDirectorRefreshSessionMessage::encode, RaceDirectorRefreshSessionMessage::decode), RaceDirectorRefreshSessionMessage::handle);
         registrar.playToServer(RaceDirectorSetArchiveModeMessage.TYPE, codec(RaceDirectorSetArchiveModeMessage::encode, RaceDirectorSetArchiveModeMessage::decode), RaceDirectorSetArchiveModeMessage::handle);
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
         registrar.playToServer(TeamTerminalSenseCarsMessage.TYPE, codec(TeamTerminalSenseCarsMessage::encode, TeamTerminalSenseCarsMessage::decode), TeamTerminalSenseCarsMessage::handle);
@@ -1139,6 +1140,32 @@ public final class OWRNetwork {
                 if (player.level() instanceof ServerLevel serverLevel) {
                     broadcastRankingBoard(serverLevel.getServer(), serverLevel);
                 }
+            });
+        }
+    }
+
+    public record RaceDirectorRefreshSessionMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorRefreshSessionMessage> TYPE = payloadType("race_director_refresh_session_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RaceDirectorRefreshSessionMessage message, FriendlyByteBuf buffer) {
+        }
+
+        private static RaceDirectorRefreshSessionMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorRefreshSessionMessage();
+        }
+
+        private static void handle(RaceDirectorRefreshSessionMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
+                    return;
+                }
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });
         }
     }

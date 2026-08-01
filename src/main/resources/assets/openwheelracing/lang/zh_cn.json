@@ -117,6 +117,7 @@
   "screen.openwheelracing.race_director.active_session": "场次：%s",
   "screen.openwheelracing.race_director.session_name_hint": "场次名称",
   "screen.openwheelracing.race_director.new_session": "新场次",
+  "screen.openwheelracing.race_director.refresh": "刷新",
   "screen.openwheelracing.race_director.archive": "历史",
   "screen.openwheelracing.race_director.current": "当前",
   "screen.openwheelracing.race_director.checkpoints": "检查点",
@@ -297,5 +298,9 @@
   "advancements.openwheelracing.build_circuit.title": "赛事总监",
   "advancements.openwheelracing.build_circuit.description": "放置起终点线，开始圈速计时",
   "advancements.openwheelracing.complete_lap.title": "飞驰圈",
-  "advancements.openwheelracing.complete_lap.description": "完成一个有效计时圈"
+  "advancements.openwheelracing.complete_lap.description": "完成一个有效计时圈",
+  "screen.openwheelracing.race_director.new_session_short": "新建",
+  "screen.openwheelracing.race_director.checkpoints_short": "检查",
+  "screen.openwheelracing.race_director.off_track_short": "离道",
+  "screen.openwheelracing.team_terminal.sense_cars_short": "扫描"
 }
