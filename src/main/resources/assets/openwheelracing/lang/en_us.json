@@ -188,6 +188,9 @@
   "screen.openwheelracing.setup.hud.setup": "Setup HUD",
   "screen.openwheelracing.setup.hud.ranking": "Ranking HUD",
   "screen.openwheelracing.setup.hud.physics_debug": "Debug HUD",
+  "screen.openwheelracing.setup.shift_lights": "Shift lights",
+  "screen.openwheelracing.setup.shift_lights.start": "Start %s RPM",
+  "screen.openwheelracing.setup.shift_lights.full": "Full %s RPM",
   "screen.openwheelracing.setup.shown": "Shown",
   "screen.openwheelracing.setup.hidden": "Hidden",
   "screen.openwheelracing.setup.wheel_setup": "Wheel Setup",
@@ -302,5 +305,7 @@
   "screen.openwheelracing.race_director.new_session_short": "New",
   "screen.openwheelracing.race_director.checkpoints_short": "CP",
   "screen.openwheelracing.race_director.off_track_short": "Track",
-  "screen.openwheelracing.team_terminal.sense_cars_short": "Scan"
+  "screen.openwheelracing.team_terminal.sense_cars_short": "Scan",
+  "screen.openwheelracing.race_director.auto_detect_map": "Auto-Detect Map",
+  "screen.openwheelracing.race_director.no_track_map": "No stored map"
 }

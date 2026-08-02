@@ -21,6 +21,8 @@ import com.openwheelracing.content.track.TrackEditorOperation;
 import com.openwheelracing.content.track.TrackEditorPlacementService;
 import com.openwheelracing.content.track.TrackEditorPreset;
 import com.openwheelracing.content.track.TrackEditorUndoStore;
+import com.openwheelracing.content.track.TrackMapSnapshot;
+import com.openwheelracing.content.track.TrackMapAutoDetector;
 import com.openwheelracing.registry.OWRItems;
 import java.lang.reflect.Method;
 import java.util.List;
@@ -45,7 +47,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "4";
+    private static final String PROTOCOL = "7";
 
     private OWRNetwork() {
     }
@@ -81,6 +83,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
         registrar.playToServer(TeamTerminalSenseCarsMessage.TYPE, codec(TeamTerminalSenseCarsMessage::encode, TeamTerminalSenseCarsMessage::decode), TeamTerminalSenseCarsMessage::handle);
         registrar.playToServer(TeamTerminalBindCarMessage.TYPE, codec(TeamTerminalBindCarMessage::encode, TeamTerminalBindCarMessage::decode), TeamTerminalBindCarMessage::handle);
+        registrar.playToServer(RaceMonitorAutoDetectMapMessage.TYPE, codec(RaceMonitorAutoDetectMapMessage::encode, RaceMonitorAutoDetectMapMessage::decode), RaceMonitorAutoDetectMapMessage::handle);
         registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
         registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
         registrar.playToClient(LiveryTextureCacheMessage.TYPE, codec(LiveryTextureCacheMessage::encode, LiveryTextureCacheMessage::decode), LiveryTextureCacheMessage::handle);
@@ -90,6 +93,17 @@ public final class OWRNetwork {
 
     public static void sendLiveryTexture(ServerPlayer player, String textureId, byte[] pngBytes) {
         PacketDistributor.sendToPlayer(player, new LiveryTextureCacheMessage(textureId, pngBytes));
+    }
+
+    public static void syncVisibleLiveries(ServerPlayer player) {
+        if (!(player.level() instanceof ServerLevel level)) {
+            return;
+        }
+        for (Entity entity : level.getAllEntities()) {
+            if (entity instanceof OpenwheelCarEntity car) {
+                ServerLiveryTextures.syncToPlayer(car, player);
+            }
+        }
     }
 
     private static void syncLiveryToTrackingCars(ServerLevel level, String textureId, byte[] pngBytes) {
@@ -790,18 +804,31 @@ public final class OWRNetwork {
         PacketDistributor.sendToPlayer(player, new RaceDirectorSnapshotMessage(snapshot));
     }
 
+    public static void sendRaceFlag(ServerPlayer player, ServerLevel level, boolean announce) {
+        PacketDistributor.sendToPlayer(player, new RaceFlagUpdateMessage(OWRRaceControlState.get(level).getGlobalFlag().ordinal(), announce));
+    }
+
     public static void broadcastRaceFlag(ServerLevel level, RaceFlagMode flag, boolean announce) {
         RaceFlagUpdateMessage message = new RaceFlagUpdateMessage(flag.ordinal(), announce);
         for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
-            PacketDistributor.sendToPlayer(player, message);
+            if (player.level().dimension().equals(level.dimension())) {
+                PacketDistributor.sendToPlayer(player, message);
+            }
         }
+    }
+
+    public static void sendRankingBoard(ServerPlayer player, ServerLevel level) {
+        OWRLapRecords records = OWRLapRecords.get(level);
+        PacketDistributor.sendToPlayer(player, new RankingBoardMessage(records.getActiveSessionName(), records.getActiveSessionBestLapsSorted()));
     }
 
     public static void broadcastRankingBoard(net.minecraft.server.MinecraftServer server, net.minecraft.server.level.ServerLevel level) {
         OWRLapRecords records = OWRLapRecords.get(level);
         RankingBoardMessage msg = new RankingBoardMessage(records.getActiveSessionName(), records.getActiveSessionBestLapsSorted());
         for (net.minecraft.server.level.ServerPlayer p : server.getPlayerList().getPlayers()) {
-            PacketDistributor.sendToPlayer(p, msg);
+            if (p.level().dimension().equals(level.dimension())) {
+                PacketDistributor.sendToPlayer(p, msg);
+            }
         }
     }
 
@@ -834,6 +861,11 @@ public final class OWRNetwork {
             buffer.writeBoolean(snapshot.archiveMode());
             buffer.writeInt(snapshot.leftTeamCarId());
             buffer.writeInt(snapshot.rightTeamCarId());
+            TrackMapSnapshot.encode(snapshot.trackMap(), buffer);
+            buffer.writeBoolean(snapshot.trackMapScanRunning());
+            buffer.writeVarInt(snapshot.trackMapScanScannedChunks());
+            buffer.writeVarInt(snapshot.trackMapScanTotalChunks());
+            buffer.writeVarInt(snapshot.trackMapScanDetectedCells());
             buffer.writeVarInt(snapshot.laps().size());
             for (RaceDirectorLapRow row : snapshot.laps()) {
                 RaceDirectorLapRow.encode(row, buffer);
@@ -864,6 +896,11 @@ public final class OWRNetwork {
             boolean archiveMode = buffer.readBoolean();
             int leftTeamCarId = buffer.readInt();
             int rightTeamCarId = buffer.readInt();
+            TrackMapSnapshot trackMap = TrackMapSnapshot.decode(buffer);
+            boolean trackMapScanRunning = buffer.readBoolean();
+            int trackMapScanScannedChunks = buffer.readVarInt();
+            int trackMapScanTotalChunks = buffer.readVarInt();
+            int trackMapScanDetectedCells = buffer.readVarInt();
             int lapCount = buffer.readVarInt();
             java.util.ArrayList<RaceDirectorLapRow> laps = new java.util.ArrayList<>(lapCount);
             for (int index = 0; index < lapCount; index++) {
@@ -874,7 +911,7 @@ public final class OWRNetwork {
             for (int index = 0; index < carCount; index++) {
                 teamCars.add(TeamCarRow.decode(buffer));
             }
-            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier, activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, laps, teamCars));
+            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier, activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, trackMap, trackMapScanRunning, trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, laps, teamCars));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {
@@ -1281,6 +1318,35 @@ public final class OWRNetwork {
         }
     }
 
+    public record RaceMonitorAutoDetectMapMessage(int radiusBlocks) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceMonitorAutoDetectMapMessage> TYPE = payloadType("race_monitor_auto_detect_map_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RaceMonitorAutoDetectMapMessage message, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(message.radiusBlocks);
+        }
+
+        private static RaceMonitorAutoDetectMapMessage decode(FriendlyByteBuf buffer) {
+            return new RaceMonitorAutoDetectMapMessage(buffer.readVarInt());
+        }
+
+        private static void handle(RaceMonitorAutoDetectMapMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || (!menu.showsTeamTerminal() && !menu.showsBoard())) {
+                    return;
+                }
+                int radius = Math.max(TrackMapAutoDetector.MIN_RADIUS_BLOCKS, Math.min(TrackMapAutoDetector.MAX_RADIUS_BLOCKS, message.radiusBlocks));
+                menu.autoDetectTrackMap(player.level(), radius);
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
     public record RaceDirectorInvalidateLapMessage(long lapId) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<RaceDirectorInvalidateLapMessage> TYPE = payloadType("race_director_invalidate_lap_message");
 
@@ -1306,11 +1372,16 @@ public final class OWRNetwork {
                 OWRLapRecords records = OWRLapRecords.get(player.level());
                 records.getLap(message.lapId).ifPresent(record -> {
                     if (records.invalidateLap(message.lapId, player.getUUID(), "race director")) {
-                        player.level().getServer().getPlayerList().broadcastSystemMessage(Component.translatable("message.openwheelracing.race_director.lap_invalidated", record.driverName(), formatLapTime(record.lapTicks()), player.getGameProfile().name()), false);
-                        sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+                        Component announcement = Component.translatable("message.openwheelracing.race_director.lap_invalidated", record.driverName(), formatLapTime(record.lapTicks()), player.getGameProfile().name());
                         if (player.level() instanceof ServerLevel serverLevel) {
+                            for (ServerPlayer recipient : serverLevel.getServer().getPlayerList().getPlayers()) {
+                                if (recipient.level().dimension().equals(serverLevel.dimension())) {
+                                    recipient.sendSystemMessage(announcement);
+                                }
+                            }
                             broadcastRankingBoard(serverLevel.getServer(), serverLevel);
                         }
+                        sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
                     }
                 });
             });
@@ -1351,6 +1422,9 @@ public final class OWRNetwork {
 
     private static void applyRaceDirectorSnapshot(RaceDirectorSnapshot snapshot) {
         try {
+            Class<?> cache = Class.forName("com.openwheelracing.client.map.ClientTrackMapCache");
+            Method set = cache.getMethod("set", TrackMapSnapshot.class);
+            set.invoke(null, snapshot.trackMap());
             Class<?> receiver = Class.forName("com.openwheelracing.client.screen.RaceDirectorScreen");
             Method method = receiver.getMethod("applySnapshot", RaceDirectorSnapshot.class);
             method.invoke(null, snapshot);

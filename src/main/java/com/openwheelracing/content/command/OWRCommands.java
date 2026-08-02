@@ -113,21 +113,21 @@ public final class OWRCommands {
 
     private static int listTracks(CommandContext<CommandSourceStack> context) {
         TrackDefinitionsData data = trackData(context);
-        List<TrackDefinition> tracks = data.tracks();
+        List<TrackDefinition> tracks = data.tracksInDimension(dimensionId(context));
         if (tracks.isEmpty()) {
             send(context, "No stewarding tracks defined. Use /owr steward create <name>.");
             return 0;
         }
         send(context, "Stewarding tracks:");
         for (TrackDefinition track : tracks) {
-            String active = data.activeTrack().filter(track::equals).isPresent() ? " *" : "";
+            String active = data.activeTrack(dimensionId(context)).filter(track::equals).isPresent() ? " *" : "";
             send(context, "- " + track.name() + " [" + track.trackId() + "]" + active + " nodes=" + track.centerline().size());
         }
         return tracks.size();
     }
 
     private static int showActiveTrack(CommandContext<CommandSourceStack> context) {
-        Optional<TrackDefinition> active = trackData(context).activeTrack();
+        Optional<TrackDefinition> active = trackData(context).activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -154,8 +154,8 @@ public final class OWRCommands {
         if (trackId == null) {
             return 0;
         }
-        if (!trackData(context).setActiveTrack(trackId)) {
-            send(context, "Unknown stewarding track: " + trackId);
+        if (!trackData(context).setActiveTrack(trackId, dimensionId(context))) {
+            send(context, "Unknown stewarding track in this dimension: " + trackId);
             return 0;
         }
         send(context, "Selected stewarding track " + trackId + ".");
@@ -167,8 +167,8 @@ public final class OWRCommands {
         if (trackId == null) {
             return 0;
         }
-        if (!trackData(context).remove(trackId)) {
-            send(context, "Unknown stewarding track: " + trackId);
+        if (!trackData(context).remove(trackId, dimensionId(context))) {
+            send(context, "Unknown stewarding track in this dimension: " + trackId);
             return 0;
         }
         send(context, "Removed stewarding track " + trackId + ".");
@@ -177,7 +177,7 @@ public final class OWRCommands {
 
     private static int addCenterlinePoint(CommandContext<CommandSourceStack> context, int width) throws CommandSyntaxException {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track. Use /owr steward create <name> first.");
             return 0;
@@ -198,7 +198,7 @@ public final class OWRCommands {
 
     private static int clearCenterline(CommandContext<CommandSourceStack> context) {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -211,7 +211,7 @@ public final class OWRCommands {
 
     private static int finishCenterline(CommandContext<CommandSourceStack> context) {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -230,7 +230,7 @@ public final class OWRCommands {
 
     private static int setStartFinishHere(CommandContext<CommandSourceStack> context, int width) throws CommandSyntaxException {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -245,7 +245,7 @@ public final class OWRCommands {
 
     private static int addCheckpointHere(CommandContext<CommandSourceStack> context, int width) throws CommandSyntaxException {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -264,7 +264,7 @@ public final class OWRCommands {
 
     private static int clearCheckpoints(CommandContext<CommandSourceStack> context) {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -276,14 +276,14 @@ public final class OWRCommands {
     }
 
     private static int addGridSlotHere(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        Optional<TrackDefinition> active = trackData(context).activeTrack();
+        Optional<TrackDefinition> active = trackData(context).activeTrack(dimensionId(context));
         int index = active.map(track -> track.gridSlots().stream().mapToInt(TrackDefinition.GridSlot::index).max().orElse(0) + 1).orElse(1);
         return addGridSlotHere(context, index);
     }
 
     private static int addGridSlotHere(CommandContext<CommandSourceStack> context, int index) throws CommandSyntaxException {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -301,7 +301,7 @@ public final class OWRCommands {
 
     private static int clearGridSlots(CommandContext<CommandSourceStack> context) {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -314,7 +314,7 @@ public final class OWRCommands {
 
     private static int addBoundaryHere(CommandContext<CommandSourceStack> context, TrackDefinition.BoundarySide side) throws CommandSyntaxException {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -332,7 +332,7 @@ public final class OWRCommands {
 
     private static int clearBoundaries(CommandContext<CommandSourceStack> context) {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -345,7 +345,7 @@ public final class OWRCommands {
 
     private static int generateAiLine(CommandContext<CommandSourceStack> context) {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack();
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
         if (active.isEmpty()) {
             send(context, "No active stewarding track selected.");
             return 0;
@@ -404,6 +404,10 @@ public final class OWRCommands {
 
     private static OWRRaceControlState raceControl(CommandContext<CommandSourceStack> context) {
         return OWRRaceControlState.get(context.getSource().getLevel());
+    }
+
+    private static String dimensionId(CommandContext<CommandSourceStack> context) {
+        return context.getSource().getLevel().dimension().identifier().toString();
     }
 
     private static void send(CommandContext<CommandSourceStack> context, String message) {

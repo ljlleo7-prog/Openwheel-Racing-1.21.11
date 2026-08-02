@@ -41,6 +41,8 @@ public class WheelInputSettings {
     public Integer ersLicoBalancedPowerKw;
     public Integer ersLicoAttackPowerKw;
     public Double ersCapacityMj;
+    public Integer shiftLightStartRpm;
+    public Integer shiftLightFullRpm;
     public AxisBinding steering = new AxisBinding(-1, false, -1.0f, 1.0f, 0.0f, 0.08f, 1.0f, 1.0f);
     public AxisBinding throttle = new AxisBinding(-1, true, -1.0f, 1.0f, 1.0f, 0.03f, 1.0f, 1.0f);
     public AxisBinding brake = new AxisBinding(-1, true, -1.0f, 1.0f, 1.0f, 0.03f, 1.0f, 1.0f);
@@ -169,6 +171,11 @@ public class WheelInputSettings {
         ersLicoBalancedPowerKw = clampInt(ersLicoBalancedPowerKw == null ? -180 : ersLicoBalancedPowerKw, -350, 0);
         ersLicoAttackPowerKw = clampInt(ersLicoAttackPowerKw == null ? 0 : ersLicoAttackPowerKw, -350, 0);
         ersCapacityMj = clampDouble(ersCapacityMj == null ? 4.0 : ersCapacityMj, 2.0, 12.0);
+        shiftLightStartRpm = clampInt(shiftLightStartRpm == null ? 9_000 : shiftLightStartRpm, 5_000, 12_500);
+        shiftLightFullRpm = clampInt(shiftLightFullRpm == null ? 13_000 : shiftLightFullRpm, 6_000, 15_000);
+        if (shiftLightFullRpm < shiftLightStartRpm + 500) {
+            shiftLightFullRpm = Math.min(15_000, shiftLightStartRpm + 500);
+        }
         EnumMap<ButtonRole, Integer> sanitizedButtons = new EnumMap<>(ButtonRole.class);
         if (buttons != null) {
             for (ButtonRole role : ButtonRole.values()) {
@@ -208,6 +215,8 @@ public class WheelInputSettings {
         settings.ersLicoBalancedPowerKw = -180;
         settings.ersLicoAttackPowerKw = 0;
         settings.ersCapacityMj = 4.0;
+        settings.shiftLightStartRpm = 9_000;
+        settings.shiftLightFullRpm = 13_000;
         settings.buttons = new EnumMap<>(ButtonRole.class);
         return settings;
     }

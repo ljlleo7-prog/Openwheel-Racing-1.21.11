@@ -188,6 +188,9 @@
   "screen.openwheelracing.setup.hud.setup": "调校HUD",
   "screen.openwheelracing.setup.hud.ranking": "排行榜HUD",
   "screen.openwheelracing.setup.hud.physics_debug": "调试HUD",
+  "screen.openwheelracing.setup.shift_lights": "换挡灯",
+  "screen.openwheelracing.setup.shift_lights.start": "起亮 %s RPM",
+  "screen.openwheelracing.setup.shift_lights.full": "全亮 %s RPM",
   "screen.openwheelracing.setup.shown": "显示",
   "screen.openwheelracing.setup.hidden": "隐藏",
   "screen.openwheelracing.setup.wheel_setup": "方向盘设置",
@@ -302,5 +305,7 @@
   "screen.openwheelracing.race_director.new_session_short": "新建",
   "screen.openwheelracing.race_director.checkpoints_short": "检查",
   "screen.openwheelracing.race_director.off_track_short": "离道",
-  "screen.openwheelracing.team_terminal.sense_cars_short": "扫描"
+  "screen.openwheelracing.team_terminal.sense_cars_short": "扫描",
+  "screen.openwheelracing.race_director.auto_detect_map": "自动检测地图",
+  "screen.openwheelracing.race_director.no_track_map": "无已存地图"
 }

@@ -210,6 +210,15 @@ public class OpenwheelCarEntity extends Entity {
     private static final double NEUTRAL_RPM_DECAY_PER_SECOND = 3_800.0;
     private static final double CLUTCH_RPM_DROP_PER_SECOND = 12_000.0;
     private static final double ENGINE_BRAKE_RPM_DROP_PER_SECOND = 7_000.0;
+    private static final double ENGINE_BRAKE_TORQUE_NM = 260.0;
+    private static final double ENGINE_BRAKE_FULL_OVERSPEED_RATIO = 0.06;
+    private static final double ENGINE_HARD_LIMIT_RPM = 15_000.0;
+    private static final double ENGINE_HARD_LIMIT_FULL_OVERSPEED_RATIO = 0.10;
+    private static final double ENGINE_HARD_LIMIT_GRIP_FORCE_MULTIPLIER = 1.05;
+    private static final double ENGINE_HARD_LIMIT_EXTRA_GRIP_FORCE_MULTIPLIER = 0.75;
+    private static final float ENGINE_OVERLOAD_DAMAGE_PER_TICK = 1.0f;
+    private static final double PIT_SPEED_GOVERNOR_FULL_OVERSPEED_RATIO = 0.03;
+    private static final double PIT_SPEED_GOVERNOR_MAX_POWER_WATTS = 180_000.0;
     private static final double CLUTCH_RELEASE_TRACTION_LIMIT = 0.95;
     private static final double STEERING_DEADZONE = 0.08;
     private static final double[] ENGINE_RPM_POINTS = {900.0, 2500.0, 4000.0, 4700.0, 6500.0, 8200.0, 10500.0, 11800.0, 12600.0, 13000.0};
@@ -1696,6 +1705,10 @@ public class OpenwheelCarEntity extends Entity {
         }
         boolean launchClutch = throttle > 0.0 && (gear == 1 || gear == REVERSE_GEAR) && horizontalSpeed < LAUNCH_CLUTCH_SPEED;
         boolean clutchReleasing = clutchReleaseTicks > 0 && gear != NEUTRAL_GEAR;
+        double estimatedRpm = wheelRpm(horizontalSpeed, gearTopSpeed);
+        if (!level().isClientSide() && estimatedRpm > ENGINE_HARD_LIMIT_RPM) {
+            setDamagePercent(getDamagePercent() + ENGINE_OVERLOAD_DAMAGE_PER_TICK);
+        }
         int engineRpm = updateEngineRpm(horizontalSpeed, gear, gearTopSpeed, throttle, launchClutch, clutchReleasing);
         double power = combustionPowerWatts(engineRpm) * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
         double requestedIcePowerWatts = throttle > 0.0 && gear > NEUTRAL_GEAR ? power * throttle : 0.0;
@@ -1820,10 +1833,11 @@ public class OpenwheelCarEntity extends Entity {
             }
 
             double subBrakeForceRequest = brake * MAX_BRAKE_FORCE;
+            double estimatedSubRpm = wheelRpm(subSpeedBlocksPerTick, gearTopSpeed);
+            double engineBrakeForce = engineBrakeForce(gear, estimatedSubRpm, subSpeedBlocksPerTick, Math.abs(velocityLong), pitSpeedLimit, surface);
             if (surface == SurfaceProfile.PIT_LANE && subSpeedBlocksPerTick >= pitSpeedLimit) {
                 subDriveForceRequest = 0.0;
                 pendingErsDriveForce = Math.min(0.0, pendingErsDriveForce);
-                subBrakeForceRequest = Math.max(subBrakeForceRequest, 6_000.0);
             }
             subDriveForceRequest += pendingErsDriveForce;
             double subBrakeForceEstimate = brake * Math.min(MAX_BRAKE_FORCE, ASPHALT_MU_LONGITUDINAL * surface.grip * (CAR_MASS_KG * GRAVITY + subDownforce));
@@ -1873,11 +1887,12 @@ public class OpenwheelCarEntity extends Entity {
             double trailBrakeRelease = brake * trailBrakeSteerUse * TRAIL_BRAKE_REAR_PRESSURE_RELIEF * 0.35;
             brakeRear *= 1.0 - trailBrakeRelease;
             double driveRear = subDriveForceRequest * 0.5;
+            double engineBrakeRear = engineBrakeForce * 0.5;
             double brakeSign = subBrakeDirection;
             double flLongRequest = -brakeSign * brakeFront;
             double frLongRequest = -brakeSign * brakeFront;
-            double rlLongRequest = driveRear - brakeSign * brakeRear;
-            double rrLongRequest = driveRear - brakeSign * brakeRear;
+            double rlLongRequest = driveRear - brakeSign * (brakeRear + engineBrakeRear);
+            double rrLongRequest = driveRear - brakeSign * (brakeRear + engineBrakeRear);
             double rollingForceRamp = Math.max(0.0, Math.min(1.0, (subSpeed - 1.5) / 8.5));
             double rollingForceScale = rollingForceRamp * rollingForceRamp * (3.0 - 2.0 * rollingForceRamp);
             double compoundStiffness = 0.90 + (tyreMuCoefficient - 0.86) * 0.55;
@@ -1889,6 +1904,14 @@ public class OpenwheelCarEntity extends Entity {
             double frLatLimit = frMuLat * frNormal;
             double rlLatLimit = rlMuLat * rlNormal;
             double rrLatLimit = rrMuLat * rrNormal;
+            if (estimatedSubRpm > ENGINE_HARD_LIMIT_RPM) {
+                double hardLimitT = smoothstep((estimatedSubRpm / ENGINE_HARD_LIMIT_RPM - 1.0) / ENGINE_HARD_LIMIT_FULL_OVERSPEED_RATIO);
+                double hardLimitGripForce = (rlLongLimit + rrLongLimit) * (ENGINE_HARD_LIMIT_GRIP_FORCE_MULTIPLIER + ENGINE_HARD_LIMIT_EXTRA_GRIP_FORCE_MULTIPLIER * hardLimitT);
+                engineBrakeForce = Math.max(engineBrakeForce, hardLimitGripForce);
+                engineBrakeRear = engineBrakeForce * 0.5;
+                rlLongRequest = driveRear - brakeSign * (brakeRear + engineBrakeRear);
+                rrLongRequest = driveRear - brakeSign * (brakeRear + engineBrakeRear);
+            }
             if (isAbsEnabled() && brake > 0.0) {
                 flLongRequest = absLimitedBrakeForce(flLongRequest, relaxedFlLatForce, flLongLimit, flLatLimit);
                 frLongRequest = absLimitedBrakeForce(frLongRequest, relaxedFrLatForce, frLongLimit, frLatLimit);
@@ -2799,6 +2822,20 @@ public class OpenwheelCarEntity extends Entity {
 
     private static double combustionPowerWatts(int rpm) {
         return enginePowerWatts(rpm) * (PEAK_POWER_WATTS - ERS_POWER_SHARE_WATTS) / PEAK_POWER_WATTS;
+    }
+
+    private static double engineBrakeForce(int gear, double estimatedRpm, double speedBlocksPerTick, double speedMetersPerSecond, double pitSpeedLimit, SurfaceProfile surface) {
+        if (gear <= NEUTRAL_GEAR || speedMetersPerSecond <= 0.1) {
+            return 0.0;
+        }
+        double engineBrakePower = ENGINE_BRAKE_TORQUE_NM * estimatedRpm * Math.PI / 30.0;
+        double redlinePower = engineBrakePower * smoothstep((estimatedRpm / REDLINE_RPM - 1.0) / ENGINE_BRAKE_FULL_OVERSPEED_RATIO);
+        double pitGovernorPower = 0.0;
+        if (surface == SurfaceProfile.PIT_LANE && speedBlocksPerTick > pitSpeedLimit) {
+            double pitOverspeedRatio = speedBlocksPerTick / pitSpeedLimit - 1.0;
+            pitGovernorPower = PIT_SPEED_GOVERNOR_MAX_POWER_WATTS * smoothstep(pitOverspeedRatio / PIT_SPEED_GOVERNOR_FULL_OVERSPEED_RATIO);
+        }
+        return (redlinePower + pitGovernorPower) / Math.max(MIN_POWER_SPEED, speedMetersPerSecond);
     }
 
     private ErsPowerResult calculateErsPower(double throttle, double brake, boolean liftInputConfirmed, int gear, double speedBlocksPerTick, double velocityLong, double lateralAccelerationG, double dt, SurfaceProfile surface) {

@@ -8,6 +8,9 @@ import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.content.race.TeamCarRow;
+import com.openwheelracing.content.track.TrackMapAutoDetector;
+import com.openwheelracing.content.track.TrackMapData;
+import com.openwheelracing.content.track.TrackMapSnapshot;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRBlocks;
 import com.openwheelracing.registry.OWRMenus;
@@ -32,6 +35,9 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private boolean archiveMode;
     private int lastRaceControlRevision = Integer.MIN_VALUE;
     private int lastLapRecordsRevision = Integer.MIN_VALUE;
+    private int lastMapRevision = Integer.MIN_VALUE;
+    private int lastMapScanScannedChunks = -1;
+    private int lastMapScanDetectedCells = -1;
     private RaceDirectorSnapshot snapshot = RaceDirectorSnapshot.empty();
 
     public RaceDirectorMenu(int containerId, Inventory playerInventory, FriendlyByteBuf extraData) {
@@ -109,11 +115,26 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         }
         OWRRaceControlState controlState = OWRRaceControlState.get(serverLevel);
         OWRLapRecords records = OWRLapRecords.get(serverLevel);
-        if (!showsTeamTerminal() && controlState.getRevision() == lastRaceControlRevision && records.getRevision() == lastLapRecordsRevision) {
+        TrackMapSnapshot map = trackMap(serverLevel);
+        TrackMapAutoDetector.Progress scanProgress = TrackMapAutoDetector.progress(serverLevel);
+        boolean mapChanged = map.revision() != lastMapRevision;
+        boolean scanUpdate = scanProgress.running()
+            && (lastMapScanScannedChunks < 0
+                || scanProgress.scannedChunks() == scanProgress.totalChunks()
+                || scanProgress.scannedChunks() - lastMapScanScannedChunks >= 16
+                || scanProgress.detectedCells() != lastMapScanDetectedCells);
+        if (!showsTeamTerminal()
+            && !mapChanged
+            && !scanUpdate
+            && controlState.getRevision() == lastRaceControlRevision
+            && records.getRevision() == lastLapRecordsRevision) {
             return;
         }
         lastRaceControlRevision = controlState.getRevision();
         lastLapRecordsRevision = records.getRevision();
+        lastMapRevision = map.revision();
+        lastMapScanScannedChunks = scanProgress.running() ? scanProgress.scannedChunks() : -1;
+        lastMapScanDetectedCells = scanProgress.running() ? scanProgress.detectedCells() : -1;
         OWRNetwork.sendRaceDirectorSnapshot(serverPlayer, createSnapshot(serverLevel));
     }
 
@@ -126,6 +147,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         List<RaceDirectorLapRow> laps = records.getVisibleLaps(archiveMode, page, LAPS_PER_PAGE).stream()
             .map(RaceDirectorLapRow::fromRecord)
             .toList();
+        TrackMapAutoDetector.Progress mapScan = TrackMapAutoDetector.progress(level);
         return new RaceDirectorSnapshot(
             controlState.isCheckpointCheckEnabled(),
             controlState.isOffTrackCheckEnabled(),
@@ -146,9 +168,22 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             archiveMode,
             leftTeamCarId(),
             rightTeamCarId(),
+            trackMap(level),
+            mapScan.running(),
+            mapScan.scannedChunks(),
+            mapScan.totalChunks(),
+            mapScan.detectedCells(),
             laps,
             senseTeamCars(level)
         );
+    }
+
+    public void autoDetectTrackMap(ServerLevel level, int radiusBlocks) {
+        TrackMapAutoDetector.begin(level, player.blockPosition(), radiusBlocks);
+    }
+
+    private TrackMapSnapshot trackMap(ServerLevel level) {
+        return TrackMapData.get(level).snapshot(level.dimension().identifier().toString()).orElse(TrackMapSnapshot.EMPTY);
     }
 
     @Override
@@ -172,20 +207,22 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     }
 
     private List<TeamCarRow> senseTeamCars(ServerLevel level) {
-        if (!showsTeamTerminal()) {
+        if (!showsTeamTerminal() && !showsBoard()) {
             return List.of();
         }
+        TrackMapSnapshot map = trackMap(level);
         java.util.ArrayList<OpenwheelCarEntity> cars = new java.util.ArrayList<>();
         for (net.minecraft.world.entity.Entity entity : level.getAllEntities()) {
             if (entity instanceof OpenwheelCarEntity car) {
                 cars.add(car);
             }
         }
-        return cars.stream()
-            .sorted(java.util.Comparator.comparingInt(car -> selectionRank(car.getId())))
-            .map(TeamCarRow::fromCar)
-            .limit(24)
-            .toList();
+        cars.sort(java.util.Comparator.comparingInt(car -> selectionRank(car.getId())));
+        java.util.ArrayList<TeamCarRow> rows = new java.util.ArrayList<>();
+        for (int index = 0; index < cars.size() && rows.size() < 24; index++) {
+            rows.add(TeamCarRow.fromCar(cars.get(index), map, index + 1));
+        }
+        return rows;
     }
 
     private int selectionRank(int entityId) {

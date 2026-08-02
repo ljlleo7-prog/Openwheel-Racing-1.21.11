@@ -2,7 +2,8 @@ package com.openwheelracing;
 
 import com.mojang.logging.LogUtils;
 import com.openwheelracing.content.command.OWRCommands;
-import com.openwheelracing.content.race.OWRRaceControlState;
+import com.openwheelracing.content.race.OWRLegacyDimensionDataImporter;
+import com.openwheelracing.content.track.TrackMapAutoDetector;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRBlockEntities;
 import com.openwheelracing.registry.OWRBlocks;
@@ -20,6 +21,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.furnace.FurnaceFuelBurnTimeEvent;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import org.slf4j.Logger;
@@ -46,6 +48,10 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(OWRFuelHandler::onFuelBurnTime);
         NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> OWRCommands.register(event));
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
+        NeoForge.EVENT_BUS.addListener(this::onPlayerChangedDimension);
+        NeoForge.EVENT_BUS.addListener(this::onPlayerRespawn);
+        NeoForge.EVENT_BUS.addListener(this::onServerStarted);
+        NeoForge.EVENT_BUS.addListener(TrackMapAutoDetector::onServerTick);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -53,17 +59,27 @@ public final class OpenwheelRacing {
     }
 
     private void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
-        if (!(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) {
+        syncPlayerCircuit(event);
+    }
+
+    private void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        syncPlayerCircuit(event);
+    }
+
+    private void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
+        syncPlayerCircuit(event);
+    }
+
+    private void onServerStarted(ServerStartedEvent event) {
+        OWRLegacyDimensionDataImporter.importOnServerStarted(event.getServer());
+    }
+
+    private void syncPlayerCircuit(PlayerEvent event) {
+        if (!(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer serverPlayer) || !(serverPlayer.level() instanceof net.minecraft.server.level.ServerLevel level)) {
             return;
         }
-        net.minecraft.server.MinecraftServer server = serverPlayer.level().getServer();
-        if (server == null) {
-            return;
-        }
-        net.minecraft.server.level.ServerLevel overworld = server.getLevel(net.minecraft.world.level.Level.OVERWORLD);
-        if (overworld != null) {
-            OWRNetwork.broadcastRankingBoard(server, overworld);
-            OWRNetwork.broadcastRaceFlag(overworld, OWRRaceControlState.get(overworld).getGlobalFlag(), false);
-        }
+        OWRNetwork.sendRankingBoard(serverPlayer, level);
+        OWRNetwork.sendRaceFlag(serverPlayer, level, false);
+        OWRNetwork.syncVisibleLiveries(serverPlayer);
     }
 }

@@ -4,7 +4,6 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.openwheelracing.OpenwheelRacing;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
@@ -65,7 +64,32 @@ public class OWRRaceControlState extends SavedData {
     }
 
     public static OWRRaceControlState get(ServerLevel level) {
-        return level.getServer().getLevel(Level.OVERWORLD).getDataStorage().computeIfAbsent(TYPE);
+        return level.getDataStorage().computeIfAbsent(TYPE);
+    }
+
+    public static OWRRaceControlState getIfPresent(ServerLevel level) {
+        return level.getDataStorage().get(TYPE);
+    }
+
+    public static void importLegacy(ServerLevel level, OWRRaceControlState legacy) {
+        if (legacy == null || getIfPresent(level) != null) {
+            return;
+        }
+        OWRRaceControlState copy = new OWRRaceControlState(
+            legacy.checkpointCheckEnabled,
+            legacy.offTrackCheckEnabled,
+            legacy.minimumValidLapTicks,
+            legacy.wheelInputAllowed,
+            legacy.maxErsCapacityMj,
+            legacy.maxBalancedDeployKw,
+            legacy.maxAttackDeployKw,
+            legacy.maxHarvestNegativeKw,
+            legacy.globalFlag.ordinal(),
+            legacy.carDamageModifier,
+            legacy.tyreWearModifier
+        );
+        copy.markChanged();
+        level.getDataStorage().set(TYPE, copy);
     }
 
     public int getRevision() {

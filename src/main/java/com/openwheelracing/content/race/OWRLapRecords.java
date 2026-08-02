@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
@@ -63,7 +62,31 @@ public class OWRLapRecords extends SavedData {
     }
 
     public static OWRLapRecords get(ServerLevel level) {
-        return level.getServer().getLevel(Level.OVERWORLD).getDataStorage().computeIfAbsent(TYPE);
+        return level.getDataStorage().computeIfAbsent(TYPE);
+    }
+
+    public static OWRLapRecords getIfPresent(ServerLevel level) {
+        return level.getDataStorage().get(TYPE);
+    }
+
+    public static void importLegacy(ServerLevel level, OWRLapRecords legacy, String dimensionId) {
+        if (legacy == null || getIfPresent(level) != null) {
+            return;
+        }
+        List<LapRecord> dimensionLaps = legacy.laps.stream()
+            .filter(record -> record.dimensionId().equals(dimensionId))
+            .toList();
+        if (dimensionLaps.isEmpty()) {
+            return;
+        }
+        OWRLapRecords copy = new OWRLapRecords(Map.of(), dimensionLaps, 1L, legacy.activeSessionId, legacy.activeSessionName, legacy.nextSessionId);
+        for (LapRecord lap : dimensionLaps) {
+            if (!lap.invalidated() && lap.lapTicks() > 0) {
+                copy.setBestLapIfBetter(lap.driverId(), lap.lapTicks());
+            }
+        }
+        copy.markChanged();
+        level.getDataStorage().set(TYPE, copy);
     }
 
     public int getRevision() {

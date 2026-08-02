@@ -4,7 +4,6 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.openwheelracing.OpenwheelRacing;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
@@ -49,7 +48,28 @@ public class TrackDefinitionsData extends SavedData {
     }
 
     public static TrackDefinitionsData get(ServerLevel level) {
-        return level.getServer().getLevel(Level.OVERWORLD).getDataStorage().computeIfAbsent(TYPE);
+        return level.getDataStorage().computeIfAbsent(TYPE);
+    }
+
+    public static TrackDefinitionsData getIfPresent(ServerLevel level) {
+        return level.getDataStorage().get(TYPE);
+    }
+
+    public static void importLegacy(ServerLevel level, TrackDefinitionsData legacy, String dimensionId) {
+        if (legacy == null || getIfPresent(level) != null) {
+            return;
+        }
+        List<TrackDefinition> tracks = legacy.tracksInDimension(dimensionId);
+        if (tracks.isEmpty()) {
+            return;
+        }
+        TrackDefinitionsData copy = new TrackDefinitionsData();
+        for (TrackDefinition track : tracks) {
+            copy.upsert(track);
+        }
+        legacy.activeTrack(dimensionId).ifPresent(track -> copy.setActiveTrack(track.trackId(), dimensionId));
+        copy.markChanged();
+        level.getDataStorage().set(TYPE, copy);
     }
 
     public int getRevision() {
@@ -70,9 +90,13 @@ public class TrackDefinitionsData extends SavedData {
         return activeTrackId.flatMap(this::get);
     }
 
+    public Optional<TrackDefinition> activeTrack(String dimensionId) {
+        return activeTrack().filter(track -> track.dimensionId().equals(dimensionId));
+    }
+
     public UUID upsert(TrackDefinition definition) {
         tracks.put(definition.trackId(), definition);
-        if (activeTrackId.isEmpty()) {
+        if (activeTrackId.isEmpty() || activeTrack(definition.dimensionId()).isEmpty()) {
             activeTrackId = Optional.of(definition.trackId());
         }
         markChanged();
@@ -85,6 +109,22 @@ public class TrackDefinitionsData extends SavedData {
         return definition;
     }
 
+    public boolean remove(UUID trackId, String dimensionId) {
+        TrackDefinition track = tracks.get(trackId);
+        if (track == null || !track.dimensionId().equals(dimensionId)) {
+            return false;
+        }
+        tracks.remove(trackId);
+        if (activeTrackId.filter(trackId::equals).isPresent()) {
+            activeTrackId = tracks.values().stream()
+                .filter(definition -> definition.dimensionId().equals(dimensionId))
+                .map(TrackDefinition::trackId)
+                .findFirst();
+        }
+        markChanged();
+        return true;
+    }
+
     public boolean remove(UUID trackId) {
         if (tracks.remove(trackId) == null) {
             return false;
@@ -92,6 +132,16 @@ public class TrackDefinitionsData extends SavedData {
         if (activeTrackId.filter(trackId::equals).isPresent()) {
             activeTrackId = tracks.keySet().stream().findFirst();
         }
+        markChanged();
+        return true;
+    }
+
+    public boolean setActiveTrack(UUID trackId, String dimensionId) {
+        TrackDefinition track = tracks.get(trackId);
+        if (track == null || !track.dimensionId().equals(dimensionId)) {
+            return false;
+        }
+        activeTrackId = Optional.of(trackId);
         markChanged();
         return true;
     }

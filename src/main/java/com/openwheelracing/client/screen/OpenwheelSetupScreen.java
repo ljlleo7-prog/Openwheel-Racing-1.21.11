@@ -20,7 +20,7 @@ import org.lwjgl.glfw.GLFW;
 
 public class OpenwheelSetupScreen extends Screen {
     private static final int PANEL_WIDTH = 380;
-    private static final int CONTENT_HEIGHT = 754;
+    private static final int CONTENT_HEIGHT = 792;
     private static final int GRAPH_WIDTH = 156;
     private static final int GRAPH_HEIGHT = 74;
     private static final int GRAPH_TEMP_MIN = 50;
@@ -66,8 +66,9 @@ public class OpenwheelSetupScreen extends Screen {
             settings.showDrivingHud = !settings.showDrivingHud;
             button.setMessage(hudToggleLabel("driving", settings.showDrivingHud));
         }).bounds(right, y + 58, buttonWidth, 20).build());
+        addRenderableWidget(new ShiftLightRangeSlider(x + 24, y + 94, PANEL_WIDTH - 48, 18));
 
-        int ersY = y + 118;
+        int ersY = y + 156;
         addRenderableWidget(new ErsRangeSlider(x + 24, ersY + 28, PANEL_WIDTH - 48, 18, ErsRange.BALANCED));
         addRenderableWidget(new PowerBox(left, ersY + 54, true, PowerTarget.BALANCED_START));
         addRenderableWidget(new PowerBox(right, ersY + 54, false, PowerTarget.BALANCED_END));
@@ -82,7 +83,7 @@ public class OpenwheelSetupScreen extends Screen {
         addRenderableWidget(new PowerBox(left, ersY + 320, true, PowerTarget.LICO_ATTACK));
         addRenderableWidget(new BatterySlider(left, ersY + 364, PANEL_WIDTH - 32, 20));
 
-        int controlsY = y + 664;
+        int controlsY = y + 702;
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.wheel_setup"), button -> Minecraft.getInstance().setScreen(new WheelSetupScreen(this)))
             .bounds(left, controlsY + 24, PANEL_WIDTH - 32, 20)
             .build());
@@ -91,10 +92,10 @@ public class OpenwheelSetupScreen extends Screen {
             .build());
 
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.done"), button -> saveAndClose())
-            .bounds(x + 106, y + 726, 76, 20)
+            .bounds(x + 106, y + 764, 76, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.cancel"), button -> closeToParent())
-            .bounds(x + 198, y + 726, 76, 20)
+            .bounds(x + 198, y + 764, 76, 20)
             .build());
         updateWidgetVisibility();
     }
@@ -114,23 +115,24 @@ public class OpenwheelSetupScreen extends Screen {
         int x = (width - PANEL_WIDTH) / 2;
         int y = 42 - scrollOffset;
         graphics.fill(x, Math.max(8, y), x + PANEL_WIDTH, Math.min(height - 8, y + CONTENT_HEIGHT), 0xDD1F2328);
-        fillPanel(graphics, x + 6, y + 22, y + 86, 0xFF2A3038);
-        fillPanel(graphics, x + 6, y + 102, y + 440, 0xFF293443);
-        fillPanel(graphics, x + 6, y + 456, y + 634, 0xFF242D38);
-        fillPanel(graphics, x + 6, y + 650, y + 714, 0xFF2F3640);
+        fillPanel(graphics, x + 6, y + 22, y + 124, 0xFF2A3038);
+        fillPanel(graphics, x + 6, y + 140, y + 478, 0xFF293443);
+        fillPanel(graphics, x + 6, y + 494, y + 672, 0xFF242D38);
+        fillPanel(graphics, x + 6, y + 688, y + 752, 0xFF2F3640);
         drawIfVisible(graphics, title, x + 10, y + 8, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.visual"), x + 12, y + 24, 0xFFC9D1D9);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers"), x + 12, y + 104, 0xFFC9D1D9);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.balanced_range"), x + 24, y + 122, 0xFFE8EDF2);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.harvest_range"), x + 24, y + 196, 0xFFE8EDF2);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico"), x + 24, y + 272, 0xFFE8EDF2);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_thresholds"), x + 24, y + 290, 0xFFC9D1D9);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_power"), x + 24, y + 358, 0xFFC9D1D9);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_harvest"), x + 16, y + 382, 0xFFE8EDF2);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_balanced"), x + 204, y + 382, 0xFFE8EDF2);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_attack"), x + 16, y + 432, 0xFFE8EDF2);
-        drawTyreThermalGraphs(graphics, x + 18, y + 478);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.controls"), x + 12, y + 652, 0xFFC9D1D9);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.shift_lights"), x + 24, y + 82, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers"), x + 12, y + 142, 0xFFC9D1D9);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.balanced_range"), x + 24, y + 160, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.harvest_range"), x + 24, y + 234, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico"), x + 24, y + 310, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_thresholds"), x + 24, y + 328, 0xFFC9D1D9);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_power"), x + 24, y + 396, 0xFFC9D1D9);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_harvest"), x + 16, y + 420, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_balanced"), x + 204, y + 420, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.lico_attack"), x + 16, y + 470, 0xFFE8EDF2);
+        drawTyreThermalGraphs(graphics, x + 18, y + 516);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.controls"), x + 12, y + 690, 0xFFC9D1D9);
         super.render(graphics, mouseX, mouseY, partialTick);
         renderScrollbar(graphics, x + PANEL_WIDTH + 4);
     }
@@ -322,6 +324,88 @@ public class OpenwheelSetupScreen extends Screen {
         ErsRange(int min, int max) {
             this.min = min;
             this.max = max;
+        }
+    }
+
+    private class ShiftLightRangeSlider extends AbstractWidget {
+        private static final int MIN_RPM = 5_000;
+        private static final int MAX_RPM = 15_000;
+        private static final int MIN_RANGE_RPM = 500;
+        private boolean draggingLower;
+        private boolean draggingUpper;
+
+        private ShiftLightRangeSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, Component.empty());
+        }
+
+        @Override
+        protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            int cy = getY() + height / 2;
+            int lowerX = valueToX(settings.shiftLightStartRpm);
+            int upperX = valueToX(settings.shiftLightFullRpm);
+            graphics.fill(getX(), cy - 2, getX() + width, cy + 2, 0xFF3F464F);
+            graphics.fill(lowerX, cy - 3, upperX, cy + 3, 0xFFD65CFF);
+            drawHandle(graphics, lowerX, cy, 0xFF34D058);
+            drawHandle(graphics, upperX, cy, 0xFFD65CFF);
+            graphics.drawString(font, Component.translatable("screen.openwheelracing.setup.shift_lights.start", settings.shiftLightStartRpm), getX(), getY() + height + 2, 0xFFC9D1D9, false);
+            String upperLabel = Component.translatable("screen.openwheelracing.setup.shift_lights.full", settings.shiftLightFullRpm).getString();
+            graphics.drawString(font, upperLabel, getX() + width - font.width(upperLabel), getY() + height + 2, 0xFFC9D1D9, false);
+        }
+
+        private void drawHandle(GuiGraphics graphics, int x, int cy, int color) {
+            graphics.fill(x - 3, cy - 7, x + 4, cy + 8, 0xFF000000);
+            graphics.fill(x - 2, cy - 6, x + 3, cy + 7, color);
+        }
+
+        public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+            if (!isMouseOver(event.x(), event.y())) {
+                return false;
+            }
+            int lowerX = valueToX(settings.shiftLightStartRpm);
+            int upperX = valueToX(settings.shiftLightFullRpm);
+            draggingLower = Math.abs(event.x() - lowerX) <= Math.abs(event.x() - upperX);
+            draggingUpper = !draggingLower;
+            updateFromMouse(event.x());
+            return true;
+        }
+
+        @Override
+        public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+            if (!draggingLower && !draggingUpper) {
+                return false;
+            }
+            updateFromMouse(event.x());
+            return true;
+        }
+
+        @Override
+        public boolean mouseReleased(MouseButtonEvent event) {
+            draggingLower = false;
+            draggingUpper = false;
+            return true;
+        }
+
+        @Override
+        protected void updateWidgetNarration(NarrationElementOutput output) {
+            defaultButtonNarrationText(output);
+        }
+
+        private void updateFromMouse(double mouseX) {
+            int value = xToValue((int) Math.round(mouseX));
+            if (draggingLower) {
+                settings.shiftLightStartRpm = clampInt(Math.min(value, settings.shiftLightFullRpm - MIN_RANGE_RPM), MIN_RPM, MAX_RPM - MIN_RANGE_RPM);
+            } else if (draggingUpper) {
+                settings.shiftLightFullRpm = clampInt(Math.max(value, settings.shiftLightStartRpm + MIN_RANGE_RPM), MIN_RPM + MIN_RANGE_RPM, MAX_RPM);
+            }
+        }
+
+        private int valueToX(int value) {
+            return getX() + (int) Math.round((value - MIN_RPM) / (double) (MAX_RPM - MIN_RPM) * width);
+        }
+
+        private int xToValue(int x) {
+            double t = (x - getX()) / (double) width;
+            return MIN_RPM + (int) Math.round(Math.max(0.0, Math.min(1.0, t)) * (MAX_RPM - MIN_RPM) / 100.0) * 100;
         }
     }
 

@@ -1,19 +1,23 @@
 package com.openwheelracing.client.hud;
 
 import com.openwheelracing.client.input.WheelInputSettings;
+import com.openwheelracing.client.map.CircuitMapRenderer;
+import com.openwheelracing.client.map.ClientTrackMapCache;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.RaceFlagMode;
+import com.openwheelracing.content.track.TrackMapSnapshot;
 import java.util.List;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.network.chat.Component;
 
 public final class CarHudOverlay {
     private static final int PANEL_WIDTH = 142;
     private static final int PANEL_HEIGHT = 100;
+    private static final int SHIFT_LIGHT_COUNT = 15;
+    private static final int SHIFT_LIGHT_GROUP_SIZE = 5;
     private static int lastTemperatureCarId = -1;
     private static float displayedTyreTemperatureC = Float.NaN;
 
@@ -30,6 +34,8 @@ public final class CarHudOverlay {
         WheelInputSettings settings = WheelInputSettings.get();
         int x = graphics.guiWidth() - PANEL_WIDTH - 8;
         int y = graphics.guiHeight() - PANEL_HEIGHT - 8;
+
+        renderMinimap(graphics, car);
 
         if (settings.showDrivingHud) {
             renderErsMeter(graphics, font, car);
@@ -67,20 +73,6 @@ public final class CarHudOverlay {
             }
         }
 
-        if (settings.showSetupHud) {
-            int setupX = 8;
-            int setupY = graphics.guiHeight() - 89;
-            graphics.fill(setupX, setupY, setupX + 172, setupY + 81, 0x99000000);
-            graphics.renderOutline(setupX, setupY, 172, 81, 0xFF555555);
-            graphics.drawString(font, "PWR " + car.getSetup().power(), setupX + 7, setupY + 7, 0xFFFF9999, false);
-            graphics.drawString(font, "TYRE C" + (car.getTyreCompound() + 1), setupX + 7, setupY + 18, 0xFFB7FFB7, false);
-            graphics.drawString(font, "AERO " + car.getSetup().aero(), setupX + 7, setupY + 29, 0xFF99DDFF, false);
-            graphics.drawString(font, "GEAR " + car.getSetup().gearing(), setupX + 52, setupY + 29, 0xFFFFDD88, false);
-            graphics.drawString(font, Component.translatable("hud.openwheelracing.controls.drive"), setupX + 7, setupY + 43, 0xFFDDDDDD, false);
-            graphics.drawString(font, Component.translatable("hud.openwheelracing.controls.shift"), setupX + 7, setupY + 54, 0xFFDDDDDD, false);
-            graphics.drawString(font, Component.translatable("hud.openwheelracing.controls.exit"), setupX + 7, setupY + 65, 0xFFDDDDDD, false);
-        }
-
         if (settings.showPhysicsDebugHud) {
             renderPhysicsDebug(graphics, font, car);
         }
@@ -88,6 +80,18 @@ public final class CarHudOverlay {
         if (settings.showRankingHud) {
             renderRankingBoard(graphics, font);
         }
+    }
+
+    private static void renderMinimap(GuiGraphics graphics, OpenwheelCarEntity car) {
+        TrackMapSnapshot map = ClientTrackMapCache.current();
+        if (!map.present()) {
+            return;
+        }
+        int width = 172;
+        int height = 112;
+        int x = 8;
+        int y = graphics.guiHeight() - height - 8;
+        CircuitMapRenderer.renderLocal(graphics, map, car.getX(), car.getZ(), car.getYRot(), car.getLiveryColors().bodySide(), x, y, width, height);
     }
 
     private static void renderGlobalFlagMarker(GuiGraphics graphics) {
@@ -117,25 +121,73 @@ public final class CarHudOverlay {
 
     private static void renderErsMeter(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {
         int width = 182;
-        int height = 7;
+        int height = 12;
         int x = (graphics.guiWidth() - width) / 2;
-        int y = graphics.guiHeight() - 31;
+        int y = graphics.guiHeight() - 43;
         float energyPercent = Math.max(0.0f, Math.min(100.0f, car.getErsEnergyPercent()));
         int fillWidth = Math.round((width - 2) * energyPercent / 100.0f);
         int fillColor = ersEnergyColor(energyPercent);
+        renderShiftLights(graphics, car, x, x + width, y - 8);
         graphics.fill(x - 1, y - 1, x + width + 1, y + height + 1, 0xCC000000);
         graphics.fill(x, y, x + width, y + height, 0xFF2B2118);
         if (fillWidth > 0) {
             graphics.fill(x + 1, y + 1, x + 1 + fillWidth, y + height - 1, fillColor);
             graphics.fill(x + 1, y + 1, x + 1 + fillWidth, y + 2, 0x66FFFFFF);
         }
+        graphics.fill(x + 2, y + 2, x + width - 2, y + height - 2, 0x99000000);
         graphics.renderOutline(x - 1, y - 1, width + 2, height + 2, 0xFF3F3F3F);
 
         String left = "ERS " + car.getErsModeLabel();
         String right = ersActivityLabel(car);
-        int labelY = y - 10;
-        graphics.drawString(font, left, x, labelY, 0xFFE8E8E8, true);
-        graphics.drawString(font, right, x + width - font.width(right), labelY, ersActivityColor(car.getErsActivity()), true);
+        int labelY = y + 2;
+        graphics.drawString(font, left, x + 5, labelY, 0xFFFFFFFF, true);
+        graphics.drawString(font, right, x + width - 5 - font.width(right), labelY, 0xFFFFFFFF, true);
+    }
+
+    private static void renderShiftLights(GuiGraphics graphics, OpenwheelCarEntity car, int minX, int maxX, int y) {
+        int lightSize = 8;
+        int gap = Math.max(1, (maxX - minX - SHIFT_LIGHT_COUNT * lightSize) / (SHIFT_LIGHT_COUNT - 1));
+        int totalWidth = SHIFT_LIGHT_COUNT * lightSize + (SHIFT_LIGHT_COUNT - 1) * gap;
+        int x = (minX + maxX - totalWidth) / 2;
+        int lit = shiftLightCount(car.getRpm(), WheelInputSettings.get());
+        for (int i = 0; i < SHIFT_LIGHT_COUNT; i++) {
+            int color = i < lit ? shiftLightColor(i) : 0xFF242424;
+            int lightX = x + i * (lightSize + gap);
+            drawShiftDot(graphics, lightX, y, lightSize, color, i < lit);
+        }
+    }
+
+    private static void drawShiftDot(GuiGraphics graphics, int x, int y, int size, int color, boolean lit) {
+        graphics.fill(x + 2, y, x + size - 2, y + 1, 0xFF050505);
+        graphics.fill(x + 1, y + 1, x + size - 1, y + 2, 0xFF050505);
+        graphics.fill(x, y + 2, x + size, y + size - 2, 0xFF050505);
+        graphics.fill(x + 1, y + size - 2, x + size - 1, y + size - 1, 0xFF050505);
+        graphics.fill(x + 2, y + size - 1, x + size - 2, y + size, 0xFF050505);
+        graphics.fill(x + 2, y + 1, x + size - 2, y + 2, color);
+        graphics.fill(x + 1, y + 2, x + size - 1, y + size - 2, color);
+        graphics.fill(x + 2, y + size - 2, x + size - 2, y + size - 1, color);
+        if (lit) {
+            graphics.fill(x + 2, y + 1, x + size - 2, y + 2, 0x88FFFFFF);
+        }
+    }
+
+    private static int shiftLightCount(int rpm, WheelInputSettings settings) {
+        int startRpm = settings.shiftLightStartRpm;
+        int fullRpm = Math.max(startRpm + 500, settings.shiftLightFullRpm);
+        if (rpm <= startRpm) {
+            return 0;
+        }
+        return Math.max(0, Math.min(SHIFT_LIGHT_COUNT, 1 + (rpm - startRpm) * SHIFT_LIGHT_COUNT / (fullRpm - startRpm)));
+    }
+
+    private static int shiftLightColor(int index) {
+        if (index < SHIFT_LIGHT_GROUP_SIZE) {
+            return 0xFF34D058;
+        }
+        if (index < SHIFT_LIGHT_GROUP_SIZE * 2) {
+            return 0xFFFF2D2D;
+        }
+        return 0xFFD65CFF;
     }
 
     private static int ersEnergyColor(float energyPercent) {
