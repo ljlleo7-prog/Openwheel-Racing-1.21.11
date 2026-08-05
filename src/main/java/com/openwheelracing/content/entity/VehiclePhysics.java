@@ -33,6 +33,15 @@ public final class VehiclePhysics {
     private VehiclePhysics() {
     }
 
+    public static boolean isNewerSequence(int candidate, int current) {
+        return candidate != current && candidate - current > 0;
+    }
+
+    public static boolean exceedsSequenceGap(int candidate, int current, int allowedGap) {
+        int gap = candidate - current;
+        return gap > Math.max(0, allowedGap);
+    }
+
     public static double speedKmhToBlocksPerTick(double speedKmh) {
         return speedKmh * SPEED_TO_BLOCKS_PER_TICK;
     }

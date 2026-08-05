@@ -15,7 +15,7 @@ public final class TrackStewardingGeometryBuilder {
         List<TrackDefinition.CenterlineNode> centerline = centerlineFromPath(points, surfaceWidth);
         Optional<TrackDefinition.StartFinishLine> startFinish = centerline.size() >= 2 ? Optional.of(startFinishFromFirstSegment(centerline)) : Optional.empty();
         List<TrackDefinition.AiWaypoint> aiLine = aiLineFromCenterline(centerline);
-        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, List.of(), List.of(), List.of(), List.of(), aiLine, TrackDefinition.CURRENT_SCHEMA);
+        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, List.of(), List.of(), List.of(), List.of(), aiLine, List.of(), TrackDefinition.CURRENT_SCHEMA);
     }
 
     public static List<TrackDefinition.CenterlineNode> centerlineFromPath(List<BlockPos> points, int surfaceWidth) {

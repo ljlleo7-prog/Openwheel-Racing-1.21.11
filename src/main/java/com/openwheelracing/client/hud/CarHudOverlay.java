@@ -40,6 +40,7 @@ public final class CarHudOverlay {
         if (settings.showDrivingHud) {
             renderErsMeter(graphics, font, car);
             renderGlobalFlagMarker(graphics);
+            renderLapDeltaBar(graphics, font);
 
             int outlineColor = car.isDrsActive() ? 0xFF00DD44 : 0xFFDA1A20;
             graphics.fill(x, y, x + PANEL_WIDTH, y + PANEL_HEIGHT, 0x99000000);
@@ -55,7 +56,8 @@ public final class CarHudOverlay {
             int displayedLapTicks = car.getCompletedLapLingerTicks() > 0 ? car.getCompletedLapTicks() : car.getCurrentLapTicks();
             int lapColor = car.getCompletedLapLingerTicks() > 0 ? completedLapColor(car.getCompletedLapResult()) : 0xFFFFFFFF;
             graphics.drawString(font, "LAP  " + formatLapTime(displayedLapTicks), x + 8, y + 51, lapColor, false);
-            graphics.drawString(font, "CP   " + (car.hasCheckpoint() ? "OK" : "--"), x + 8, y + 62, car.hasCheckpoint() ? 0xFFB7FFB7 : 0xFFFFDD66, false);
+            String checkpointProgress = LapDeltaClient.segmentCount() > 0 ? LapDeltaClient.hitCount() + " / " + LapDeltaClient.segmentCount() : (car.hasCheckpoint() ? "1 / 1" : "0 / 1");
+            graphics.drawString(font, "CP   " + checkpointProgress, x + 8, y + 62, LapDeltaClient.hitCount() > 0 || car.hasCheckpoint() ? 0xFFB7FFB7 : 0xFFFFDD66, false);
             graphics.drawString(font, "BEST " + formatLapTime(car.getBestLapTicks()), x + 8, y + 73, 0xFFFFFF99, false);
             float tyreTemperature = displayedTyreTemperature(car);
             String tyreTemp = String.format("TEMP %3.0fC", tyreTemperature);
@@ -108,6 +110,66 @@ public final class CarHudOverlay {
         if (flag == RaceFlagMode.SAFETY_CAR || flag == RaceFlagMode.VIRTUAL_SAFETY_CAR) {
             graphics.fill(x + 6, y + 5, x + 14, y + 9, 0xFF1F2328);
         }
+    }
+
+    private static void renderLapDeltaBar(GuiGraphics graphics, Font font) {
+        int count = LapDeltaClient.segmentCount();
+        if (count <= 0) {
+            return;
+        }
+        int width = Math.min(260, graphics.guiWidth() - 48);
+        int x = (graphics.guiWidth() - width) / 2;
+        int y = 32;
+        int gap = 2;
+        int segmentWidth = Math.max(4, (width - gap * (count - 1)) / count);
+        List<Integer> statuses = LapDeltaClient.statuses();
+        graphics.fill(x - 3, y - 3, x + width + 3, y + 24, 0xAA000000);
+        for (int index = 0; index < count; index++) {
+            int sx = x + index * (segmentWidth + gap);
+            int color = splitStatusColor(index < statuses.size() ? statuses.get(index) : LapDeltaClient.STATUS_UNREACHED);
+            graphics.fill(sx, y, sx + segmentWidth, y + 7, color);
+            graphics.fill(sx, y + 7, sx + segmentWidth, y + 8, 0x66000000);
+        }
+        int last = LapDeltaClient.lastSegmentIndex();
+        if (last >= 0) {
+            String total = formatSignedTicks(LapDeltaClient.cumulativeDeltaMillis());
+            String mini = formatSignedTicks(LapDeltaClient.miniDeltaMillis());
+            int totalColor = deltaColor(LapDeltaClient.cumulativeDeltaMillis());
+            int miniColor = deltaColor(LapDeltaClient.miniDeltaMillis());
+            graphics.drawString(font, total, x + 5, y + 12, totalColor, true);
+            graphics.drawString(font, mini, x + width - 5 - font.width(mini), y + 13, miniColor, false);
+        }
+        String flash = LapDeltaClient.flashLabel();
+        if (!flash.isBlank()) {
+            graphics.drawString(font, flash, (graphics.guiWidth() - font.width(flash)) / 2, y - 13, 0xFFFFFFFF, true);
+        }
+    }
+
+    private static int splitStatusColor(int status) {
+        return switch (status) {
+            case LapDeltaClient.STATUS_SESSION_BEST -> 0xFFD65CFF;
+            case LapDeltaClient.STATUS_PERSONAL_BEST -> 0xFF34D058;
+            case LapDeltaClient.STATUS_SLOWER -> 0xFFFFD044;
+            default -> 0xFF333333;
+        };
+    }
+
+    private static int deltaColor(int ticks) {
+        if (ticks < 0) {
+            return 0xFF34D058;
+        }
+        if (ticks > 0) {
+            return 0xFFFFD044;
+        }
+        return 0xFFE8E8E8;
+    }
+
+    private static String formatSignedTicks(int ticks) {
+        if (ticks == 0) {
+            return "+0.00";
+        }
+        String sign = ticks > 0 ? "+" : "-";
+        return sign + formatGap(Math.abs(ticks));
     }
 
     private static int flagColor(RaceFlagMode flag) {
@@ -238,15 +300,15 @@ public final class CarHudOverlay {
             graphics.drawString(font, "No laps yet", px + 6, py + headerHeight + 1, 0xFF666666, false);
             return;
         }
-        int firstTicks = ranking.get(0).ticks();
+        int firstMillis = ranking.get(0).millis();
         for (int i = 0; i < rowCount; i++) {
             OWRLapRecords.DriverBest entry = ranking.get(i);
             int ry = py + headerHeight + i * rowHeight + 1;
             int nameColor = i == 0 ? 0xFFFFDD44 : 0xFFCCCCCC;
             String pos = (i + 1) + ".";
             String name = entry.name().length() > 10 ? entry.name().substring(0, 10) : entry.name();
-            String time = formatLapTime(entry.ticks());
-            String gap = i == 0 ? "" : "+" + formatGap(entry.ticks() - firstTicks);
+            String time = formatLapTime(entry.millis());
+            String gap = i == 0 ? "" : "+" + formatGap(entry.millis() - firstMillis);
             graphics.drawString(font, pos, px + 4, ry, 0xFF888888, false);
             graphics.drawString(font, name, px + 16, ry, nameColor, false);
             graphics.drawString(font, time, px + 80, ry, nameColor, false);
@@ -256,11 +318,10 @@ public final class CarHudOverlay {
         }
     }
 
-    private static String formatGap(int ticks) {
-        int cs = ticks * 5;
-        int s = cs / 100;
-        int frac = cs % 100;
-        return s + "." + String.format("%02d", frac);
+    private static String formatGap(int millis) {
+        int s = millis / 1000;
+        int frac = millis % 1000;
+        return s + "." + String.format("%03d", frac);
     }
 
     private static String fit(Font font, String text, int width) {
@@ -357,14 +418,13 @@ public final class CarHudOverlay {
         return displayedTyreTemperatureC;
     }
 
-    private static String formatLapTime(int ticks) {
-        if (ticks <= 0) {
-            return "--:--.--";
+    private static String formatLapTime(int millis) {
+        if (millis <= 0) {
+            return "--:--.---";
         }
-        int totalCentiseconds = ticks * 5;
-        int minutes = totalCentiseconds / 6000;
-        int seconds = totalCentiseconds / 100 % 60;
-        int centiseconds = totalCentiseconds % 100;
-        return String.format("%d:%02d.%02d", minutes, seconds, centiseconds);
+        int minutes = millis / 60000;
+        int seconds = millis / 1000 % 60;
+        int milliseconds = millis % 1000;
+        return String.format("%d:%02d.%03d", minutes, seconds, milliseconds);
     }
 }

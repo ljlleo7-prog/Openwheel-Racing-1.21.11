@@ -41,6 +41,33 @@ public final class TrackGeometry {
         return Math.atan2(delta.z, delta.x);
     }
 
+    public static Optional<LineCrossing> crossing(Vec3 previous, Vec3 current, TrackDefinition.StewardLine line) {
+        return crossing(previous, current, line.left(), line.right());
+    }
+
+    public static Optional<LineCrossing> crossing(Vec3 previous, Vec3 current, TrackDefinition.Point3 left, TrackDefinition.Point3 right) {
+        double movementX = current.x - previous.x;
+        double movementZ = current.z - previous.z;
+        double lineX = right.x() - left.x();
+        double lineZ = right.z() - left.z();
+        double denominator = cross2d(movementX, movementZ, lineX, lineZ);
+        if (Math.abs(denominator) <= 1.0E-7) {
+            return Optional.empty();
+        }
+        double startToLineX = left.x() - previous.x;
+        double startToLineZ = left.z() - previous.z;
+        double movementT = cross2d(startToLineX, startToLineZ, lineX, lineZ) / denominator;
+        double lineT = cross2d(startToLineX, startToLineZ, movementX, movementZ) / denominator;
+        if (movementT < -1.0E-6 || movementT > 1.0 + 1.0E-6 || lineT < -1.0E-6 || lineT > 1.0 + 1.0E-6) {
+            return Optional.empty();
+        }
+        return Optional.of(new LineCrossing(clamp(movementT, 0.0, 1.0), clamp(lineT, 0.0, 1.0)));
+    }
+
+    private static double cross2d(double ax, double az, double bx, double bz) {
+        return ax * bz - az * bx;
+    }
+
     public static double wrapRadians(double radians) {
         double wrapped = radians;
         while (wrapped <= -Math.PI) {
@@ -83,6 +110,9 @@ public final class TrackGeometry {
     }
 
     private record SegmentProjection(Vec3 position, double t, double signedLateralDistance, double distanceSq) {
+    }
+
+    public record LineCrossing(double movementT, double lineT) {
     }
 
     public record ProgressSample(int segmentIndex, Vec3 projectedPosition, double distanceAlongTrack, double signedLateralDistance, double widthLeft, double widthRight, double headingRadians) {

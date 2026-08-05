@@ -27,6 +27,7 @@ public final class OpenwheelRacingClient {
         NeoForge.EVENT_BUS.addListener(OpenwheelRacingClientEvents::onClientTick);
         NeoForge.EVENT_BUS.addListener(OpenwheelRacingClientEvents::onMouseButton);
         NeoForge.EVENT_BUS.addListener(OpenwheelRacingClientEvents::onRenderPlayer);
+        NeoForge.EVENT_BUS.addListener(OpenwheelRacingClientEvents::onRenderLevelAfterEntities);
     }
 
     private void onClientSetup(FMLClientSetupEvent event) {

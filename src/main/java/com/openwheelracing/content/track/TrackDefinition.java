@@ -21,6 +21,7 @@ public record TrackDefinition(
     List<BoundarySample> boundaries,
     List<GridSlot> gridSlots,
     List<AiWaypoint> aiLine,
+    List<StewardLine> stewardLines,
     int schemaVersion
 ) {
     public static final int CURRENT_SCHEMA = 1;
@@ -37,6 +38,7 @@ public record TrackDefinition(
         BoundarySample.CODEC.listOf().optionalFieldOf("boundaries", List.of()).forGetter(TrackDefinition::boundaries),
         GridSlot.CODEC.listOf().optionalFieldOf("grid_slots", List.of()).forGetter(TrackDefinition::gridSlots),
         AiWaypoint.CODEC.listOf().optionalFieldOf("ai_line", List.of()).forGetter(TrackDefinition::aiLine),
+        StewardLine.CODEC.listOf().optionalFieldOf("steward_lines", List.of()).forGetter(TrackDefinition::stewardLines),
         Codec.INT.optionalFieldOf("schema", CURRENT_SCHEMA).forGetter(TrackDefinition::schemaVersion)
     ).apply(instance, TrackDefinition::new));
 
@@ -50,11 +52,12 @@ public record TrackDefinition(
         boundaries = List.copyOf(boundaries == null ? List.of() : boundaries);
         gridSlots = List.copyOf(gridSlots == null ? List.of() : gridSlots);
         aiLine = List.copyOf(aiLine == null ? List.of() : aiLine);
+        stewardLines = List.copyOf(stewardLines == null ? List.of() : stewardLines);
         schemaVersion = Math.max(1, schemaVersion);
     }
 
     public static TrackDefinition empty(UUID trackId, String name, String dimensionId) {
-        return new TrackDefinition(trackId, name, dimensionId, List.of(), Optional.empty(), List.of(), List.of(), List.of(), List.of(), List.of(), CURRENT_SCHEMA);
+        return new TrackDefinition(trackId, name, dimensionId, List.of(), Optional.empty(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), CURRENT_SCHEMA);
     }
 
     public boolean hasRaceStewardingGeometry() {
@@ -69,27 +72,31 @@ public record TrackDefinition(
     }
 
     public TrackDefinition withCenterline(List<CenterlineNode> centerline) {
-        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, schemaVersion);
+        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, stewardLines, schemaVersion);
     }
 
     public TrackDefinition withStartFinish(StartFinishLine startFinish) {
-        return new TrackDefinition(trackId, name, dimensionId, centerline, Optional.of(startFinish), checkpoints, sectors, boundaries, gridSlots, aiLine, schemaVersion);
+        return new TrackDefinition(trackId, name, dimensionId, centerline, Optional.of(startFinish), checkpoints, sectors, boundaries, gridSlots, aiLine, stewardLines, schemaVersion);
     }
 
     public TrackDefinition withCheckpoints(List<Checkpoint> checkpoints) {
-        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, schemaVersion);
+        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, stewardLines, schemaVersion);
     }
 
     public TrackDefinition withBoundaries(List<BoundarySample> boundaries) {
-        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, schemaVersion);
+        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, stewardLines, schemaVersion);
     }
 
     public TrackDefinition withGridSlots(List<GridSlot> gridSlots) {
-        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, schemaVersion);
+        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, stewardLines, schemaVersion);
     }
 
     public TrackDefinition withAiLine(List<AiWaypoint> aiLine) {
-        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, schemaVersion);
+        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, stewardLines, schemaVersion);
+    }
+
+    public TrackDefinition withStewardLines(List<StewardLine> stewardLines) {
+        return new TrackDefinition(trackId, name, dimensionId, centerline, startFinish, checkpoints, sectors, boundaries, gridSlots, aiLine, stewardLines, schemaVersion);
     }
 
     public record Point3(double x, double y, double z) {
@@ -149,6 +156,67 @@ public record TrackDefinition(
             Codec.INT.fieldOf("start_checkpoint").forGetter(Sector::startCheckpointIndex),
             Codec.INT.fieldOf("end_checkpoint").forGetter(Sector::endCheckpointIndex)
         ).apply(instance, Sector::new));
+    }
+
+    public enum StewardLineType {
+        CHECKPOINT("Checkpoint"),
+        SECTOR_SPLIT("Sector Split"),
+        PIT_LIMIT_START("Pit Limit Start"),
+        PIT_LIMIT_END("Pit Limit End"),
+        SAFETY_CAR_LINE("Safety Car Line"),
+        DRS_DETECTION("DRS Detection"),
+        DRS_ACTIVATION("DRS Activation");
+
+        public static final Codec<StewardLineType> CODEC = Codec.STRING.xmap(
+            StewardLineType::fromSerializedName,
+            StewardLineType::serializedName
+        );
+
+        private final String displayName;
+
+        StewardLineType(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public String displayName() {
+            return displayName;
+        }
+
+        public String serializedName() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+
+        public static StewardLineType fromSerializedName(String value) {
+            String normalized = value == null ? "" : value.trim().replace('-', '_').replace(' ', '_').toUpperCase(Locale.ROOT);
+            if (normalized.equals("MARSHALLING_POINT") || normalized.equals("MARSHALING_POINT") || normalized.equals("CP")) {
+                return CHECKPOINT;
+            }
+            if (normalized.equals("SC_LINE")) {
+                return SAFETY_CAR_LINE;
+            }
+            return StewardLineType.valueOf(normalized);
+        }
+    }
+
+    public record StewardLine(StewardLineType type, int index, String name, Point3 left, Point3 right, double headingRadians, double distanceAlongTrack) {
+        public static final Codec<StewardLine> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            StewardLineType.CODEC.fieldOf("type").forGetter(StewardLine::type),
+            Codec.INT.optionalFieldOf("index", 1).forGetter(StewardLine::index),
+            Codec.STRING.optionalFieldOf("name", "").forGetter(StewardLine::name),
+            Point3.CODEC.fieldOf("left").forGetter(StewardLine::left),
+            Point3.CODEC.fieldOf("right").forGetter(StewardLine::right),
+            Codec.DOUBLE.optionalFieldOf("heading", 0.0).forGetter(StewardLine::headingRadians),
+            Codec.DOUBLE.optionalFieldOf("distance", 0.0).forGetter(StewardLine::distanceAlongTrack)
+        ).apply(instance, StewardLine::new));
+
+        public StewardLine {
+            if (type == null) {
+                type = StewardLineType.CHECKPOINT;
+            }
+            index = Math.max(1, index);
+            name = name == null || name.isBlank() ? type.displayName() + " " + index : name;
+            distanceAlongTrack = Math.max(0.0, distanceAlongTrack);
+        }
     }
 
     public enum BoundarySide {

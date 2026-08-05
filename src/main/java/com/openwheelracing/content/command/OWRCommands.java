@@ -1,11 +1,13 @@
 package com.openwheelracing.content.command;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.openwheelracing.content.race.OWRRaceControlState;
+import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.TrackGeometry;
@@ -93,6 +95,35 @@ public final class OWRCommands {
                         .executes(context -> addBoundaryHere(context, TrackDefinition.BoundarySide.RIGHT)))
                     .then(Commands.literal("clear")
                         .executes(OWRCommands::clearBoundaries)))
+                .then(Commands.literal("line")
+                    .then(Commands.literal("set")
+                        .then(Commands.argument("x1", DoubleArgumentType.doubleArg())
+                            .then(Commands.argument("y1", DoubleArgumentType.doubleArg())
+                                .then(Commands.argument("z1", DoubleArgumentType.doubleArg())
+                                    .then(Commands.argument("x2", DoubleArgumentType.doubleArg())
+                                        .then(Commands.argument("y2", DoubleArgumentType.doubleArg())
+                                            .then(Commands.argument("z2", DoubleArgumentType.doubleArg())
+                                                .then(Commands.argument("type", StringArgumentType.word())
+                                                    .then(Commands.argument("index", IntegerArgumentType.integer(1))
+                                                        .executes(OWRCommands::setStewardLine))))))))))
+                    .then(Commands.literal("add-here")
+                        .then(Commands.argument("type", StringArgumentType.word())
+                            .then(Commands.argument("index", IntegerArgumentType.integer(1))
+                                .executes(context -> addStewardLineHere(context, 8))
+                                .then(Commands.argument("width", IntegerArgumentType.integer(1, 64))
+                                    .executes(context -> addStewardLineHere(context, IntegerArgumentType.getInteger(context, "width")))))))
+                    .then(Commands.literal("list")
+                        .executes(OWRCommands::listStewardLines))
+                    .then(Commands.literal("remove")
+                        .then(Commands.argument("type", StringArgumentType.word())
+                            .then(Commands.argument("index", IntegerArgumentType.integer(1))
+                                .executes(OWRCommands::removeStewardLine))))
+                    .then(Commands.literal("clear")
+                        .executes(OWRCommands::clearStewardLines))
+                    .then(Commands.literal("show")
+                        .executes(context -> setStewardLineVisibility(context, true)))
+                    .then(Commands.literal("hide")
+                        .executes(context -> setStewardLineVisibility(context, false))))
                 .then(Commands.literal("ai")
                     .then(Commands.literal("generate")
                         .executes(OWRCommands::generateAiLine)))));
@@ -341,6 +372,157 @@ public final class OWRCommands {
         data.upsert(track.withBoundaries(List.of()));
         send(context, "Cleared boundary samples for " + track.name() + ".");
         return 1;
+    }
+
+    private static int setStewardLine(CommandContext<CommandSourceStack> context) {
+        TrackDefinition.Point3 left = new TrackDefinition.Point3(
+            DoubleArgumentType.getDouble(context, "x1"),
+            DoubleArgumentType.getDouble(context, "y1"),
+            DoubleArgumentType.getDouble(context, "z1")
+        );
+        TrackDefinition.Point3 right = new TrackDefinition.Point3(
+            DoubleArgumentType.getDouble(context, "x2"),
+            DoubleArgumentType.getDouble(context, "y2"),
+            DoubleArgumentType.getDouble(context, "z2")
+        );
+        TrackDefinition.StewardLineType type = parseStewardLineType(context);
+        if (type == null) {
+            return 0;
+        }
+        return upsertStewardLine(context, createStewardLine(context, type, IntegerArgumentType.getInteger(context, "index"), left, right));
+    }
+
+    private static int addStewardLineHere(CommandContext<CommandSourceStack> context, int width) throws CommandSyntaxException {
+        TrackDefinition.StewardLineType type = parseStewardLineType(context);
+        if (type == null) {
+            return 0;
+        }
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        TrackDefinition.StartFinishLine line = lineAtPlayer(player, width);
+        return upsertStewardLine(context, createStewardLine(context, type, IntegerArgumentType.getInteger(context, "index"), line.left(), line.right()));
+    }
+
+    private static TrackDefinition.StewardLine createStewardLine(CommandContext<CommandSourceStack> context, TrackDefinition.StewardLineType type, int index, TrackDefinition.Point3 left, TrackDefinition.Point3 right) {
+        TrackDefinition.Point3 raisedLeft = raiseStewardLinePoint(left);
+        TrackDefinition.Point3 raisedRight = raiseStewardLinePoint(right);
+        double centerX = (raisedLeft.x() + raisedRight.x()) * 0.5;
+        double centerY = (raisedLeft.y() + raisedRight.y()) * 0.5;
+        double centerZ = (raisedLeft.z() + raisedRight.z()) * 0.5;
+        Vec3 center = new Vec3(centerX, centerY, centerZ);
+        TrackDefinition track = trackData(context).activeTrack(dimensionId(context)).orElse(null);
+        double distance = track == null ? 0.0 : TrackGeometry.sample(track, center).map(TrackGeometry.ProgressSample::distanceAlongTrack).orElse(0.0);
+        double lineAngle = Math.atan2(raisedRight.z() - raisedLeft.z(), raisedRight.x() - raisedLeft.x());
+        double heading = lineAngle - Math.PI * 0.5;
+        return new TrackDefinition.StewardLine(type, index, type.displayName() + " " + index, raisedLeft, raisedRight, heading, distance);
+    }
+
+    private static TrackDefinition.Point3 raiseStewardLinePoint(TrackDefinition.Point3 point) {
+        return new TrackDefinition.Point3(point.x(), point.y() + 0.5, point.z());
+    }
+
+    private static int upsertStewardLine(CommandContext<CommandSourceStack> context, TrackDefinition.StewardLine line) {
+        TrackDefinitionsData data = trackData(context);
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
+        if (active.isEmpty()) {
+            send(context, "No active stewarding track selected.");
+            return 0;
+        }
+        TrackDefinition track = active.get();
+        List<TrackDefinition.StewardLine> lines = new ArrayList<>(track.stewardLines().stream()
+            .filter(existing -> existing.type() != line.type() || existing.index() != line.index())
+            .toList());
+        lines.add(line);
+        lines.sort(java.util.Comparator.comparing(TrackDefinition.StewardLine::type).thenComparingInt(TrackDefinition.StewardLine::index));
+        data.upsert(track.withStewardLines(lines));
+        send(context, "Set " + line.type().serializedName() + " " + line.index() + " for " + track.name() + ".");
+        return line.index();
+    }
+
+    private static int listStewardLines(CommandContext<CommandSourceStack> context) {
+        Optional<TrackDefinition> active = trackData(context).activeTrack(dimensionId(context));
+        if (active.isEmpty()) {
+            send(context, "No active stewarding track selected.");
+            return 0;
+        }
+        List<TrackDefinition.StewardLine> lines = active.get().stewardLines();
+        if (lines.isEmpty()) {
+            send(context, "No stewarding lines defined for " + active.get().name() + ".");
+            return 0;
+        }
+        send(context, "Stewarding lines for " + active.get().name() + ":");
+        for (TrackDefinition.StewardLine line : lines) {
+            send(context, "- " + line.type().serializedName() + " " + line.index() + " [" + formatPoint(line.left()) + " -> " + formatPoint(line.right()) + "]");
+        }
+        return lines.size();
+    }
+
+    private static int removeStewardLine(CommandContext<CommandSourceStack> context) {
+        TrackDefinition.StewardLineType type = parseStewardLineType(context);
+        if (type == null) {
+            return 0;
+        }
+        TrackDefinitionsData data = trackData(context);
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
+        if (active.isEmpty()) {
+            send(context, "No active stewarding track selected.");
+            return 0;
+        }
+        int index = IntegerArgumentType.getInteger(context, "index");
+        TrackDefinition track = active.get();
+        List<TrackDefinition.StewardLine> lines = track.stewardLines().stream()
+            .filter(line -> line.type() != type || line.index() != index)
+            .toList();
+        if (lines.size() == track.stewardLines().size()) {
+            send(context, "No " + type.serializedName() + " " + index + " exists.");
+            return 0;
+        }
+        data.upsert(track.withStewardLines(lines));
+        send(context, "Removed " + type.serializedName() + " " + index + ".");
+        return 1;
+    }
+
+    private static int clearStewardLines(CommandContext<CommandSourceStack> context) {
+        TrackDefinitionsData data = trackData(context);
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
+        if (active.isEmpty()) {
+            send(context, "No active stewarding track selected.");
+            return 0;
+        }
+        data.upsert(active.get().withStewardLines(List.of()));
+        send(context, "Cleared stewarding lines for " + active.get().name() + ".");
+        return 1;
+    }
+
+    private static int setStewardLineVisibility(CommandContext<CommandSourceStack> context, boolean visible) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        if (!visible) {
+            OWRNetwork.sendStewardLineOverlay(player, false, null, 0);
+            send(context, "Stewarding lines hidden for your client.");
+            return 1;
+        }
+        TrackDefinitionsData data = trackData(context);
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
+        if (active.isEmpty()) {
+            send(context, "No active stewarding track selected.");
+            return 0;
+        }
+        OWRNetwork.sendStewardLineOverlay(player, true, active.get(), data.getRevision());
+        send(context, "Showing " + active.get().stewardLines().size() + " stewarding lines for your client.");
+        return active.get().stewardLines().size();
+    }
+
+    private static TrackDefinition.StewardLineType parseStewardLineType(CommandContext<CommandSourceStack> context) {
+        String value = StringArgumentType.getString(context, "type");
+        try {
+            return TrackDefinition.StewardLineType.fromSerializedName(value);
+        } catch (IllegalArgumentException ignored) {
+            send(context, "Unknown line type: " + value + ". Use checkpoint, sector_split, pit_limit_start, pit_limit_end, safety_car_line, drs_detection, or drs_activation.");
+            return null;
+        }
+    }
+
+    private static String formatPoint(TrackDefinition.Point3 point) {
+        return String.format(java.util.Locale.ROOT, "%.1f %.1f %.1f", point.x(), point.y(), point.z());
     }
 
     private static int generateAiLine(CommandContext<CommandSourceStack> context) {

@@ -22,6 +22,7 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.furnace.FurnaceFuelBurnTimeEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import org.slf4j.Logger;
@@ -51,6 +52,7 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(this::onPlayerChangedDimension);
         NeoForge.EVENT_BUS.addListener(this::onPlayerRespawn);
         NeoForge.EVENT_BUS.addListener(this::onServerStarted);
+        NeoForge.EVENT_BUS.addListener(this::onServerStopped);
         NeoForge.EVENT_BUS.addListener(TrackMapAutoDetector::onServerTick);
     }
 
@@ -71,7 +73,12 @@ public final class OpenwheelRacing {
     }
 
     private void onServerStarted(ServerStartedEvent event) {
+        TrackMapAutoDetector.clearJobs();
         OWRLegacyDimensionDataImporter.importOnServerStarted(event.getServer());
+    }
+
+    private void onServerStopped(ServerStoppedEvent event) {
+        TrackMapAutoDetector.clearJobs();
     }
 
     private void syncPlayerCircuit(PlayerEvent event) {

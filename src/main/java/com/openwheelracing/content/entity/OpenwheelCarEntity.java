@@ -13,9 +13,16 @@ import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.item.TyreItem;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.OWRRaceControlState;
+import com.openwheelracing.content.track.TrackDefinition;
+import com.openwheelracing.content.track.TrackDefinitionsData;
+import com.openwheelracing.content.track.TrackGeometry;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRBlocks;
 import com.openwheelracing.registry.OWRItems;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -156,6 +163,14 @@ public class OpenwheelCarEntity extends Entity {
     private static final double SPEED_TO_BLOCKS_PER_TICK = VehiclePhysics.SPEED_TO_BLOCKS_PER_TICK;
     private static final double MAX_REASONABLE_SPEED_BLOCKS_PER_TICK = 420.0 * SPEED_TO_BLOCKS_PER_TICK;
     private static final double MAX_REASONABLE_MOVEMENT_BLOCKS_PER_TICK = MAX_REASONABLE_SPEED_BLOCKS_PER_TICK + 0.35;
+    private static final int CLIENT_PREDICTION_HISTORY_SIZE = 32;
+    private static final int CLIENT_MAX_REPLAY_TICKS = 8;
+    private static final int DRIVE_INPUT_RECONCILE_SEQUENCE_GAP = 2;
+    private static final int DRIVE_INPUT_ACK_MIN_GAP_TICKS = 2;
+    private static final double CLIENT_RECONCILE_POSITION_EPSILON_SQR = 1.25 * 1.25;
+    private static final double CLIENT_RECONCILE_DELTA_EPSILON_SQR = 0.35 * 0.35;
+    private static final float CLIENT_RECONCILE_YAW_EPSILON_DEGREES = 12.0f;
+    private static final double CLIENT_RECONCILE_YAW_RATE_EPSILON = 0.50;
     private static final double PASSIVE_GROUND_DRAG = 0.92;
     private static final double PASSIVE_AIR_DRAG = 0.985;
     private static final double PASSIVE_YAW_DAMPING = 0.70;
@@ -278,7 +293,7 @@ public class OpenwheelCarEntity extends Entity {
     private double lastClimbDelta;
     private double lastGroundSnapDelta;
     private double lastTerrainPositionCorrectionY;
-    private long lapStartedAt = -1L;
+    private double lapStartedAt = -1.0;
     private long lastStartFinishMarker;
     private long lastStartFinishTriggerAt = -20L;
     private long lastLowTyreWarningAt = -200L;
@@ -289,13 +304,28 @@ public class OpenwheelCarEntity extends Entity {
     // Client-side: yaw the car was at when passenger was last synced; used to detect
     // server-authoritative yaw corrections and keep the driver view aligned.
     private float clientLastSyncedCarYaw = Float.NaN;
+    private int clientCurrentInputSequence;
+    private final ClientPredictionFrame[] clientPredictionHistory = new ClientPredictionFrame[CLIENT_PREDICTION_HISTORY_SIZE];
+    private int clientPredictionHistoryCount;
     // Checkpoint positions (packed BlockPos longs) visited in the current lap, in order
     private final java.util.LinkedList<Long> visitedCheckpoints = new java.util.LinkedList<>();
     private final java.util.HashSet<Long> visitedCheckpointSet = new java.util.HashSet<>();
+    private final java.util.HashSet<String> visitedTimingSegments = new java.util.HashSet<>();
+    private final java.util.HashMap<String, Integer> currentLapCumulativeBySegment = new java.util.HashMap<>();
+    private final java.util.HashMap<String, Integer> currentLapMiniBySegment = new java.util.HashMap<>();
+    private final java.util.HashMap<String, Integer> currentLapStatusBySegment = new java.util.HashMap<>();
+    private String lastCrossedTimingSegment = "";
+    private int lastTimingSegmentElapsedMillis;
+    private int visitedStewardCheckpoints;
     // Last driver input received from client; cleared each tick after use
     private float inputThrottle;
     private float inputBrake;
     private float inputSteering;
+    private int lastAcceptedInputSequence;
+    private int lastAckedInputSequence;
+    private long lastDriveInputAckAt = -DRIVE_INPUT_ACK_MIN_GAP_TICKS;
+    private boolean driveInputAckRequested;
+    private boolean hasAcceptedInputSequence;
     private long lastMovementWarningAt = -200L;
     private final java.util.HashMap<Integer, Long> lastEntityImpactById = new java.util.HashMap<>();
     private boolean wasRiddenLastTick;
@@ -347,10 +377,49 @@ public class OpenwheelCarEntity extends Entity {
     private int ersLiftConfirmTicks;
     private boolean ersLiftAndCoastArmed;
 
-    public void applyDriveInput(float throttle, float brake, float steering) {
+    public boolean applyDriveInput(int sequence, float throttle, float brake, float steering) {
+        if (hasAcceptedInputSequence) {
+            if (!VehiclePhysics.isNewerSequence(sequence, lastAcceptedInputSequence)) {
+                return false;
+            }
+            if (VehiclePhysics.exceedsSequenceGap(sequence, lastAcceptedInputSequence, DRIVE_INPUT_RECONCILE_SEQUENCE_GAP)) {
+                driveInputAckRequested = true;
+            }
+        }
+        lastAcceptedInputSequence = sequence;
+        hasAcceptedInputSequence = true;
         this.inputThrottle = throttle;
         this.inputBrake = brake;
         this.inputSteering = steering;
+        return true;
+    }
+
+    public int getLastAcceptedInputSequence() {
+        return lastAcceptedInputSequence;
+    }
+
+    public double getYawRateRadiansPerSecond() {
+        return yawRate;
+    }
+
+    public double getSteeringAngleRadians() {
+        return steeringAngle;
+    }
+
+    public double getRelaxedFlLateralForce() {
+        return relaxedFlLatForce;
+    }
+
+    public double getRelaxedFrLateralForce() {
+        return relaxedFrLatForce;
+    }
+
+    public double getRelaxedRlLateralForce() {
+        return relaxedRlLatForce;
+    }
+
+    public double getRelaxedRrLateralForce() {
+        return relaxedRrLatForce;
     }
 
     public OpenwheelCarEntity(EntityType<? extends OpenwheelCarEntity> entityType, Level level) {
@@ -954,6 +1023,10 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public void crossStartFinishLine(BlockPos pos, Direction markerFacing) {
+        crossStartFinishLine(pos, markerFacing, 1.0);
+    }
+
+    private void crossStartFinishLine(BlockPos pos, Direction markerFacing, double movementT) {
         long packed = pos.asLong();
         if (packed == lastStartFinishMarker && level().getGameTime() == lastStartFinishTriggerAt) {
             return;
@@ -965,19 +1038,25 @@ public class OpenwheelCarEntity extends Entity {
             return;
         }
 
+        double crossingTime = preciseGameTime(movementT);
         long gameTime = level().getGameTime();
-        if (lapStartedAt >= 0L) {
-            if (isCheckpointCheckEnabled() && visitedCheckpoints.isEmpty()) {
+        if (lapStartedAt >= 0.0) {
+            if (isCheckpointCheckEnabled() && visitedCheckpoints.isEmpty() && visitedStewardCheckpoints == 0) {
                 invalidateLap("no checkpoints crossed");
-                startLap(gameTime, Component.literal("Lap started — cross all checkpoints"));
+                startLap(crossingTime, Component.literal("Lap started — cross all checkpoints"));
                 return;
             }
-            completeLap(pos, gameTime);
+            if (completeLap(pos, gameTime, crossingTime)) {
+                startLap(crossingTime, null);
+            } else {
+                startLap(crossingTime, Component.literal("Lap started — cross all checkpoints"));
+            }
+            return;
         } else {
             messageDriver(Component.literal("Lap started"));
         }
 
-        startLap(gameTime, null);
+        startLap(crossingTime, null);
     }
 
     public void crossCheckpoint(BlockPos pos, Direction markerFacing) {
@@ -988,7 +1067,7 @@ public class OpenwheelCarEntity extends Entity {
             invalidateLap("reverse checkpoint pass");
             return;
         }
-        if (lapStartedAt < 0L) {
+        if (lapStartedAt < 0.0) {
             return;
         }
         long packed = pos.asLong();
@@ -1000,36 +1079,54 @@ public class OpenwheelCarEntity extends Entity {
         messageDriver(Component.literal("CP " + visitedCheckpoints.size()));
     }
 
-    private void startLap(long gameTime, @Nullable Component message) {
+    private void startLap(double gameTime, @Nullable Component message) {
         lapStartedAt = gameTime;
         resetLapProgress();
         if (message != null) {
             messageDriver(message);
         }
+        sendTimingDeltaReset();
     }
 
-    private void completeLap(BlockPos startFinishPos, long gameTime) {
-        int lapTicks = Math.max(1, (int)(gameTime - lapStartedAt));
+    private void sendTimingDeltaReset() {
+        if (!(level() instanceof ServerLevel serverLevel) || !(getControllingPassenger() instanceof ServerPlayer player)) {
+            return;
+        }
+        int segmentCount = TrackDefinitionsData.get(serverLevel)
+            .activeTrack(serverLevel.dimension().identifier().toString())
+            .map(track -> timingSegments(track).size())
+            .orElse(0);
+        OWRNetwork.sendTimingDeltaReset(player, segmentCount);
+    }
+
+    private boolean completeLap(BlockPos startFinishPos, long gameTime, double crossingTime) {
+        int lapMillis = Math.max(1, elapsedMillisAt(crossingTime));
         if (!(level() instanceof ServerLevel serverLevel) || !(getControllingPassenger() instanceof Player player)) {
-            return;
+            return false;
         }
-        int minimumLapTicks = OWRRaceControlState.get(serverLevel).getMinimumValidLapTicks();
-        if (lapTicks <= minimumLapTicks) {
-            messageDriver(Component.translatable("message.openwheelracing.race_director.lap_ignored", String.format("%.1f", minimumLapTicks / 20.0f)));
-            return;
+        int minimumLapMillis = OWRRaceControlState.get(serverLevel).getMinimumValidLapTicks() * 50;
+        if (lapMillis <= minimumLapMillis) {
+            messageDriver(Component.translatable("message.openwheelracing.race_director.lap_ignored", String.format("%.1f", minimumLapMillis / 1000.0f)));
+            return false;
         }
-        entityData.set(CURRENT_LAP_TICKS, lapTicks);
+        Optional<TrackDefinition> activeTrack = TrackDefinitionsData.get(serverLevel).activeTrack(serverLevel.dimension().identifier().toString());
+        List<TrackDefinition.StewardLine> timingSegments = activeTrack.map(this::timingSegments).orElse(List.of());
+        if (isCheckpointCheckEnabled() && !allTimingSegmentsHit(timingSegments)) {
+            invalidateLap("missed checkpoints");
+            return false;
+        }
+        entityData.set(CURRENT_LAP_TICKS, lapMillis);
         OWRLapRecords records = OWRLapRecords.get(serverLevel);
         int previousBest = records.getBestLap(player.getUUID());
-        int previousOverallBest = records.getOverallBestLapTicks();
+        int previousOverallBest = records.getOverallBestLapMillis();
         records.recordLap(
             player.getUUID(),
             player.getScoreboardName(),
-            lapTicks,
+            lapMillis,
             gameTime,
             serverLevel.dimension().identifier().toString(),
             startFinishPos.asLong(),
-            visitedCheckpoints.size(),
+            visitedCheckpoints.size() + visitedStewardCheckpoints,
             new OWRLapRecords.CarSnapshot(
                 setup.power(),
                 setup.grip(),
@@ -1040,20 +1137,22 @@ public class OpenwheelCarEntity extends Entity {
                 isAbsEnabled()
             )
         );
+        activeTrack.ifPresent(track -> commitValidTimingSegments(records, player.getUUID(), serverLevel.dimension().identifier().toString(), track, timingSegments));
         int bestLap = records.getBestLap(player.getUUID());
-        boolean personalBest = bestLap != 0 && bestLap != previousBest && bestLap == lapTicks;
-        int lapResult = previousOverallBest == 0 || lapTicks < previousOverallBest
+        boolean personalBest = bestLap != 0 && bestLap != previousBest && bestLap == lapMillis;
+        int lapResult = previousOverallBest == 0 || lapMillis < previousOverallBest
             ? LAP_RESULT_OVERALL_BEST
             : personalBest ? LAP_RESULT_PERSONAL_BEST : LAP_RESULT_SLOWER;
         entityData.set(BEST_LAP_TICKS, bestLap);
-        entityData.set(COMPLETED_LAP_TICKS, lapTicks);
+        entityData.set(COMPLETED_LAP_TICKS, lapMillis);
         entityData.set(COMPLETED_LAP_LINGER_TICKS, COMPLETED_LAP_LINGER_DURATION);
         entityData.set(COMPLETED_LAP_RESULT, lapResult);
         OWRNetwork.broadcastRankingBoard(serverLevel.getServer(), serverLevel);
         awardCompleteLapAdvancement(serverLevel, player);
-        messageDriver(Component.literal("Lap: " + formatLapTime(lapTicks)
-            + " | CPs: " + visitedCheckpoints.size()
+        messageDriver(Component.literal("Lap: " + formatLapTime(lapMillis)
+            + " | CPs: " + (visitedCheckpoints.size() + visitedStewardCheckpoints)
             + (personalBest ? " | Personal best" : "")));
+        return true;
     }
 
     private void awardCompleteLapAdvancement(ServerLevel serverLevel, Player player) {
@@ -1066,6 +1165,13 @@ public class OpenwheelCarEntity extends Entity {
     private void resetLapProgress() {
         visitedCheckpoints.clear();
         visitedCheckpointSet.clear();
+        visitedTimingSegments.clear();
+        currentLapCumulativeBySegment.clear();
+        currentLapMiniBySegment.clear();
+        currentLapStatusBySegment.clear();
+        lastCrossedTimingSegment = "";
+        lastTimingSegmentElapsedMillis = 0;
+        visitedStewardCheckpoints = 0;
         entityData.set(CHECKPOINT_ARMED, false);
         entityData.set(CURRENT_LAP_TICKS, 0);
     }
@@ -1127,9 +1233,22 @@ public class OpenwheelCarEntity extends Entity {
                 clearHollowCollisionBlocks(false);
             }
             tickMovement(true);
+            sendPendingDriveInputAck();
             clearHollowCollisionBlocks(true);
             tickImpactDamage();
             tickWarnings();
+        }
+    }
+
+    private void sendPendingDriveInputAck() {
+        if (!driveInputAckRequested || !hasAcceptedInputSequence || lastAcceptedInputSequence == lastAckedInputSequence || level().getGameTime() - lastDriveInputAckAt < DRIVE_INPUT_ACK_MIN_GAP_TICKS) {
+            return;
+        }
+        if (getControllingPassenger() instanceof ServerPlayer player) {
+            OWRNetwork.sendDriveInputAck(player, this);
+            lastAckedInputSequence = lastAcceptedInputSequence;
+            lastDriveInputAckAt = level().getGameTime();
+            driveInputAckRequested = false;
         }
     }
 
@@ -1258,8 +1377,8 @@ public class OpenwheelCarEntity extends Entity {
             input.getIntOr("LiveryAccent2", getLiveryColors().accent2())
         ));
         setLiveryTexture(new CarLiveryTexture(input.getStringOr("LiveryTexture", "")));
-        entityData.set(CURRENT_LAP_TICKS, input.getIntOr("CurrentLapTicks", 0));
-        entityData.set(BEST_LAP_TICKS, input.getIntOr("BestLapTicks", 0));
+        entityData.set(CURRENT_LAP_TICKS, input.getIntOr("CurrentLapMillis", input.getIntOr("CurrentLapTicks", 0) * 50));
+        entityData.set(BEST_LAP_TICKS, input.getIntOr("BestLapMillis", input.getIntOr("BestLapTicks", 0) * 50));
         entityData.set(CHECKPOINT_ARMED, input.getBooleanOr("CheckpointArmed", false));
         setAbsEnabled(input.getBooleanOr("AbsEnabled", false));
         setTractionControlEnabled(input.getBooleanOr("TractionControlEnabled", false));
@@ -1285,7 +1404,7 @@ public class OpenwheelCarEntity extends Entity {
         setErsEnergyJoules(input.getDoubleOr("ErsEnergy", getErsCapacityJoules()));
         steeringAngle = input.getDoubleOr("SteeringAngle", 0.0);
         yawRate = input.getDoubleOr("YawRate", 0.0);
-        lapStartedAt = input.getLongOr("LapStartedAt", -1L);
+        lapStartedAt = input.getDoubleOr("LapStartedAtPrecise", input.getLongOr("LapStartedAt", -1L));
     }
 
     @Override
@@ -1313,8 +1432,8 @@ public class OpenwheelCarEntity extends Entity {
         output.putInt("LiveryAccent1", liveryColors.accent1());
         output.putInt("LiveryAccent2", liveryColors.accent2());
         output.putString("LiveryTexture", getLiveryTexture().id());
-        output.putInt("CurrentLapTicks", getCurrentLapTicks());
-        output.putInt("BestLapTicks", getBestLapTicks());
+        output.putInt("CurrentLapMillis", getCurrentLapTicks());
+        output.putInt("BestLapMillis", getBestLapTicks());
         output.putBoolean("CheckpointArmed", hasCheckpoint());
         output.putBoolean("AbsEnabled", isAbsEnabled());
         output.putBoolean("TractionControlEnabled", isTractionControlEnabled());
@@ -1338,7 +1457,8 @@ public class OpenwheelCarEntity extends Entity {
         output.putDouble("ErsCapacity", getErsCapacityJoules());
         output.putDouble("SteeringAngle", steeringAngle);
         output.putDouble("YawRate", yawRate);
-        output.putLong("LapStartedAt", lapStartedAt);
+        output.putDouble("LapStartedAtPrecise", lapStartedAt);
+        output.putLong("LapStartedAt", lapStartedAt < 0.0 ? -1L : (long) Math.floor(lapStartedAt));
     }
 
     private boolean isOnPitStopMark() {
@@ -1379,7 +1499,7 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private void tickLapTimer() {
-        if (lapStartedAt >= 0L) {
+        if (lapStartedAt >= 0.0) {
             Entity passenger = getControllingPassenger();
             if (!(passenger instanceof Player player) || !player.isAlive()) {
                 invalidateLap("driver left car");
@@ -1395,7 +1515,7 @@ public class OpenwheelCarEntity extends Entity {
                     }
                 }
             }
-            entityData.set(CURRENT_LAP_TICKS, Math.max(0, (int) (level().getGameTime() - lapStartedAt)));
+            entityData.set(CURRENT_LAP_TICKS, elapsedMillisNow());
         }
     }
 
@@ -1544,50 +1664,214 @@ public class OpenwheelCarEntity extends Entity {
         return !(level() instanceof ServerLevel serverLevel) || OWRRaceControlState.get(serverLevel).isOffTrackCheckEnabled();
     }
 
-    private void scanLapMarkers(Vec3 beforeMove, Vec3 actualMovement) {
-        double yaw = Math.toRadians(getYRot());
-        Vec3 forward = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
-        Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
-        int steps = Math.max(1, (int)Math.ceil(actualMovement.horizontalDistance() / 0.25));
-        Vec3 currentPosition = position();
-        for (int step = 0; step <= steps; step++) {
-            double t = (double)step / steps;
-            Vec3 center = beforeMove.lerp(currentPosition, t);
-            if (scanLapMarkerAt(center, forward, right)) {
-                return;
-            }
+    private void scanVirtualMarkerLines(Vec3 beforeMove, Vec3 actualMovement) {
+        if (actualMovement.horizontalDistanceSqr() <= 1.0E-8) {
+            return;
         }
-    }
-
-    private boolean scanLapMarkerAt(Vec3 center, Vec3 forward, Vec3 right) {
-        for (double side : TRACK_WHEEL_SIDE_OFFSETS) {
-            for (double length : TRACK_WHEEL_LENGTH_OFFSETS) {
-                for (double sidePatch : TRACK_PATCH_SIDE_OFFSETS) {
-                    for (double lengthPatch : TRACK_PATCH_LENGTH_OFFSETS) {
-                        Vec3 samplePos = center
-                            .add(right.scale(side + sidePatch))
-                            .add(forward.scale(length + lengthPatch));
-                        BlockPos pos = BlockPos.containing(samplePos.x, getBoundingBox().minY - 0.05, samplePos.z);
-                        Block block = level().getBlockState(pos).getBlock();
-                        if (block == OWRBlocks.START_FINISH.get()) {
-                            crossStartFinishLine(pos, level().getBlockState(pos).getValue(net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING));
-                            return true;
-                        }
-                        if (block == OWRBlocks.CHECKPOINT.get()) {
-                            crossCheckpoint(pos, level().getBlockState(pos).getValue(net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING));
-                            return true;
-                        }
+        Vec3 current = position();
+        VirtualMarkerCrossing best = null;
+        AABB swept = new AABB(
+            Math.min(beforeMove.x, current.x) - 1.5,
+            getBoundingBox().minY - 0.2,
+            Math.min(beforeMove.z, current.z) - 1.5,
+            Math.max(beforeMove.x, current.x) + 1.5,
+            getBoundingBox().maxY + 0.2,
+            Math.max(beforeMove.z, current.z) + 1.5
+        );
+        int minX = (int) Math.floor(swept.minX);
+        int maxX = (int) Math.floor(swept.maxX);
+        int minY = (int) Math.floor(swept.minY);
+        int maxY = (int) Math.floor(swept.maxY);
+        int minZ = (int) Math.floor(swept.minZ);
+        int maxZ = (int) Math.floor(swept.maxZ);
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = level().getBlockState(pos);
+                    Block block = state.getBlock();
+                    if (block != OWRBlocks.START_FINISH.get() && block != OWRBlocks.CHECKPOINT.get()) {
+                        continue;
+                    }
+                    Direction facing = state.getValue(net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING);
+                    Optional<TrackGeometry.LineCrossing> crossing = TrackGeometry.crossing(beforeMove, current, virtualMarkerLeftPoint(pos, facing), virtualMarkerRightPoint(pos, facing));
+                    if (crossing.isPresent() && (best == null || crossing.get().movementT() < best.crossing().movementT())) {
+                        best = new VirtualMarkerCrossing(pos, facing, block == OWRBlocks.START_FINISH.get(), crossing.get());
                     }
                 }
             }
         }
-        return false;
+        if (best == null) {
+            return;
+        }
+        if (best.startFinish()) {
+            crossStartFinishLine(best.pos(), best.facing(), best.crossing().movementT());
+        } else {
+            crossCheckpoint(best.pos(), best.facing());
+        }
     }
 
+    private TrackDefinition.Point3 virtualMarkerLeftPoint(BlockPos pos, Direction facing) {
+        double centerX = pos.getX() + 0.5;
+        double centerY = pos.getY() + 0.5;
+        double centerZ = pos.getZ() + 0.5;
+        return switch (facing.getAxis()) {
+            case X -> new TrackDefinition.Point3(centerX, centerY, centerZ - 0.5);
+            case Z -> new TrackDefinition.Point3(centerX - 0.5, centerY, centerZ);
+            default -> new TrackDefinition.Point3(centerX - 0.5, centerY, centerZ);
+        };
+    }
 
-    public void tickLocalClientMovement(float throttle, float brake, float steering) {
+    private TrackDefinition.Point3 virtualMarkerRightPoint(BlockPos pos, Direction facing) {
+        double centerX = pos.getX() + 0.5;
+        double centerY = pos.getY() + 0.5;
+        double centerZ = pos.getZ() + 0.5;
+        return switch (facing.getAxis()) {
+            case X -> new TrackDefinition.Point3(centerX, centerY, centerZ + 0.5);
+            case Z -> new TrackDefinition.Point3(centerX + 0.5, centerY, centerZ);
+            default -> new TrackDefinition.Point3(centerX + 0.5, centerY, centerZ);
+        };
+    }
+
+    private record VirtualMarkerCrossing(BlockPos pos, Direction facing, boolean startFinish, TrackGeometry.LineCrossing crossing) {
+    }
+
+    private void scanStewardTimingLines(Vec3 beforeMove, Vec3 actualMovement) {
+        if (!(level() instanceof ServerLevel serverLevel) || lapStartedAt < 0.0 || actualMovement.horizontalDistanceSqr() <= 1.0E-8 || !(getControllingPassenger() instanceof ServerPlayer player)) {
+            return;
+        }
+        Optional<TrackDefinition> active = TrackDefinitionsData.get(serverLevel).activeTrack(serverLevel.dimension().identifier().toString());
+        if (active.isEmpty()) {
+            return;
+        }
+        TrackDefinition track = active.get();
+        List<TrackDefinition.StewardLine> segments = timingSegments(track);
+        if (segments.isEmpty()) {
+            return;
+        }
+        Vec3 current = position();
+        TrackDefinition.StewardLine crossed = null;
+        TrackGeometry.LineCrossing bestCrossing = null;
+        int crossedIndex = -1;
+        for (int index = 0; index < segments.size(); index++) {
+            TrackDefinition.StewardLine line = segments.get(index);
+            String key = timingSegmentKey(line);
+            if (key.equals(lastCrossedTimingSegment)) {
+                continue;
+            }
+            Optional<TrackGeometry.LineCrossing> crossing = TrackGeometry.crossing(beforeMove, current, line);
+            if (crossing.isPresent() && (bestCrossing == null || crossing.get().movementT() < bestCrossing.movementT())) {
+                crossed = line;
+                bestCrossing = crossing.get();
+                crossedIndex = index;
+            }
+        }
+        if (crossed != null && bestCrossing != null) {
+            recordStewardTimingSegment(serverLevel, player, track, segments, crossed, crossedIndex, bestCrossing.movementT());
+        }
+    }
+
+    private List<TrackDefinition.StewardLine> timingSegments(TrackDefinition track) {
+        return track.stewardLines().stream()
+            .filter(line -> line.type() == TrackDefinition.StewardLineType.CHECKPOINT || line.type() == TrackDefinition.StewardLineType.SECTOR_SPLIT)
+            .sorted(java.util.Comparator.comparingDouble(TrackDefinition.StewardLine::distanceAlongTrack)
+                .thenComparing(TrackDefinition.StewardLine::type)
+                .thenComparingInt(TrackDefinition.StewardLine::index))
+            .toList();
+    }
+
+    private boolean allTimingSegmentsHit(List<TrackDefinition.StewardLine> segments) {
+        if (segments.isEmpty()) {
+            return !visitedCheckpoints.isEmpty();
+        }
+        for (TrackDefinition.StewardLine segment : segments) {
+            if (!visitedTimingSegments.contains(timingSegmentKey(segment))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void commitValidTimingSegments(OWRLapRecords records, UUID driverId, String dimensionId, TrackDefinition track, List<TrackDefinition.StewardLine> segments) {
+        for (int index = 0; index < segments.size(); index++) {
+            TrackDefinition.StewardLine segment = segments.get(index);
+            String key = timingSegmentKey(segment);
+            Integer cumulativeTicks = currentLapCumulativeBySegment.get(key);
+            Integer miniTicks = currentLapMiniBySegment.get(key);
+            if (cumulativeTicks != null && miniTicks != null) {
+                records.commitValidSplit(driverId, dimensionId, track.trackId(), key, index, cumulativeTicks, miniTicks);
+            }
+        }
+    }
+
+    private void recordStewardTimingSegment(ServerLevel serverLevel, ServerPlayer player, TrackDefinition track, List<TrackDefinition.StewardLine> segments, TrackDefinition.StewardLine line, int segmentIndex, double movementT) {
+        String key = timingSegmentKey(line);
+        lastCrossedTimingSegment = key;
+        if (!visitedTimingSegments.add(key)) {
+            return;
+        }
+        int elapsedMillis = elapsedMillisAt(preciseGameTime(movementT));
+        int miniMillis = Math.max(1, elapsedMillis - lastTimingSegmentElapsedMillis);
+        lastTimingSegmentElapsedMillis = elapsedMillis;
+        currentLapCumulativeBySegment.put(key, elapsedMillis);
+        currentLapMiniBySegment.put(key, miniMillis);
+        OWRLapRecords records = OWRLapRecords.get(serverLevel);
+        OWRLapRecords.SplitComparison comparison = records.compareSplit(player.getUUID(), key, elapsedMillis, miniMillis);
+        int status = splitStatus(comparison);
+        currentLapStatusBySegment.put(key, status);
+        List<Integer> statuses = segmentStatuses(segments, key, status);
+        String label = line.type() == TrackDefinition.StewardLineType.SECTOR_SPLIT ? "S " + line.index() : "CP " + line.index();
+        OWRNetwork.sendTimingDeltaUpdate(player, segments.size(), statuses, label, segmentIndex, comparison.cumulativeDeltaMillis(), comparison.miniDeltaMillis());
+        if (line.type() == TrackDefinition.StewardLineType.CHECKPOINT) {
+            visitedStewardCheckpoints++;
+            entityData.set(CHECKPOINT_ARMED, true);
+        }
+    }
+
+    private List<Integer> segmentStatuses(List<TrackDefinition.StewardLine> segments, String reachedKey, int reachedStatus) {
+        java.util.ArrayList<Integer> statuses = new java.util.ArrayList<>(segments.size());
+        for (TrackDefinition.StewardLine segment : segments) {
+            String key = timingSegmentKey(segment);
+            if (key.equals(reachedKey)) {
+                statuses.add(reachedStatus);
+            } else if (visitedTimingSegments.contains(key)) {
+                statuses.add(currentLapStatusBySegment.getOrDefault(key, OWRNetwork.TIMING_STATUS_SLOWER));
+            } else {
+                statuses.add(OWRNetwork.TIMING_STATUS_UNREACHED);
+            }
+        }
+        return statuses;
+    }
+
+    private int splitStatus(OWRLapRecords.SplitComparison comparison) {
+        if (comparison.sessionBestMini()) {
+            return OWRNetwork.TIMING_STATUS_SESSION_BEST;
+        }
+        if (comparison.personalBestMini()) {
+            return OWRNetwork.TIMING_STATUS_PERSONAL_BEST;
+        }
+        return OWRNetwork.TIMING_STATUS_SLOWER;
+    }
+
+    private String timingSegmentKey(TrackDefinition.StewardLine line) {
+        return line.type().serializedName() + ":" + line.index();
+    }
+    private int elapsedMillisNow() {
+        return lapStartedAt < 0.0 ? 0 : elapsedMillisAt(level().getGameTime());
+    }
+
+    private int elapsedMillisAt(double gameTime) {
+        return lapStartedAt < 0.0 ? 0 : Math.max(0, (int) Math.round((gameTime - lapStartedAt) * 50.0));
+    }
+
+    private double preciseGameTime(double movementT) {
+        return level().getGameTime() - (1.0 - clamp(movementT, 0.0, 1.0));
+    }
+
+    public void tickLocalClientMovement(int sequence, float throttle, float brake, float steering) {
         Entity passenger = getControllingPassenger();
         if (level().isClientSide() && passenger != null) {
+            clientCurrentInputSequence = sequence;
             float currentCarYaw = getYRot();
 
             // If the server corrected the car's yaw since last tick, apply the same delta
@@ -1609,17 +1893,114 @@ public class OpenwheelCarEntity extends Entity {
             passenger.setYHeadRot(passenger.getYRot());
             passenger.setYBodyRot(passenger.getYRot());
 
+            recordClientPredictionFrame(sequence, throttle, brake, steering);
             clientLastSyncedCarYaw = getYRot();
         }
+    }
+
+    public void tickLocalClientMovement(float throttle, float brake, float steering) {
+        tickLocalClientMovement(clientCurrentInputSequence + 1, throttle, brake, steering);
+    }
+
+    private void recordClientPredictionFrame(int sequence, float throttle, float brake, float steering) {
+        int index = Math.floorMod(sequence, CLIENT_PREDICTION_HISTORY_SIZE);
+        clientPredictionHistory[index] = new ClientPredictionFrame(sequence, throttle, brake, steering, position(), getDeltaMovement(), getYRot(), yawRate, steeringAngle);
+        clientPredictionHistoryCount = Math.min(CLIENT_PREDICTION_HISTORY_SIZE, clientPredictionHistoryCount + 1);
+    }
+
+    public void applyClientAuthoritativeSnapshot(int ackedInputSequence, Vec3 position, Vec3 deltaMovement, float yaw, double yawRate, double steeringAngle, double relaxedFlLatForce, double relaxedFrLatForce, double relaxedRlLatForce, double relaxedRrLatForce) {
+        if (!level().isClientSide()) {
+            return;
+        }
+        ClientPredictionFrame matchedFrame = getClientPredictionFrame(ackedInputSequence);
+        if (matchedFrame == null) {
+            return;
+        }
+        if (!clientPredictionDiverged(matchedFrame, position, deltaMovement, yaw, yawRate)) {
+            discardClientPredictionThrough(ackedInputSequence);
+            return;
+        }
+        ClientPredictionFrame[] replayFrames = clientReplayFramesAfter(ackedInputSequence);
+        if (replayFrames.length > CLIENT_MAX_REPLAY_TICKS) {
+            discardClientPredictionThrough(ackedInputSequence);
+            return;
+        }
+        Entity passenger = getControllingPassenger();
+        float previousYaw = getYRot();
+        setPos(position.x, position.y, position.z);
+        setDeltaMovement(deltaMovement);
+        setYRot(yaw);
+        this.yawRate = yawRate;
+        this.steeringAngle = steeringAngle;
+        this.relaxedFlLatForce = relaxedFlLatForce;
+        this.relaxedFrLatForce = relaxedFrLatForce;
+        this.relaxedRlLatForce = relaxedRlLatForce;
+        this.relaxedRrLatForce = relaxedRrLatForce;
+        for (ClientPredictionFrame frame : replayFrames) {
+            tickMovement(frame.throttle(), frame.brake(), frame.steering(), false);
+            recordClientPredictionFrame(frame.sequence(), frame.throttle(), frame.brake(), frame.steering());
+        }
+        if (passenger != null) {
+            positionRider(passenger);
+            float yawDelta = getYRot() - previousYaw;
+            passenger.setYRot(passenger.getYRot() + yawDelta);
+            passenger.setYHeadRot(passenger.getYRot());
+            passenger.setYBodyRot(passenger.getYRot());
+        }
+        clientLastSyncedCarYaw = getYRot();
+        discardClientPredictionThrough(ackedInputSequence);
+    }
+
+    private ClientPredictionFrame getClientPredictionFrame(int sequence) {
+        ClientPredictionFrame frame = clientPredictionHistory[Math.floorMod(sequence, CLIENT_PREDICTION_HISTORY_SIZE)];
+        return frame != null && frame.sequence() == sequence ? frame : null;
+    }
+
+    private boolean clientPredictionDiverged(ClientPredictionFrame frame, Vec3 authoritativePosition, Vec3 authoritativeDelta, float authoritativeYaw, double authoritativeYawRate) {
+        return frame.position().distanceToSqr(authoritativePosition) > CLIENT_RECONCILE_POSITION_EPSILON_SQR
+            || frame.deltaMovement().distanceToSqr(authoritativeDelta) > CLIENT_RECONCILE_DELTA_EPSILON_SQR
+            || Math.abs(wrapDegrees(frame.yaw() - authoritativeYaw)) > CLIENT_RECONCILE_YAW_EPSILON_DEGREES
+            || Math.abs(frame.yawRate() - authoritativeYawRate) > CLIENT_RECONCILE_YAW_RATE_EPSILON;
+    }
+
+    private ClientPredictionFrame[] clientReplayFramesAfter(int ackedInputSequence) {
+        java.util.ArrayList<ClientPredictionFrame> frames = new java.util.ArrayList<>(Math.min(clientPredictionHistoryCount, CLIENT_MAX_REPLAY_TICKS));
+        for (ClientPredictionFrame frame : clientPredictionHistory) {
+            if (frame != null && VehiclePhysics.isNewerSequence(frame.sequence(), ackedInputSequence)) {
+                frames.add(frame);
+            }
+        }
+        frames.sort(java.util.Comparator.comparingInt(ClientPredictionFrame::sequence));
+        return frames.toArray(ClientPredictionFrame[]::new);
+    }
+
+    private void discardClientPredictionThrough(int ackedInputSequence) {
+        for (int i = 0; i < clientPredictionHistory.length; i++) {
+            ClientPredictionFrame frame = clientPredictionHistory[i];
+            if (frame != null && !VehiclePhysics.isNewerSequence(frame.sequence(), ackedInputSequence)) {
+                clientPredictionHistory[i] = null;
+            }
+        }
+    }
+
+    private static float wrapDegrees(float degrees) {
+        float wrapped = degrees % 360.0f;
+        if (wrapped >= 180.0f) {
+            wrapped -= 360.0f;
+        }
+        if (wrapped < -180.0f) {
+            wrapped += 360.0f;
+        }
+        return wrapped;
+    }
+
+    private record ClientPredictionFrame(int sequence, float throttle, float brake, float steering, Vec3 position, Vec3 deltaMovement, float yaw, double yawRate, double steeringAngle) {
     }
 
     private void tickMovement(boolean debugMovement) {
         double throttle = inputThrottle;
         double steering = inputSteering;
         double brake = inputBrake;
-        inputThrottle = 0;
-        inputBrake = 0;
-        inputSteering = 0;
         if (getControllingPassenger() == null) {
             ersLiftConfirmTicks = 0;
             ersLiftAndCoastPowerWatts = 0.0;
@@ -2181,7 +2562,8 @@ public class OpenwheelCarEntity extends Entity {
         setDeltaMovement(new Vec3(actualMovement.x, carriedVerticalMovement, actualMovement.z));
         handleEntityImpacts(beforeMove, actualMovement);
         if (!level().isClientSide()) {
-            scanLapMarkers(beforeMove, actualMovement);
+            scanVirtualMarkerLines(beforeMove, actualMovement);
+            scanStewardTimingLines(beforeMove, actualMovement);
         }
 
 
@@ -2612,11 +2994,9 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private void invalidateLap(String reason) {
-        if (lapStartedAt >= 0L) {
-            lapStartedAt = -1L;
-            visitedCheckpoints.clear();
-            visitedCheckpointSet.clear();
-            entityData.set(CURRENT_LAP_TICKS, 0);
+        if (lapStartedAt >= 0.0) {
+            lapStartedAt = -1.0;
+            resetLapProgress();
             entityData.set(CHECKPOINT_ARMED, false);
             showInvalidLap(reason);
         }
@@ -3126,12 +3506,11 @@ public class OpenwheelCarEntity extends Entity {
         return Math.max(min, Math.min(max, value));
     }
 
-    private static String formatLapTime(int ticks) {
-        int totalCentiseconds = ticks * 5;
-        int minutes = totalCentiseconds / 6000;
-        int seconds = totalCentiseconds / 100 % 60;
-        int centiseconds = totalCentiseconds % 100;
-        return String.format("%d:%02d.%02d", minutes, seconds, centiseconds);
+    private static String formatLapTime(int millis) {
+        int minutes = millis / 60000;
+        int seconds = millis / 1000 % 60;
+        int milliseconds = millis % 1000;
+        return String.format("%d:%02d.%03d", minutes, seconds, milliseconds);
     }
 
     private static String formatVec(Vec3 vec) {

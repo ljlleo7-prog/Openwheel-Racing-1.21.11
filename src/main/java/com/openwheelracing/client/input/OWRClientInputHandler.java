@@ -15,6 +15,7 @@ public final class OWRClientInputHandler {
     private static boolean shiftDownWasDown;
     private static final boolean[] onboardNumberWasDown = new boolean[9];
     private static boolean sentIdleDriveInput;
+    private static int driveInputSequence;
     private static int lastSyncedCarId = Integer.MIN_VALUE;
     private static int sentBalancedClipStart = Integer.MIN_VALUE;
     private static int sentBalancedClipEnd = Integer.MIN_VALUE;
@@ -77,7 +78,7 @@ public final class OWRClientInputHandler {
         if (Math.abs(wheel.steering()) > 0.0f) {
             steering = wheel.steering();
         }
-        car.tickLocalClientMovement(throttle, brake, steering);
+        car.tickLocalClientMovement(driveInputSequence + 1, throttle, brake, steering);
         sendDriveInputIfNeeded(keyboardThrottle, keyboardBrake, keyboardSteering, wheel.throttle(), wheel.brake(), wheel.steering());
 
         boolean shiftUpDown = isDown(OWRKeyMappings.SHIFT_UP) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_UP);
@@ -274,7 +275,7 @@ public final class OWRClientInputHandler {
             return;
         }
         sentIdleDriveInput = idle;
-        OWRNetwork.sendToServer(new OWRNetwork.DriveInputMessage(keyboardThrottle, keyboardBrake, keyboardSteering, wheelThrottle, wheelBrake, wheelSteering));
+        OWRNetwork.sendToServer(new OWRNetwork.DriveInputMessage(++driveInputSequence, keyboardThrottle, keyboardBrake, keyboardSteering, wheelThrottle, wheelBrake, wheelSteering));
     }
 
     /** Poll the raw GLFW key state regardless of Minecraft conflict context. */

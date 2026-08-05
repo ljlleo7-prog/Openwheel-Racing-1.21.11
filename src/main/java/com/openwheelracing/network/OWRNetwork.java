@@ -12,9 +12,6 @@ import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.content.race.RaceFlagMode;
 import com.openwheelracing.content.race.TeamCarRow;
-import com.openwheelracing.client.livery.ClientLiveryTextures;
-import com.openwheelracing.client.hud.LapRankingClient;
-import com.openwheelracing.client.hud.RaceFlagClient;
 import com.openwheelracing.content.track.TrackEditorMaterial;
 import com.openwheelracing.content.track.TrackEditorMode;
 import com.openwheelracing.content.track.TrackEditorOperation;
@@ -23,9 +20,11 @@ import com.openwheelracing.content.track.TrackEditorPreset;
 import com.openwheelracing.content.track.TrackEditorUndoStore;
 import com.openwheelracing.content.track.TrackMapSnapshot;
 import com.openwheelracing.content.track.TrackMapAutoDetector;
+import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.registry.OWRItems;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.FriendlyByteBuf;
@@ -40,14 +39,18 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.client.network.ClientPacketDistributor;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "7";
+    private static final String PROTOCOL = "8";
+
+    public static final int TIMING_STATUS_UNREACHED = 0;
+    public static final int TIMING_STATUS_SLOWER = 1;
+    public static final int TIMING_STATUS_PERSONAL_BEST = 2;
+    public static final int TIMING_STATUS_SESSION_BEST = 3;
 
     private OWRNetwork() {
     }
@@ -88,7 +91,30 @@ public final class OWRNetwork {
         registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
         registrar.playToClient(LiveryTextureCacheMessage.TYPE, codec(LiveryTextureCacheMessage::encode, LiveryTextureCacheMessage::decode), LiveryTextureCacheMessage::handle);
         registrar.playToClient(RaceFlagUpdateMessage.TYPE, codec(RaceFlagUpdateMessage::encode, RaceFlagUpdateMessage::decode), RaceFlagUpdateMessage::handle);
+        registrar.playToClient(DriveInputAckMessage.TYPE, codec(DriveInputAckMessage::encode, DriveInputAckMessage::decode), DriveInputAckMessage::handle);
         registrar.playToClient(RankingBoardMessage.TYPE, codec(RankingBoardMessage::encode, RankingBoardMessage::decode), RankingBoardMessage::handle);
+        registrar.playToClient(StewardLineOverlayMessage.TYPE, codec(StewardLineOverlayMessage::encode, StewardLineOverlayMessage::decode), StewardLineOverlayMessage::handle);
+        registrar.playToClient(TimingDeltaHudMessage.TYPE, codec(TimingDeltaHudMessage::encode, TimingDeltaHudMessage::decode), TimingDeltaHudMessage::handle);
+    }
+
+    public static void sendDriveInputAck(ServerPlayer player, OpenwheelCarEntity car) {
+        PacketDistributor.sendToPlayer(player, new DriveInputAckMessage(
+            car.getId(),
+            car.getLastAcceptedInputSequence(),
+            car.getX(),
+            car.getY(),
+            car.getZ(),
+            car.getDeltaMovement().x,
+            car.getDeltaMovement().y,
+            car.getDeltaMovement().z,
+            car.getYRot(),
+            car.getYawRateRadiansPerSecond(),
+            car.getSteeringAngleRadians(),
+            car.getRelaxedFlLateralForce(),
+            car.getRelaxedFrLateralForce(),
+            car.getRelaxedRlLateralForce(),
+            car.getRelaxedRrLateralForce()
+        ));
     }
 
     public static void sendLiveryTexture(ServerPlayer player, String textureId, byte[] pngBytes) {
@@ -116,7 +142,12 @@ public final class OWRNetwork {
     }
 
     public static void sendToServer(CustomPacketPayload payload) {
-        ClientPacketDistributor.sendToServer(payload);
+        try {
+            Class<?> distributor = Class.forName("net.neoforged.neoforge.client.network.ClientPacketDistributor");
+            Method method = distributor.getMethod("sendToServer", CustomPacketPayload.class, CustomPacketPayload[].class);
+            method.invoke(null, payload, new CustomPacketPayload[0]);
+        } catch (ReflectiveOperationException ignored) {
+        }
     }
 
     private static <T extends CustomPacketPayload> StreamCodec<RegistryFriendlyByteBuf, T> codec(Encoder<T> encoder, Decoder<T> decoder) {
@@ -410,7 +441,7 @@ public final class OWRNetwork {
         }
     }
 
-    public record DriveInputMessage(float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering) implements CustomPacketPayload {
+    public record DriveInputMessage(int sequence, float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<DriveInputMessage> TYPE = payloadType("drive_input_message");
 
         @Override
@@ -419,6 +450,7 @@ public final class OWRNetwork {
         }
 
         private static void encode(DriveInputMessage message, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(message.sequence);
             buffer.writeFloat(message.keyboardThrottle);
             buffer.writeFloat(message.keyboardBrake);
             buffer.writeFloat(message.keyboardSteering);
@@ -428,7 +460,7 @@ public final class OWRNetwork {
         }
 
         private static DriveInputMessage decode(FriendlyByteBuf buffer) {
-            return new DriveInputMessage(buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
+            return new DriveInputMessage(buffer.readVarInt(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
         }
 
         private static void handle(DriveInputMessage message, IPayloadContext context) {
@@ -453,7 +485,7 @@ public final class OWRNetwork {
                         steering = wheelSteering;
                     }
                 }
-                car.applyDriveInput(throttle, brake, steering);
+                car.applyDriveInput(message.sequence, throttle, brake, steering);
             });
         }
     }
@@ -804,6 +836,21 @@ public final class OWRNetwork {
         PacketDistributor.sendToPlayer(player, new RaceDirectorSnapshotMessage(snapshot));
     }
 
+    public static void sendStewardLineOverlay(ServerPlayer player, boolean visible, TrackDefinition track, int revision) {
+        UUID trackId = track == null ? new UUID(0L, 0L) : track.trackId();
+        String trackName = track == null ? "" : track.name();
+        List<TrackDefinition.StewardLine> lines = track == null ? List.of() : track.stewardLines();
+        PacketDistributor.sendToPlayer(player, new StewardLineOverlayMessage(visible, trackId, trackName, revision, lines));
+    }
+
+    public static void sendTimingDeltaReset(ServerPlayer player, int segmentCount) {
+        PacketDistributor.sendToPlayer(player, new TimingDeltaHudMessage(true, segmentCount, List.of(), "", -1, 0, 0));
+    }
+
+    public static void sendTimingDeltaUpdate(ServerPlayer player, int segmentCount, List<Integer> statuses, String label, int segmentIndex, int cumulativeDeltaMillis, int miniDeltaMillis) {
+        PacketDistributor.sendToPlayer(player, new TimingDeltaHudMessage(false, segmentCount, statuses, label, segmentIndex, cumulativeDeltaMillis, miniDeltaMillis));
+    }
+
     public static void sendRaceFlag(ServerPlayer player, ServerLevel level, boolean announce) {
         PacketDistributor.sendToPlayer(player, new RaceFlagUpdateMessage(OWRRaceControlState.get(level).getGlobalFlag().ordinal(), announce));
     }
@@ -938,13 +985,7 @@ public final class OWRNetwork {
         }
 
         private static void handle(LiveryTextureCacheMessage message, IPayloadContext context) {
-            context.enqueueWork(() -> {
-                try {
-                    ClientLiveryTextures.saveSynced(net.minecraft.client.Minecraft.getInstance(), message.textureId, message.pngBytes);
-                    com.openwheelracing.client.render.OpenwheelCarRenderer.invalidateLiveryCache(message.textureId);
-                } catch (java.io.IOException ignored) {
-                }
-            });
+            context.enqueueWork(() -> applyLiveryTextureCache(message));
         }
     }
 
@@ -966,7 +1007,42 @@ public final class OWRNetwork {
         }
 
         private static void handle(RaceFlagUpdateMessage message, IPayloadContext context) {
-            context.enqueueWork(() -> RaceFlagClient.setGlobalFlag(RaceFlagMode.fromOrdinal(message.flag), message.announce));
+            context.enqueueWork(() -> applyRaceFlagUpdate(message));
+        }
+    }
+
+    public record DriveInputAckMessage(int entityId, int ackedInputSequence, double x, double y, double z, double deltaX, double deltaY, double deltaZ, float yaw, double yawRate, double steeringAngle, double relaxedFlLatForce, double relaxedFrLatForce, double relaxedRlLatForce, double relaxedRrLatForce) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<DriveInputAckMessage> TYPE = payloadType("drive_input_ack_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(DriveInputAckMessage message, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(message.entityId);
+            buffer.writeVarInt(message.ackedInputSequence);
+            buffer.writeDouble(message.x);
+            buffer.writeDouble(message.y);
+            buffer.writeDouble(message.z);
+            buffer.writeDouble(message.deltaX);
+            buffer.writeDouble(message.deltaY);
+            buffer.writeDouble(message.deltaZ);
+            buffer.writeFloat(message.yaw);
+            buffer.writeDouble(message.yawRate);
+            buffer.writeDouble(message.steeringAngle);
+            buffer.writeDouble(message.relaxedFlLatForce);
+            buffer.writeDouble(message.relaxedFrLatForce);
+            buffer.writeDouble(message.relaxedRlLatForce);
+            buffer.writeDouble(message.relaxedRrLatForce);
+        }
+
+        private static DriveInputAckMessage decode(FriendlyByteBuf buffer) {
+            return new DriveInputAckMessage(buffer.readVarInt(), buffer.readVarInt(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readFloat(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
+        }
+
+        private static void handle(DriveInputAckMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> applyDriveInputAck(message));
         }
     }
 
@@ -1372,7 +1448,7 @@ public final class OWRNetwork {
                 OWRLapRecords records = OWRLapRecords.get(player.level());
                 records.getLap(message.lapId).ifPresent(record -> {
                     if (records.invalidateLap(message.lapId, player.getUUID(), "race director")) {
-                        Component announcement = Component.translatable("message.openwheelracing.race_director.lap_invalidated", record.driverName(), formatLapTime(record.lapTicks()), player.getGameProfile().name());
+                        Component announcement = Component.translatable("message.openwheelracing.race_director.lap_invalidated", record.driverName(), formatLapTime(record.lapMillis()), player.getGameProfile().name());
                         if (player.level() instanceof ServerLevel serverLevel) {
                             for (ServerPlayer recipient : serverLevel.getServer().getPlayerList().getPlayers()) {
                                 if (recipient.level().dimension().equals(serverLevel.dimension())) {
@@ -1401,7 +1477,7 @@ public final class OWRNetwork {
             buffer.writeVarInt(message.entries.size());
             for (OWRLapRecords.DriverBest entry : message.entries) {
                 buffer.writeUtf(entry.name());
-                buffer.writeInt(entry.ticks());
+                buffer.writeInt(entry.millis());
             }
         }
 
@@ -1416,7 +1492,178 @@ public final class OWRNetwork {
         }
 
         private static void handle(RankingBoardMessage message, IPayloadContext context) {
-            context.enqueueWork(() -> LapRankingClient.setRanking(message.sessionName, message.entries));
+            context.enqueueWork(() -> applyRankingBoard(message));
+        }
+    }
+
+    public record TimingDeltaHudMessage(boolean reset, int segmentCount, List<Integer> statuses, String label, int segmentIndex, int cumulativeDeltaMillis, int miniDeltaMillis) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<TimingDeltaHudMessage> TYPE = payloadType("timing_delta_hud_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(TimingDeltaHudMessage message, FriendlyByteBuf buffer) {
+            buffer.writeBoolean(message.reset);
+            buffer.writeVarInt(message.segmentCount);
+            buffer.writeVarInt(message.statuses.size());
+            for (int status : message.statuses) {
+                buffer.writeVarInt(status);
+            }
+            buffer.writeUtf(message.label);
+            buffer.writeVarInt(message.segmentIndex);
+            buffer.writeInt(message.cumulativeDeltaMillis);
+            buffer.writeInt(message.miniDeltaMillis);
+        }
+
+        private static TimingDeltaHudMessage decode(FriendlyByteBuf buffer) {
+            boolean reset = buffer.readBoolean();
+            int segmentCount = buffer.readVarInt();
+            int statusCount = buffer.readVarInt();
+            java.util.ArrayList<Integer> statuses = new java.util.ArrayList<>(statusCount);
+            for (int index = 0; index < statusCount; index++) {
+                statuses.add(buffer.readVarInt());
+            }
+            return new TimingDeltaHudMessage(reset, segmentCount, statuses, buffer.readUtf(), buffer.readVarInt(), buffer.readInt(), buffer.readInt());
+        }
+
+        private static void handle(TimingDeltaHudMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> applyTimingDeltaHud(message));
+        }
+    }
+
+    public record StewardLineOverlayMessage(boolean visible, UUID trackId, String trackName, int revision, List<TrackDefinition.StewardLine> lines) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<StewardLineOverlayMessage> TYPE = payloadType("steward_line_overlay_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(StewardLineOverlayMessage message, FriendlyByteBuf buffer) {
+            buffer.writeBoolean(message.visible);
+            buffer.writeUUID(message.trackId);
+            buffer.writeUtf(message.trackName);
+            buffer.writeVarInt(message.revision);
+            buffer.writeVarInt(message.lines.size());
+            for (TrackDefinition.StewardLine line : message.lines) {
+                buffer.writeUtf(line.type().serializedName());
+                buffer.writeVarInt(line.index());
+                buffer.writeUtf(line.name());
+                writePoint(buffer, line.left());
+                writePoint(buffer, line.right());
+                buffer.writeDouble(line.headingRadians());
+                buffer.writeDouble(line.distanceAlongTrack());
+            }
+        }
+
+        private static StewardLineOverlayMessage decode(FriendlyByteBuf buffer) {
+            boolean visible = buffer.readBoolean();
+            UUID trackId = buffer.readUUID();
+            String trackName = buffer.readUtf();
+            int revision = buffer.readVarInt();
+            int count = buffer.readVarInt();
+            java.util.ArrayList<TrackDefinition.StewardLine> lines = new java.util.ArrayList<>(count);
+            for (int index = 0; index < count; index++) {
+                TrackDefinition.StewardLineType type = TrackDefinition.StewardLineType.fromSerializedName(buffer.readUtf());
+                int lineIndex = buffer.readVarInt();
+                String name = buffer.readUtf();
+                TrackDefinition.Point3 left = readPoint(buffer);
+                TrackDefinition.Point3 right = readPoint(buffer);
+                double heading = buffer.readDouble();
+                double distance = buffer.readDouble();
+                lines.add(new TrackDefinition.StewardLine(type, lineIndex, name, left, right, heading, distance));
+            }
+            return new StewardLineOverlayMessage(visible, trackId, trackName, revision, lines);
+        }
+
+        private static void handle(StewardLineOverlayMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> applyStewardLineOverlay(message));
+        }
+    }
+
+    private static void writePoint(FriendlyByteBuf buffer, TrackDefinition.Point3 point) {
+        buffer.writeDouble(point.x());
+        buffer.writeDouble(point.y());
+        buffer.writeDouble(point.z());
+    }
+
+    private static TrackDefinition.Point3 readPoint(FriendlyByteBuf buffer) {
+        return new TrackDefinition.Point3(buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
+    }
+
+    private static void applyLiveryTextureCache(LiveryTextureCacheMessage message) {
+        try {
+            Class<?> minecraftClass = Class.forName("net.minecraft.client.Minecraft");
+            Object minecraft = minecraftClass.getMethod("getInstance").invoke(null);
+            Class<?> textures = Class.forName("com.openwheelracing.client.livery.ClientLiveryTextures");
+            Method save = textures.getMethod("saveSynced", minecraftClass, String.class, byte[].class);
+            save.invoke(null, minecraft, message.textureId, message.pngBytes);
+            Class<?> renderer = Class.forName("com.openwheelracing.client.render.OpenwheelCarRenderer");
+            Method invalidate = renderer.getMethod("invalidateLiveryCache", String.class);
+            invalidate.invoke(null, message.textureId);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applyRaceFlagUpdate(RaceFlagUpdateMessage message) {
+        try {
+            Class<?> client = Class.forName("com.openwheelracing.client.hud.RaceFlagClient");
+            Method method = client.getMethod("setGlobalFlag", RaceFlagMode.class, boolean.class);
+            method.invoke(null, RaceFlagMode.fromOrdinal(message.flag), message.announce);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applyDriveInputAck(DriveInputAckMessage message) {
+        try {
+            Class<?> minecraftClass = Class.forName("net.minecraft.client.Minecraft");
+            Object minecraft = minecraftClass.getMethod("getInstance").invoke(null);
+            Object level = minecraftClass.getField("level").get(minecraft);
+            if (level == null) {
+                return;
+            }
+            Object player = minecraftClass.getField("player").get(minecraft);
+            Entity entity = (Entity) level.getClass().getMethod("getEntity", int.class).invoke(level, message.entityId);
+            if (entity instanceof OpenwheelCarEntity car && player instanceof Entity playerEntity && playerEntity.getVehicle() == car) {
+                car.applyClientAuthoritativeSnapshot(
+                    message.ackedInputSequence,
+                    new Vec3(message.x, message.y, message.z),
+                    new Vec3(message.deltaX, message.deltaY, message.deltaZ),
+                    message.yaw,
+                    message.yawRate,
+                    message.steeringAngle,
+                    message.relaxedFlLatForce,
+                    message.relaxedFrLatForce,
+                    message.relaxedRlLatForce,
+                    message.relaxedRrLatForce
+                );
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applyRankingBoard(RankingBoardMessage message) {
+        try {
+            Class<?> client = Class.forName("com.openwheelracing.client.hud.LapRankingClient");
+            Method method = client.getMethod("setRanking", String.class, List.class);
+            method.invoke(null, message.sessionName, message.entries);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applyTimingDeltaHud(TimingDeltaHudMessage message) {
+        try {
+            Class<?> client = Class.forName("com.openwheelracing.client.hud.LapDeltaClient");
+            if (message.reset) {
+                Method reset = client.getMethod("reset", int.class);
+                reset.invoke(null, message.segmentCount);
+            } else {
+                Method update = client.getMethod("update", int.class, List.class, String.class, int.class, int.class, int.class);
+                update.invoke(null, message.segmentCount, message.statuses, message.label, message.segmentIndex, message.cumulativeDeltaMillis, message.miniDeltaMillis);
+            }
+        } catch (ReflectiveOperationException ignored) {
         }
     }
 
@@ -1432,11 +1679,19 @@ public final class OWRNetwork {
         }
     }
 
-    private static String formatLapTime(int ticks) {
-        int totalCentiseconds = ticks * 5;
-        int minutes = totalCentiseconds / 6000;
-        int seconds = totalCentiseconds / 100 % 60;
-        int centiseconds = totalCentiseconds % 100;
-        return String.format("%d:%02d.%02d", minutes, seconds, centiseconds);
+    private static void applyStewardLineOverlay(StewardLineOverlayMessage message) {
+        try {
+            Class<?> overlay = Class.forName("com.openwheelracing.client.render.StewardLineOverlay");
+            Method method = overlay.getMethod("apply", StewardLineOverlayMessage.class);
+            method.invoke(null, message);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static String formatLapTime(int millis) {
+        int minutes = millis / 60000;
+        int seconds = millis / 1000 % 60;
+        int milliseconds = millis % 1000;
+        return String.format("%d:%02d.%03d", minutes, seconds, milliseconds);
     }
 }

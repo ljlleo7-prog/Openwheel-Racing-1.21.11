@@ -3,8 +3,10 @@ package com.openwheelracing.client;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.client.camera.OWRCameraMode;
 import com.openwheelracing.client.hud.CarHudOverlay;
+import com.openwheelracing.client.hud.LapDeltaClient;
 import com.openwheelracing.client.input.OWRClientInputHandler;
 import com.openwheelracing.client.input.OWRKeyMappings;
+import com.openwheelracing.client.render.StewardLineOverlay;
 import com.openwheelracing.client.screen.OpenwheelSetupScreen;
 import com.openwheelracing.client.sound.CarSoundManager;
 import net.minecraft.client.Minecraft;
@@ -15,6 +17,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.neoforged.neoforge.client.event.InputEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.client.event.RenderPlayerEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
@@ -49,6 +52,11 @@ public final class OpenwheelRacingClientEvents {
         OWRClientInputHandler.onClientTick(event);
         OWRCameraMode.clearIfNotOnboard();
         CarSoundManager.onClientTick();
+        boolean ridingCar = Minecraft.getInstance().player != null && Minecraft.getInstance().player.getVehicle() instanceof com.openwheelracing.content.entity.OpenwheelCarEntity;
+        LapDeltaClient.tick(ridingCar);
+        if (Minecraft.getInstance().level == null) {
+            StewardLineOverlay.clear();
+        }
     }
 
     public static void onMouseButton(InputEvent.MouseButton.Pre event) {
@@ -71,5 +79,9 @@ public final class OpenwheelRacingClientEvents {
         if (mc.player != null && OWRCameraMode.isTCamera() && event.getRenderState().id == mc.player.getId()) {
             event.setCanceled(true);
         }
+    }
+
+    public static void onRenderLevelAfterEntities(RenderLevelStageEvent.AfterEntities event) {
+        StewardLineOverlay.render(event);
     }
 }

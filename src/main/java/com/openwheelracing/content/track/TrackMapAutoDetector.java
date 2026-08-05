@@ -4,29 +4,26 @@ import com.openwheelracing.registry.OWRBlocks;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class TrackMapAutoDetector {
     public static final int MIN_RADIUS_BLOCKS = 128;
     public static final int MAX_RADIUS_BLOCKS = 2_048;
-    private static final int CHUNKS_PER_TICK = 2;
+    private static final int BFS_STEPS_PER_TICK = 384;
+    private static final int SEED_RADIUS = 8;
     private static final Map<String, ScanJob> JOBS = new HashMap<>();
 
     private TrackMapAutoDetector() {
@@ -40,6 +37,10 @@ public final class TrackMapAutoDetector {
         }
         TrackMapData.get(level).clear(dimensionId);
         JOBS.put(dimensionId, new ScanJob(level, center, radius));
+    }
+
+    public static void clearJobs() {
+        JOBS.clear();
     }
 
     public static Progress progress(ServerLevel level) {
@@ -69,7 +70,19 @@ public final class TrackMapAutoDetector {
         if (block == OWRBlocks.PIT_LANE.get() || block == OWRBlocks.PIT_LANE_SLAB.get() || block == OWRBlocks.PIT_STOP_MARK.get()) {
             return SurfaceCell.PIT;
         }
-        if (block == OWRBlocks.ASPHALT_TRACK.get() || block == OWRBlocks.ASPHALT_TRACK_SLAB.get() || block == OWRBlocks.START_FINISH.get() || block == OWRBlocks.CHECKPOINT.get()) {
+        if (block == OWRBlocks.START_FINISH.get()) {
+            return SurfaceCell.START_FINISH;
+        }
+        if (block == OWRBlocks.CHECKPOINT.get()) {
+            return SurfaceCell.CHECKPOINT;
+        }
+        if (block == OWRBlocks.KERB.get()) {
+            return SurfaceCell.KERB;
+        }
+        if (block == Blocks.WHITE_CONCRETE) {
+            return SurfaceCell.WHITE_CONCRETE;
+        }
+        if (block == OWRBlocks.ASPHALT_TRACK.get() || block == OWRBlocks.ASPHALT_TRACK_SLAB.get()) {
             return SurfaceCell.ASPHALT;
         }
         return SurfaceCell.NONE;
@@ -111,18 +124,6 @@ public final class TrackMapAutoDetector {
         return combined;
     }
 
-    private static Path regionPath(ServerLevel level, int regionX, int regionZ) {
-        Path root = level.getServer().getWorldPath(LevelResource.ROOT);
-        String path = level.dimension().identifier().getPath();
-        Path dimensionRoot = switch (level.dimension().identifier().toString()) {
-            case "minecraft:overworld" -> root;
-            case "minecraft:the_nether" -> root.resolve("DIM-1");
-            case "minecraft:the_end" -> root.resolve("DIM1");
-            default -> root.resolve("dimensions").resolve(level.dimension().identifier().getNamespace()).resolve(path);
-        };
-        return dimensionRoot.resolve("region").resolve("r." + regionX + "." + regionZ + ".mca");
-    }
-
     public record Progress(boolean running, int scannedChunks, int totalChunks, int detectedCells) {
         public static final Progress IDLE = new Progress(false, 0, 0, 0);
     }
@@ -130,7 +131,11 @@ public final class TrackMapAutoDetector {
     private enum SurfaceCell {
         NONE,
         ASPHALT,
-        PIT
+        PIT,
+        START_FINISH,
+        CHECKPOINT,
+        WHITE_CONCRETE,
+        KERB
     }
 
     private record Bounds(int minX, int minZ, int maxX, int maxZ) {
@@ -139,75 +144,107 @@ public final class TrackMapAutoDetector {
     private static final class ScanJob {
         private final net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> levelKey;
         private final String dimensionId;
+        private final BlockPos origin;
         private final int minX;
         private final int maxX;
+        private final int minY;
+        private final int maxY;
         private final int minZ;
         private final int maxZ;
-        private final ArrayDeque<ChunkPos> chunks = new ArrayDeque<>();
+        private final ArrayDeque<BlockPos> frontier = new ArrayDeque<>();
+        private final Set<Long> visited = new HashSet<>();
         private final Map<Integer, BitSet> asphalt = new HashMap<>();
         private final Map<Integer, BitSet> pit = new HashMap<>();
-        private final int totalChunks;
-        private int scannedChunks;
+        private boolean seeded;
+        private int scanned;
         private int detectedCells;
 
         private ScanJob(ServerLevel level, BlockPos center, int radius) {
             this.levelKey = level.dimension();
             this.dimensionId = level.dimension().identifier().toString();
+            this.origin = center.immutable();
             this.minX = center.getX() - radius;
             this.maxX = center.getX() + radius;
+            this.minY = Math.max(level.getMinY(), center.getY() - radius);
+            this.maxY = Math.min(level.getMaxY() - 1, center.getY() + radius);
             this.minZ = center.getZ() - radius;
             this.maxZ = center.getZ() + radius;
-            for (int chunkX = Math.floorDiv(minX, 16); chunkX <= Math.floorDiv(maxX, 16); chunkX++) {
-                for (int chunkZ = Math.floorDiv(minZ, 16); chunkZ <= Math.floorDiv(maxZ, 16); chunkZ++) {
-                    ChunkPos chunk = new ChunkPos(chunkX, chunkZ);
-                    if (Files.isRegularFile(regionPath(level, chunk.getRegionX(), chunk.getRegionZ()))) {
-                        chunks.add(chunk);
-                    }
-                }
-            }
-            this.totalChunks = chunks.size();
         }
 
         private boolean tick(ServerLevel level, boolean hasTime) {
             if (!hasTime) {
                 return false;
             }
-            int budget = CHUNKS_PER_TICK;
-            while (budget-- > 0 && !chunks.isEmpty()) {
-                scanChunk(level, chunks.removeFirst());
-                scannedChunks++;
+            if (!seeded && !seed(level)) {
+                return true;
             }
-            if (!chunks.isEmpty()) {
+            int budget = BFS_STEPS_PER_TICK;
+            while (budget-- > 0 && !frontier.isEmpty()) {
+                scan(frontier.removeFirst(), level);
+            }
+            if (!frontier.isEmpty()) {
                 return false;
             }
             finish(level);
             return true;
         }
 
-        private void scanChunk(ServerLevel level, ChunkPos pos) {
-            ChunkAccess chunk = level.getChunk(pos.x, pos.z, ChunkStatus.FULL, true);
-            if (chunk == null) {
-                return;
-            }
-            int startX = Math.max(minX, pos.getMinBlockX());
-            int endX = Math.min(maxX, pos.getMaxBlockX());
-            int startZ = Math.max(minZ, pos.getMinBlockZ());
-            int endZ = Math.min(maxZ, pos.getMaxBlockZ());
-            for (int z = startZ; z <= endZ; z++) {
-                for (int x = startX; x <= endX; x++) {
-                    int y = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
-                    if (y < level.getMinY()) {
-                        continue;
+        private boolean seed(ServerLevel level) {
+            for (int dy = -SEED_RADIUS; dy <= SEED_RADIUS; dy++) {
+                int y = origin.getY() + dy;
+                if (y < minY || y > maxY) {
+                    continue;
+                }
+                for (int dx = -SEED_RADIUS; dx <= SEED_RADIUS; dx++) {
+                    for (int dz = -SEED_RADIUS; dz <= SEED_RADIUS; dz++) {
+                        BlockPos pos = origin.offset(dx, dy, dz);
+                        if (!inside(pos) || surfaceCell(level.getBlockState(pos)) == SurfaceCell.NONE) {
+                            continue;
+                        }
+                        frontier.add(pos.immutable());
+                        visited.add(pos.asLong());
+                        seeded = true;
+                        return true;
                     }
-                    SurfaceCell cell = surfaceCell(chunk.getBlockState(new BlockPos(x, y, z)));
-                    if (cell == SurfaceCell.NONE) {
-                        continue;
-                    }
-                    Map<Integer, BitSet> target = cell == SurfaceCell.PIT ? pit : asphalt;
-                    target.computeIfAbsent(z, ignored -> new BitSet(maxX - minX + 1)).set(x - minX);
-                    detectedCells++;
                 }
             }
+            return false;
+        }
+
+        private void scan(BlockPos pos, ServerLevel level) {
+            scanned++;
+            SurfaceCell cell = surfaceCell(level.getBlockState(pos));
+            if (cell == SurfaceCell.NONE) {
+                return;
+            }
+            store(pos, cell);
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dz == 0) {
+                        continue;
+                    }
+                    for (int dy = -1; dy <= 1; dy++) {
+                        BlockPos next = pos.offset(dx, dy, dz);
+                        if (!inside(next)) {
+                            continue;
+                        }
+                        long key = next.asLong();
+                        if (visited.add(key) && surfaceCell(level.getBlockState(next)) != SurfaceCell.NONE) {
+                            frontier.add(next.immutable());
+                        }
+                    }
+                }
+            }
+        }
+
+        private void store(BlockPos pos, SurfaceCell cell) {
+            Map<Integer, BitSet> target = cell == SurfaceCell.PIT ? pit : asphalt;
+            target.computeIfAbsent(pos.getZ(), ignored -> new BitSet(maxX - minX + 1)).set(pos.getX() - minX);
+            detectedCells++;
+        }
+
+        private boolean inside(BlockPos pos) {
+            return pos.getX() >= minX && pos.getX() <= maxX && pos.getY() >= minY && pos.getY() <= maxY && pos.getZ() >= minZ && pos.getZ() <= maxZ;
         }
 
         private void finish(ServerLevel level) {
@@ -222,7 +259,7 @@ public final class TrackMapAutoDetector {
         }
 
         private Progress progress() {
-            return new Progress(true, scannedChunks, totalChunks, detectedCells);
+            return new Progress(true, scanned, Math.max(scanned + frontier.size(), 1), detectedCells);
         }
     }
 }
