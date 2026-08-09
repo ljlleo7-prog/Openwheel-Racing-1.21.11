@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "openwheelracing:item/safety_car_spawn"
+  }
+}

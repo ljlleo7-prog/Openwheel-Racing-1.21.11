@@ -38,8 +38,6 @@ public final class CircuitMapRenderer {
     }
 
     public static void renderLocal(GuiGraphics graphics, TrackMapSnapshot map, double carX, double carZ, float headingDegrees, int color, int x, int y, int width, int height) {
-        graphics.fill(x, y, x + width, y + height, 0x99000000);
-        graphics.renderOutline(x, y, width, height, 0xFF444444);
         if (map == null || !map.present()) {
             return;
         }

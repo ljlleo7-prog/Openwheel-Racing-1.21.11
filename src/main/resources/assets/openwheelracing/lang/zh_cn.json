@@ -307,5 +307,10 @@
   "screen.openwheelracing.race_director.off_track_short": "离道",
   "screen.openwheelracing.team_terminal.sense_cars_short": "扫描",
   "screen.openwheelracing.race_director.auto_detect_map": "自动检测地图",
-  "screen.openwheelracing.race_director.no_track_map": "无已存地图"
+  "screen.openwheelracing.race_director.no_track_map": "无已存地图",
+  "entity.openwheelracing.safety_car": "安全车",
+  "item.openwheelracing.safety_car_spawn": "安全车生成物品",
+  "tooltip.openwheelracing.safety_car.official": "官方安全车",
+  "tooltip.openwheelracing.safety_car.rules": "非竞赛车控车辆；不计入圈速计时",
+  "tooltip.openwheelracing.safety_car.performance": "安全车参数：更重的公路车、低空力、较低赛道速度"
 }

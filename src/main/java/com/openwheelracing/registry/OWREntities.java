@@ -2,6 +2,7 @@ package com.openwheelracing.registry;
 
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
+import com.openwheelracing.content.entity.SafetyCarEntity;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.Identifier;
@@ -20,6 +21,14 @@ public final class OWREntities {
             .clientTrackingRange(10)
             .updateInterval(2)
             .build(ResourceKey.create(Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "prototype_car")))
+    );
+
+    public static final DeferredHolder<EntityType<?>, EntityType<SafetyCarEntity>> SAFETY_CAR = ENTITY_TYPES.register("safety_car",
+        () -> EntityType.Builder.of(SafetyCarEntity::new, MobCategory.MISC)
+            .sized(1.7f, 1.25f)
+            .clientTrackingRange(10)
+            .updateInterval(2)
+            .build(ResourceKey.create(Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "safety_car")))
     );
 
     private OWREntities() {

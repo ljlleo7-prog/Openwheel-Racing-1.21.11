@@ -3,6 +3,7 @@ package com.openwheelracing.client;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.client.input.WheelInputSettings;
 import com.openwheelracing.client.render.OpenwheelCarRenderer;
+import com.openwheelracing.client.render.SafetyCarRenderer;
 import com.openwheelracing.client.screen.CarAssemblyScreen;
 import com.openwheelracing.client.screen.RaceDirectorScreen;
 import com.openwheelracing.client.screen.RefineryScreen;
@@ -34,6 +35,7 @@ public final class OpenwheelRacingClient {
         event.enqueueWork(() -> {
             WheelInputSettings.load(Minecraft.getInstance());
             EntityRenderers.register(OWREntities.PROTOTYPE_CAR.get(), OpenwheelCarRenderer::new);
+            EntityRenderers.register(OWREntities.SAFETY_CAR.get(), SafetyCarRenderer::new);
         });
     }
 

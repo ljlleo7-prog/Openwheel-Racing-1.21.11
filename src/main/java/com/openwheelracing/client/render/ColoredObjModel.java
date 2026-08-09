@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Queue;
 
 public class ColoredObjModel {
@@ -86,8 +87,13 @@ public class ColoredObjModel {
     }
 
     public static ColoredObjModel load(ResourceManager rm, Identifier loc) {
+        return load(rm, loc, true);
+    }
+
+    public static ColoredObjModel load(ResourceManager rm, Identifier loc, boolean buildLiveryAtlas) {
         List<float[]> positions = new ArrayList<>();
         List<ParsedFace> parsedFaces = new ArrayList<>();
+        Map<String, Integer> materialColors = new HashMap<>();
         int materialRgb = 0xFF000000;
         String group = "";
 
@@ -95,13 +101,16 @@ public class ColoredObjModel {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
-                if (line.startsWith("v ")) {
+                if (line.startsWith("mtllib ")) {
+                    materialColors.putAll(loadMaterialColors(rm, loc, line.substring(7).trim()));
+                } else if (line.startsWith("v ")) {
                     String[] p = line.split("\\s+");
                     positions.add(new float[] {Float.parseFloat(p[1]), Float.parseFloat(p[2]), Float.parseFloat(p[3])});
                 } else if (line.startsWith("g ")) {
                     group = line.substring(2).trim();
                 } else if (line.startsWith("usemtl ")) {
-                    materialRgb = parseMaterialColor(line.substring(7).trim());
+                    String material = line.substring(7).trim();
+                    materialRgb = materialColors.getOrDefault(material, parseMaterialColor(material));
                 } else if (line.startsWith("f ")) {
                     String[] tokens = line.split("\\s+");
                     if (tokens.length != 4 && tokens.length != 5) {
@@ -120,7 +129,7 @@ public class ColoredObjModel {
             throw new RuntimeException("Failed to load OBJ: " + loc, e);
         }
 
-        AtlasRegion[] regions = buildLiveryRegions(parsedFaces);
+        AtlasRegion[] regions = buildLiveryAtlas ? buildLiveryRegions(parsedFaces) : new AtlasRegion[parsedFaces.size()];
         List<Face> faces = new ArrayList<>(parsedFaces.size());
         for (int i = 0; i < parsedFaces.size(); i++) {
             ParsedFace face = parsedFaces.get(i);
@@ -263,6 +272,52 @@ public class ColoredObjModel {
             return new float[] {0.0f, 1.0f, 0.0f};
         }
         return new float[] {nx / length, ny / length, nz / length};
+    }
+
+    private static Map<String, Integer> loadMaterialColors(ResourceManager rm, Identifier objLoc, String materialFile) {
+        Map<String, Integer> colors = new HashMap<>();
+        Identifier materialLoc = sibling(objLoc, materialFile);
+        Optional<net.minecraft.server.packs.resources.Resource> resource = rm.getResource(materialLoc);
+        if (resource.isEmpty()) {
+            return colors;
+        }
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(resource.get().open()))) {
+            String material = "";
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.startsWith("newmtl ")) {
+                    material = line.substring(7).trim();
+                } else if (line.startsWith("Kd ") && !material.isEmpty()) {
+                    colors.put(material, parseDiffuseColor(line.substring(3).trim()));
+                }
+            }
+        } catch (Exception ignored) {
+            colors.clear();
+        }
+        return colors;
+    }
+
+    private static Identifier sibling(Identifier loc, String fileName) {
+        String path = loc.getPath();
+        int slash = path.lastIndexOf('/');
+        String siblingPath = slash >= 0 ? path.substring(0, slash + 1) + fileName : fileName;
+        return Identifier.fromNamespaceAndPath(loc.getNamespace(), siblingPath);
+    }
+
+    private static int parseDiffuseColor(String color) {
+        String[] rgb = color.split("\\s+");
+        if (rgb.length < 3) {
+            return 0xFF000000;
+        }
+        try {
+            int r = clamp(Math.round(Float.parseFloat(rgb[0].trim()) * 255.0f));
+            int g = clamp(Math.round(Float.parseFloat(rgb[1].trim()) * 255.0f));
+            int b = clamp(Math.round(Float.parseFloat(rgb[2].trim()) * 255.0f));
+            return 0xFF000000 | (r << 16) | (g << 8) | b;
+        } catch (NumberFormatException e) {
+            return 0xFF000000;
+        }
     }
 
     private static int parseMaterialColor(String material) {

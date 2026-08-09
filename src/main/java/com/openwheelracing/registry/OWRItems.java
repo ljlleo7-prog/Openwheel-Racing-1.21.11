@@ -2,6 +2,7 @@ package com.openwheelracing.registry;
 
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.item.PrototypeCarItem;
+import com.openwheelracing.content.item.SafetyCarItem;
 import com.openwheelracing.content.item.TyreItem;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.Item;
@@ -38,6 +39,9 @@ public final class OWRItems {
     public static final DeferredHolder<Item, Item> STEERING_CONTROLS = registerSimple("steering_controls");
     public static final DeferredHolder<Item, Item> PROTOTYPE_CAR_SPAWN = ITEMS.register("prototype_car_spawn",
         () -> new PrototypeCarItem(new Item.Properties().setId(key("prototype_car_spawn")))
+    );
+    public static final DeferredHolder<Item, Item> SAFETY_CAR_SPAWN = ITEMS.register("safety_car_spawn",
+        () -> new SafetyCarItem(new Item.Properties().setId(key("safety_car_spawn")))
     );
 
     private OWRItems() {

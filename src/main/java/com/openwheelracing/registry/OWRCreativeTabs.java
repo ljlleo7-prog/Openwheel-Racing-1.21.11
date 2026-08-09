@@ -4,6 +4,7 @@ import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.openwheelracing.content.item.PrototypeCarItem;
+import com.openwheelracing.content.item.SafetyCarItem;
 import com.openwheelracing.content.item.TyreItem;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
@@ -57,6 +58,7 @@ public final class OWRCreativeTabs {
             for (int livery = 0; livery < CarLivery.count(); livery++) {
                 output.accept(PrototypeCarItem.create(PrototypeCarSetup.DEFAULT, 0.0f, 0.0f, livery));
             }
+            output.accept(SafetyCarItem.createDefault());
         })
         .build()
     );

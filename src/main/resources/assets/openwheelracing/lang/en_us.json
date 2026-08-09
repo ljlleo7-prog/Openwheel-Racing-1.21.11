@@ -307,5 +307,10 @@
   "screen.openwheelracing.race_director.off_track_short": "Track",
   "screen.openwheelracing.team_terminal.sense_cars_short": "Scan",
   "screen.openwheelracing.race_director.auto_detect_map": "Auto-Detect Map",
-  "screen.openwheelracing.race_director.no_track_map": "No stored map"
+  "screen.openwheelracing.race_director.no_track_map": "No stored map",
+  "entity.openwheelracing.safety_car": "Safety Car",
+  "item.openwheelracing.safety_car_spawn": "Safety Car Spawn",
+  "tooltip.openwheelracing.safety_car.official": "Official safety car",
+  "tooltip.openwheelracing.safety_car.rules": "Non-competitive race-control vehicle; excluded from lap timing",
+  "tooltip.openwheelracing.safety_car.performance": "SC parameters: heavier road car, limited aero, reduced race pace"
 }
