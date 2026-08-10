@@ -18,6 +18,10 @@ public class TrackMapData extends SavedData {
         Codec.INT.fieldOf("start_x").forGetter(TrackMapSnapshot.CellRun::startX),
         Codec.INT.fieldOf("end_x").forGetter(TrackMapSnapshot.CellRun::endX)
     ).apply(instance, TrackMapSnapshot.CellRun::new));
+    private static final Codec<TrackMapSnapshot.MapPoint> MAP_POINT_CODEC = RecordCodecBuilder.create(instance -> instance.group(
+        Codec.INT.fieldOf("x").forGetter(TrackMapSnapshot.MapPoint::x),
+        Codec.INT.fieldOf("z").forGetter(TrackMapSnapshot.MapPoint::z)
+    ).apply(instance, TrackMapSnapshot.MapPoint::new));
     private static final Codec<StoredMap> STORED_MAP_CODEC = RecordCodecBuilder.create(instance -> instance.group(
         Codec.STRING.optionalFieldOf("source", "auto_detected").forGetter(StoredMap::source),
         Codec.STRING.optionalFieldOf("name", "Auto-Detected Track").forGetter(StoredMap::name),
@@ -27,7 +31,9 @@ public class TrackMapData extends SavedData {
         Codec.INT.fieldOf("max_x").forGetter(StoredMap::maxX),
         Codec.INT.fieldOf("max_z").forGetter(StoredMap::maxZ),
         CELL_RUN_CODEC.listOf().optionalFieldOf("asphalt", List.of()).forGetter(StoredMap::asphaltRuns),
-        CELL_RUN_CODEC.listOf().optionalFieldOf("pit", List.of()).forGetter(StoredMap::pitRuns)
+        CELL_RUN_CODEC.listOf().optionalFieldOf("pit", List.of()).forGetter(StoredMap::pitRuns),
+        MAP_POINT_CODEC.listOf().optionalFieldOf("start_finish_markers", List.of()).forGetter(StoredMap::startFinishMarkers),
+        MAP_POINT_CODEC.listOf().optionalFieldOf("checkpoint_markers", List.of()).forGetter(StoredMap::checkpointMarkers)
     ).apply(instance, StoredMap::new));
     private static final Codec<TrackMapData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
         Codec.unboundedMap(Codec.STRING, STORED_MAP_CODEC).optionalFieldOf("maps", Map.of()).forGetter(TrackMapData::maps)
@@ -68,9 +74,9 @@ public class TrackMapData extends SavedData {
         return true;
     }
 
-    public TrackMapSnapshot upsertAutoDetected(String dimensionId, String name, int minX, int minZ, int maxX, int maxZ, List<TrackMapSnapshot.CellRun> asphaltRuns, List<TrackMapSnapshot.CellRun> pitRuns) {
+    public TrackMapSnapshot upsertAutoDetected(String dimensionId, String name, int minX, int minZ, int maxX, int maxZ, List<TrackMapSnapshot.CellRun> asphaltRuns, List<TrackMapSnapshot.CellRun> pitRuns, List<TrackMapSnapshot.MapPoint> startFinishMarkers, List<TrackMapSnapshot.MapPoint> checkpointMarkers) {
         int revision = maps.getOrDefault(dimensionId, StoredMap.empty()).revision() + 1;
-        StoredMap map = new StoredMap("auto_detected", name, revision, minX, minZ, maxX, maxZ, asphaltRuns, pitRuns);
+        StoredMap map = new StoredMap("auto_detected", name, revision, minX, minZ, maxX, maxZ, asphaltRuns, pitRuns, startFinishMarkers, checkpointMarkers);
         maps.put(dimensionId, map);
         setDirty();
         return map.snapshot(dimensionId);
@@ -80,20 +86,22 @@ public class TrackMapData extends SavedData {
         return maps;
     }
 
-    private record StoredMap(String source, String name, int revision, int minX, int minZ, int maxX, int maxZ, List<TrackMapSnapshot.CellRun> asphaltRuns, List<TrackMapSnapshot.CellRun> pitRuns) {
+    private record StoredMap(String source, String name, int revision, int minX, int minZ, int maxX, int maxZ, List<TrackMapSnapshot.CellRun> asphaltRuns, List<TrackMapSnapshot.CellRun> pitRuns, List<TrackMapSnapshot.MapPoint> startFinishMarkers, List<TrackMapSnapshot.MapPoint> checkpointMarkers) {
         private StoredMap {
             source = source == null ? "auto_detected" : source;
             name = name == null || name.isBlank() ? "Auto-Detected Track" : name;
             asphaltRuns = List.copyOf(asphaltRuns == null ? List.of() : asphaltRuns);
             pitRuns = List.copyOf(pitRuns == null ? List.of() : pitRuns);
+            startFinishMarkers = List.copyOf(startFinishMarkers == null ? List.of() : startFinishMarkers);
+            checkpointMarkers = List.copyOf(checkpointMarkers == null ? List.of() : checkpointMarkers);
         }
 
         private static StoredMap empty() {
-            return new StoredMap("auto_detected", "Auto-Detected Track", 0, 0, 0, 0, 0, List.of(), List.of());
+            return new StoredMap("auto_detected", "Auto-Detected Track", 0, 0, 0, 0, 0, List.of(), List.of(), List.of(), List.of());
         }
 
         private TrackMapSnapshot snapshot(String dimensionId) {
-            return new TrackMapSnapshot(true, source, name, dimensionId, revision, minX, minZ, maxX, maxZ, asphaltRuns, pitRuns);
+            return new TrackMapSnapshot(true, source, name, dimensionId, revision, minX, minZ, maxX, maxZ, asphaltRuns, pitRuns, startFinishMarkers, checkpointMarkers);
         }
     }
 }

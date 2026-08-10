@@ -241,10 +241,10 @@ public final class CarHudOverlay {
 
         float min = car.getTyreWorkingTemperatureMinCelsius();
         float max = car.getTyreWorkingTemperatureMaxCelsius();
-        drawTyreStatus(graphics, x + 22, y + 18, car.getTyreTemperatureFlCelsius(), min, max, car.getTyreWearPercent());
-        drawTyreStatus(graphics, x + 76, y + 18, car.getTyreTemperatureFrCelsius(), min, max, car.getTyreWearPercent());
-        drawTyreStatus(graphics, x + 22, y + 51, car.getTyreTemperatureRlCelsius(), min, max, car.getTyreWearPercent());
-        drawTyreStatus(graphics, x + 76, y + 51, car.getTyreTemperatureRrCelsius(), min, max, car.getTyreWearPercent());
+        drawTyreStatus(graphics, font, x + 22, y + 18, car.getTyreTemperatureFlCelsius(), min, max, car.getTyreWearFlPercent());
+        drawTyreStatus(graphics, font, x + 76, y + 18, car.getTyreTemperatureFrCelsius(), min, max, car.getTyreWearFrPercent());
+        drawTyreStatus(graphics, font, x + 22, y + 51, car.getTyreTemperatureRlCelsius(), min, max, car.getTyreWearRlPercent());
+        drawTyreStatus(graphics, font, x + 76, y + 51, car.getTyreTemperatureRrCelsius(), min, max, car.getTyreWearRrPercent());
 
         int damageColor = damageColor(car.getDamagePercent());
         drawVerticalMeter(graphics, x + 121, y + 18, 10, 50, car.getDamagePercent() / 100.0f, damageColor, 0xFF251B1B);
@@ -255,12 +255,12 @@ public final class CarHudOverlay {
         drawStatusChip(graphics, font, "DRS", x + 80, y + 80, car.isDrsActive() ? 0xFF00DD44 : 0xFF555B63);
     }
 
-    private static void drawTyreStatus(GuiGraphics graphics, int x, int y, float temperature, float min, float max, float wearPercent) {
+    private static void drawTyreStatus(GuiGraphics graphics, Font font, int x, int y, float temperature, float min, float max, float wearPercent) {
         int tempColor = tyreTemperatureColor(temperature, min, max);
-        int wearFill = Math.max(2, Math.min(20, Math.round(20.0f * Math.max(0.0f, 100.0f - wearPercent) / 100.0f)));
-        graphics.fill(x, y, x + 24, y + 10, 0xFF111418);
-        graphics.fill(x + 2, y + 2, x + 2 + wearFill, y + 8, 0xFF3A414A);
-        graphics.renderOutline(x, y, 24, 10, tempColor);
+        int wearColor = tyreWearColor(wearPercent);
+        String wear = Math.round(clamp(wearPercent, 0.0f, 100.0f)) + "%";
+        graphics.fill(x, y, x + 24, y + 10, 0xFF050608);
+        graphics.drawString(font, wear, x + (24 - font.width(wear)) / 2, y + 1, wearColor, false);
         graphics.fill(x + 4, y - 4, x + 20, y - 2, tempColor);
         graphics.fill(x + 4, y + 12, x + 20, y + 14, tempColor);
     }
@@ -498,19 +498,34 @@ public final class CarHudOverlay {
     }
 
     private static int tyreTemperatureColor(float temperature, float min, float max) {
-        if (temperature < min - 10.0f) {
-            return 0xFF66CCFF;
-        }
-        if (temperature < min) {
-            return 0xFF99DDFF;
+        float coldStart = min - 18.0f;
+        float hotEnd = max + 18.0f;
+        if (temperature <= min) {
+            return interpolateColor(0xFF66CCFF, 0xFFB7FFB7, clamp((temperature - coldStart) / Math.max(1.0f, min - coldStart), 0.0f, 1.0f));
         }
         if (temperature <= max) {
-            return 0xFFB7FFB7;
+            float mid = (min + max) * 0.5f;
+            float blend = 1.0f - Math.abs(temperature - mid) / Math.max(1.0f, (max - min) * 0.5f);
+            return interpolateColor(0xFF9EF7A5, 0xFFD6FFD0, clamp(blend, 0.0f, 1.0f));
         }
-        if (temperature <= max + 10.0f) {
-            return 0xFFFFDD66;
+        return interpolateColor(0xFFFFD044, 0xFFFF5555, clamp((temperature - max) / Math.max(1.0f, hotEnd - max), 0.0f, 1.0f));
+    }
+
+    private static int tyreWearColor(float wearPercent) {
+        float wear = clamp(wearPercent, 0.0f, 100.0f);
+        if (wear <= 55.0f) {
+            return interpolateColor(0xFFB7FFB7, 0xFFFFD044, wear / 55.0f);
         }
-        return 0xFFFF7777;
+        return interpolateColor(0xFFFFD044, 0xFFFF5555, (wear - 55.0f) / 45.0f);
+    }
+
+    private static int interpolateColor(int from, int to, float t) {
+        t = clamp(t, 0.0f, 1.0f);
+        int a = Math.round(((from >>> 24) & 0xFF) + (((to >>> 24) & 0xFF) - ((from >>> 24) & 0xFF)) * t);
+        int r = Math.round(((from >>> 16) & 0xFF) + (((to >>> 16) & 0xFF) - ((from >>> 16) & 0xFF)) * t);
+        int g = Math.round(((from >>> 8) & 0xFF) + (((to >>> 8) & 0xFF) - ((from >>> 8) & 0xFF)) * t);
+        int b = Math.round((from & 0xFF) + ((to & 0xFF) - (from & 0xFF)) * t);
+        return a << 24 | r << 16 | g << 8 | b;
     }
 
     private static double maxDemand(OpenwheelCarEntity car) {

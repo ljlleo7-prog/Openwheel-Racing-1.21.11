@@ -93,6 +93,7 @@ public final class OWRNetwork {
         registrar.playToClient(RaceFlagUpdateMessage.TYPE, codec(RaceFlagUpdateMessage::encode, RaceFlagUpdateMessage::decode), RaceFlagUpdateMessage::handle);
         registrar.playToClient(DriveInputAckMessage.TYPE, codec(DriveInputAckMessage::encode, DriveInputAckMessage::decode), DriveInputAckMessage::handle);
         registrar.playToClient(RankingBoardMessage.TYPE, codec(RankingBoardMessage::encode, RankingBoardMessage::decode), RankingBoardMessage::handle);
+        registrar.playToClient(CommandFeedbackMessage.TYPE, codec(CommandFeedbackMessage::encode, CommandFeedbackMessage::decode), CommandFeedbackMessage::handle);
         registrar.playToClient(StewardLineOverlayMessage.TYPE, codec(StewardLineOverlayMessage::encode, StewardLineOverlayMessage::decode), StewardLineOverlayMessage::handle);
         registrar.playToClient(TimingDeltaHudMessage.TYPE, codec(TimingDeltaHudMessage::encode, TimingDeltaHudMessage::decode), TimingDeltaHudMessage::handle);
     }
@@ -836,6 +837,10 @@ public final class OWRNetwork {
         PacketDistributor.sendToPlayer(player, new RaceDirectorSnapshotMessage(snapshot));
     }
 
+    public static void sendCommandFeedback(ServerPlayer player, String message) {
+        PacketDistributor.sendToPlayer(player, new CommandFeedbackMessage(message));
+    }
+
     public static void sendStewardLineOverlay(ServerPlayer player, boolean visible, TrackDefinition track, int revision) {
         UUID trackId = track == null ? new UUID(0L, 0L) : track.trackId();
         String trackName = track == null ? "" : track.name();
@@ -1533,6 +1538,27 @@ public final class OWRNetwork {
         }
     }
 
+    public record CommandFeedbackMessage(String message) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<CommandFeedbackMessage> TYPE = payloadType("command_feedback_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(CommandFeedbackMessage message, FriendlyByteBuf buffer) {
+            buffer.writeUtf(message.message, 256);
+        }
+
+        private static CommandFeedbackMessage decode(FriendlyByteBuf buffer) {
+            return new CommandFeedbackMessage(buffer.readUtf(256));
+        }
+
+        private static void handle(CommandFeedbackMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> applyCommandFeedback(message));
+        }
+    }
+
     public record StewardLineOverlayMessage(boolean visible, UUID trackId, String trackName, int revision, List<TrackDefinition.StewardLine> lines) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<StewardLineOverlayMessage> TYPE = payloadType("steward_line_overlay_message");
 
@@ -1675,6 +1701,19 @@ public final class OWRNetwork {
             Class<?> receiver = Class.forName("com.openwheelracing.client.screen.RaceDirectorScreen");
             Method method = receiver.getMethod("applySnapshot", RaceDirectorSnapshot.class);
             method.invoke(null, snapshot);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applyCommandFeedback(CommandFeedbackMessage message) {
+        try {
+            Class<?> minecraftClass = Class.forName("net.minecraft.client.Minecraft");
+            Object minecraft = minecraftClass.getMethod("getInstance").invoke(null);
+            Object player = minecraftClass.getField("player").get(minecraft);
+            if (player != null) {
+                Method sendSystemMessage = player.getClass().getMethod("sendSystemMessage", Component.class);
+                sendSystemMessage.invoke(player, Component.literal("[OWR] " + message.message));
+            }
         } catch (ReflectiveOperationException ignored) {
         }
     }

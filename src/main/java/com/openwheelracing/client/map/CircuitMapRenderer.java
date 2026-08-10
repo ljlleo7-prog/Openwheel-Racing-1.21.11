@@ -32,6 +32,7 @@ public final class CircuitMapRenderer {
         }
         Projection projection = new Projection(map, x + 4, y + 4, Math.max(1, width - 8), Math.max(1, height - 8));
         drawSurface(graphics, map, projection);
+        drawMapMarkers(graphics, map, projection);
         for (TeamCarRow car : cars) {
             drawCar(graphics, projection, car, carColor(car, selectedCarId, leftCarId, rightCarId));
         }
@@ -43,6 +44,7 @@ public final class CircuitMapRenderer {
         }
         Projection projection = new Projection(map, x + 4, y + 4, Math.max(1, width - 8), Math.max(1, height - 8));
         drawSurface(graphics, map, projection);
+        drawMapMarkers(graphics, map, projection);
         drawMarker(graphics, projection.screenX(carX), projection.screenY(carZ), headingDegrees, color, true);
     }
 
@@ -147,6 +149,20 @@ public final class CircuitMapRenderer {
             bottom = top + MIN_SURFACE_PIXELS;
         }
         return new Rect(left, top, right, bottom);
+    }
+
+    private static void drawMapMarkers(GuiGraphics graphics, TrackMapSnapshot map, Projection projection) {
+        for (TrackMapSnapshot.MapPoint marker : map.checkpointMarkers()) {
+            drawDot(graphics, projection.screenX(marker.x() + 0.5), projection.screenY(marker.z() + 0.5), 0xFFFFD044);
+        }
+        for (TrackMapSnapshot.MapPoint marker : map.startFinishMarkers()) {
+            drawDot(graphics, projection.screenX(marker.x() + 0.5), projection.screenY(marker.z() + 0.5), 0xFFFFFFFF);
+        }
+    }
+
+    private static void drawDot(GuiGraphics graphics, int x, int y, int color) {
+        graphics.fill(x - 2, y - 2, x + 3, y + 3, 0xCC000000);
+        graphics.fill(x - 1, y - 1, x + 2, y + 2, color);
     }
 
     private static void drawCar(GuiGraphics graphics, Projection projection, TeamCarRow car, int color) {

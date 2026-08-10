@@ -26,7 +26,7 @@ public class SafetyCarRenderer extends EntityRenderer<SafetyCarEntity, SafetyCar
     private static final int WHITE = 0xFFF2F2F2;
     private static final int BLACK = 0xFF07080A;
     private static final int DARK_TRIM = 0xFF171A20;
-    private static final int GLASS = 0x3338A8FF;
+    private static final int GLASS = 0x1138A8FF;
 
     private static final float SOURCE_MIN_X = -105.744179f;
     private static final float SOURCE_MAX_X = 105.655052f;

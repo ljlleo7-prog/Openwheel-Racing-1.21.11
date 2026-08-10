@@ -594,5 +594,8 @@ public final class OWRCommands {
 
     private static void send(CommandContext<CommandSourceStack> context, String message) {
         context.getSource().sendSuccess(() -> Component.literal(message), false);
+        if (context.getSource().getEntity() instanceof ServerPlayer player) {
+            OWRNetwork.sendCommandFeedback(player, message);
+        }
     }
 }

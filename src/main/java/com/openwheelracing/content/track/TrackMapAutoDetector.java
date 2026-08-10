@@ -155,6 +155,8 @@ public final class TrackMapAutoDetector {
         private final Set<Long> visited = new HashSet<>();
         private final Map<Integer, BitSet> asphalt = new HashMap<>();
         private final Map<Integer, BitSet> pit = new HashMap<>();
+        private final List<TrackMapSnapshot.MapPoint> startFinishMarkers = new ArrayList<>();
+        private final List<TrackMapSnapshot.MapPoint> checkpointMarkers = new ArrayList<>();
         private boolean seeded;
         private int scanned;
         private int detectedCells;
@@ -240,6 +242,11 @@ public final class TrackMapAutoDetector {
         private void store(BlockPos pos, SurfaceCell cell) {
             Map<Integer, BitSet> target = cell == SurfaceCell.PIT ? pit : asphalt;
             target.computeIfAbsent(pos.getZ(), ignored -> new BitSet(maxX - minX + 1)).set(pos.getX() - minX);
+            if (cell == SurfaceCell.START_FINISH) {
+                startFinishMarkers.add(new TrackMapSnapshot.MapPoint(pos.getX(), pos.getZ()));
+            } else if (cell == SurfaceCell.CHECKPOINT) {
+                checkpointMarkers.add(new TrackMapSnapshot.MapPoint(pos.getX(), pos.getZ()));
+            }
             detectedCells++;
         }
 
@@ -255,7 +262,7 @@ public final class TrackMapAutoDetector {
                 return;
             }
             Bounds bounds = bounds(asphaltRuns, pitRuns);
-            data.upsertAutoDetected(dimensionId, "Auto-Detected Track", bounds.minX(), bounds.minZ(), bounds.maxX(), bounds.maxZ(), asphaltRuns, pitRuns);
+            data.upsertAutoDetected(dimensionId, "Auto-Detected Track", bounds.minX(), bounds.minZ(), bounds.maxX(), bounds.maxZ(), asphaltRuns, pitRuns, startFinishMarkers, checkpointMarkers);
         }
 
         private Progress progress() {

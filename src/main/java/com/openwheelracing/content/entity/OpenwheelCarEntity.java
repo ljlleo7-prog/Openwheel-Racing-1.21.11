@@ -69,6 +69,10 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Float> SPEED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DAMAGE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_WEAR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_WEAR_FL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_WEAR_FR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_WEAR_RL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_WEAR_RR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_SLIP = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_TEMPERATURE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_TEMPERATURE_FL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
@@ -185,9 +189,13 @@ public class OpenwheelCarEntity extends Entity {
     private static final double FRONT_AXLE_DISTANCE = WHEELBASE * (1.0 - 0.46);
     private static final double REAR_AXLE_DISTANCE = WHEELBASE * 0.46;
     private static final VehicleProfile PROTOTYPE_PROFILE = new VehicleProfile(
-        CAR_MASS_KG, WHEELBASE, TRACK_WIDTH, 0.46, 1100.0, 1.05, 7.0, 780_000.0,
-        40_000.0, 2.15, 2.25, 210_000.0, 285_000.0, 245_000.0, 315_000.0,
-        Math.toRadians(34.0), Math.toRadians(2.45), 1.0, 1.0, OWRItems.PROTOTYPE_CAR_SPAWN
+        CAR_MASS_KG, WHEELBASE, TRACK_WIDTH, 0.46, 1100.0, 1.05, 7.0, 0.43, 780_000.0, 350_000.0,
+        40_000.0, 0.58, 2.15, 2.25, 210_000.0, 285_000.0, 245_000.0, 315_000.0,
+        Math.toRadians(34.0), Math.toRadians(2.45), 1.0, 1.0, 900.0, 4000.0, 13000.0, 15000.0,
+        260.0, new double[] {900.0, 2500.0, 4000.0, 4700.0, 6500.0, 8200.0, 10500.0, 11800.0, 12600.0, 13000.0},
+        new double[] {0.03, 0.10, 0.22, 0.34, 0.56, 0.75, 0.95, 1.00, 0.78, 0.42},
+        60.0, new double[] {0.0, 100.0, 135.0, 170.0, 205.0, 245.0, 280.0, 320.0, 360.0},
+        1.0, OWRItems.PROTOTYPE_CAR_SPAWN
     );
 
     private static final double YAW_INERTIA = 1100.0;
@@ -453,6 +461,10 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(SPEED, 0.0f);
         builder.define(DAMAGE, 0.0f);
         builder.define(TYRE_WEAR, 0.0f);
+        builder.define(TYRE_WEAR_FL, 0.0f);
+        builder.define(TYRE_WEAR_FR, 0.0f);
+        builder.define(TYRE_WEAR_RL, 0.0f);
+        builder.define(TYRE_WEAR_RR, 0.0f);
         builder.define(TYRE_SLIP, 0.0f);
         builder.define(TYRE_TEMPERATURE, (float) TYRE_INITIAL_TEMPERATURE_C);
         builder.define(TYRE_TEMPERATURE_FL, (float) TYRE_INITIAL_TEMPERATURE_C);
@@ -521,11 +533,36 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public void setDamagePercent(float damage) {
-        entityData.set(DAMAGE, Math.max(0.0f, Math.min(100.0f, damage)));
+        entityData.set(DAMAGE, normalizeDamagePercent(damage));
+    }
+
+    protected float normalizeDamagePercent(float damage) {
+        return Math.max(0.0f, Math.min(100.0f, damage));
     }
 
     public void setTyreWearPercent(float tyreWear) {
-        entityData.set(TYRE_WEAR, Math.max(0.0f, Math.min(100.0f, tyreWear)));
+        float normalized = normalizeTyreWearPercent(tyreWear);
+        entityData.set(TYRE_WEAR, normalized);
+        entityData.set(TYRE_WEAR_FL, normalized);
+        entityData.set(TYRE_WEAR_FR, normalized);
+        entityData.set(TYRE_WEAR_RL, normalized);
+        entityData.set(TYRE_WEAR_RR, normalized);
+    }
+
+    protected float normalizeTyreWearPercent(float tyreWear) {
+        return Math.max(0.0f, Math.min(100.0f, tyreWear));
+    }
+
+    private void setTyreWearPercents(float flWear, float frWear, float rlWear, float rrWear) {
+        float fl = normalizeTyreWearPercent(flWear);
+        float fr = normalizeTyreWearPercent(frWear);
+        float rl = normalizeTyreWearPercent(rlWear);
+        float rr = normalizeTyreWearPercent(rrWear);
+        entityData.set(TYRE_WEAR_FL, fl);
+        entityData.set(TYRE_WEAR_FR, fr);
+        entityData.set(TYRE_WEAR_RL, rl);
+        entityData.set(TYRE_WEAR_RR, rr);
+        entityData.set(TYRE_WEAR, (fl + fr + rl + rr) * 0.25f);
     }
 
     public void setTyreWearPercentAndSync(float tyreWear) {
@@ -576,8 +613,8 @@ public class OpenwheelCarEntity extends Entity {
         return gearLabel(getGear());
     }
 
-    private static int clampGear(int gear) {
-        return Math.max(REVERSE_GEAR, Math.min(MAX_GEAR, gear));
+    private int clampGear(int gear) {
+        return Math.max(REVERSE_GEAR, Math.min(vehicleProfile().maxForwardGear(), gear));
     }
 
     private static String gearLabel(int gear) {
@@ -590,11 +627,13 @@ public class OpenwheelCarEntity extends Entity {
         return Integer.toString(gear);
     }
 
-    private static double gearTopSpeed(int gear, PrototypeCarSetup setup) {
+    private double gearTopSpeed(int gear, PrototypeCarSetup setup) {
         if (gear == NEUTRAL_GEAR) {
             return 0.0;
         }
-        return VehiclePhysics.gearTopSpeedBlocksPerTick(gear, setup);
+        VehicleProfile profile = vehicleProfile();
+        double speedKmh = gear < 0 ? profile.reverseTopSpeedKmh() : profile.gearTopSpeedKmh(gear);
+        return VehiclePhysics.speedKmhToBlocksPerTick(speedKmh * setup.topSpeedCoefficient());
     }
 
     public int getRpm() {
@@ -611,6 +650,22 @@ public class OpenwheelCarEntity extends Entity {
 
     public float getTyreWearPercent() {
         return entityData.get(TYRE_WEAR);
+    }
+
+    public float getTyreWearFlPercent() {
+        return entityData.get(TYRE_WEAR_FL);
+    }
+
+    public float getTyreWearFrPercent() {
+        return entityData.get(TYRE_WEAR_FR);
+    }
+
+    public float getTyreWearRlPercent() {
+        return entityData.get(TYRE_WEAR_RL);
+    }
+
+    public float getTyreWearRrPercent() {
+        return entityData.get(TYRE_WEAR_RR);
     }
 
     public float getTyreSlipIntensity() {
@@ -1202,7 +1257,7 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public void shiftUp() {
-        if (getGear() < MAX_GEAR) {
+        if (getGear() < vehicleProfile().maxForwardGear()) {
             setGear(clampGear(getGear() + 1));
             playShiftFeedback(1.1f);
             messageDriver(Component.literal("Gear " + getGearLabel()));
@@ -1220,7 +1275,7 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public void shiftLocal(int direction) {
-        if (direction > 0 && getGear() < MAX_GEAR) {
+        if (direction > 0 && getGear() < vehicleProfile().maxForwardGear()) {
             setGear(clampGear(getGear() + 1));
         } else if (direction < 0 && getGear() > REVERSE_GEAR) {
             setGear(clampGear(getGear() - 1));
@@ -1389,8 +1444,13 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(RPM, input.getIntOr("Rpm", 900));
         clutchReleaseTicks = input.getIntOr("ClutchReleaseTicks", 0);
         clutchReleaseRpm = input.getIntOr("ClutchReleaseRpm", 0);
-        entityData.set(DAMAGE, (float) input.getDoubleOr("Damage", 0.0));
-        entityData.set(TYRE_WEAR, (float) input.getDoubleOr("TyreWear", 0.0));
+        float savedTyreWear = (float) input.getDoubleOr("TyreWear", 0.0);
+        setTyreWearPercents(
+            (float) input.getDoubleOr("TyreWearFl", savedTyreWear),
+            (float) input.getDoubleOr("TyreWearFr", savedTyreWear),
+            (float) input.getDoubleOr("TyreWearRl", savedTyreWear),
+            (float) input.getDoubleOr("TyreWearRr", savedTyreWear)
+        );
         double savedTyreTemperature = input.getDoubleOr("TyreTemperature", TYRE_INITIAL_TEMPERATURE_C);
         tyreTemperatureFlC = input.getDoubleOr("TyreTemperatureFl", savedTyreTemperature);
         tyreTemperatureFrC = input.getDoubleOr("TyreTemperatureFr", savedTyreTemperature);
@@ -1449,6 +1509,10 @@ public class OpenwheelCarEntity extends Entity {
         output.putInt("ClutchReleaseRpm", clutchReleaseRpm);
         output.putDouble("Damage", getDamagePercent());
         output.putDouble("TyreWear", getTyreWearPercent());
+        output.putDouble("TyreWearFl", getTyreWearFlPercent());
+        output.putDouble("TyreWearFr", getTyreWearFrPercent());
+        output.putDouble("TyreWearRl", getTyreWearRlPercent());
+        output.putDouble("TyreWearRr", getTyreWearRrPercent());
         output.putDouble("TyreTemperature", averageTyreTemperatureC());
         output.putDouble("TyreTemperatureFl", tyreTemperatureFlC);
         output.putDouble("TyreTemperatureFr", tyreTemperatureFrC);
@@ -1521,8 +1585,8 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(PIT_STOP_TICKS, ticks);
 
         if (ticks == 0) {
-            entityData.set(DAMAGE, 0.0f);
-            entityData.set(TYRE_WEAR, 0.0f);
+            setDamagePercent(0.0f);
+            setTyreWearPercent(0.0f);
             resetTyreThermalState();
             messageDriver(Component.literal("Pit stop complete — car serviced"));
         }
@@ -2101,6 +2165,8 @@ public class OpenwheelCarEntity extends Entity {
         double asphaltMuLongitudinal = profile.asphaltMuLongitudinal();
         double lowSpeedSteerAngle = profile.lowSpeedSteerAngle();
         double highSpeedSteerAngle = profile.highSpeedSteerAngle();
+        double frontAeroBalance = profile.frontAeroBalance();
+        double brakeFrontBias = profile.brakeFrontBias();
 
         Vec3 delta = getDeltaMovement();
         double horizontalSpeed = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
@@ -2134,8 +2200,8 @@ public class OpenwheelCarEntity extends Entity {
         }
         boolean launchClutch = throttle > 0.0 && (gear == 1 || gear == REVERSE_GEAR) && horizontalSpeed < LAUNCH_CLUTCH_SPEED;
         boolean clutchReleasing = clutchReleaseTicks > 0 && gear != NEUTRAL_GEAR;
-        double estimatedRpm = wheelRpm(horizontalSpeed, gearTopSpeed);
-        if (!level().isClientSide() && estimatedRpm > ENGINE_HARD_LIMIT_RPM) {
+        double estimatedRpm = wheelRpm(horizontalSpeed, gearTopSpeed, profile);
+        if (!level().isClientSide() && estimatedRpm > profile.hardLimitRpm()) {
             setDamagePercent(getDamagePercent() + ENGINE_OVERLOAD_DAMAGE_PER_TICK);
         }
         int engineRpm = updateEngineRpm(horizontalSpeed, gear, gearTopSpeed, throttle, launchClutch, clutchReleasing);
@@ -2218,8 +2284,8 @@ public class OpenwheelCarEntity extends Entity {
             double subAeroDrag = 0.5 * AIR_DENSITY * dragArea * cdACoefficient * subSpeedSquared * (isDrsActive() ? DRS_DRAG_FACTOR : 1.0);
             double subStaticFrontLoad = carMassKg * GRAVITY * frontStaticWeight;
             double subStaticRearLoad = carMassKg * GRAVITY * (1.0 - frontStaticWeight);
-            double subAeroFrontLoad = subDownforce * FRONT_AERO_BALANCE;
-            double subAeroRearLoad = subDownforce * (1.0 - FRONT_AERO_BALANCE);
+            double subAeroFrontLoad = subDownforce * frontAeroBalance;
+            double subAeroRearLoad = subDownforce * (1.0 - frontAeroBalance);
 
             double subSpeedBlocksPerTick = subSpeed / 20.0;
             double driveDirection = gear == REVERSE_GEAR ? -1.0 : gear > NEUTRAL_GEAR ? 1.0 : 0.0;
@@ -2262,8 +2328,8 @@ public class OpenwheelCarEntity extends Entity {
             }
 
             double subBrakeForceRequest = brake * maxBrakeForce;
-            double estimatedSubRpm = wheelRpm(subSpeedBlocksPerTick, gearTopSpeed);
-            double engineBrakeForce = engineBrakeForce(gear, estimatedSubRpm, subSpeedBlocksPerTick, Math.abs(velocityLong), pitSpeedLimit, surface);
+            double estimatedSubRpm = wheelRpm(subSpeedBlocksPerTick, gearTopSpeed, profile);
+            double engineBrakeForce = engineBrakeForce(profile, gear, estimatedSubRpm, subSpeedBlocksPerTick, Math.abs(velocityLong), pitSpeedLimit, surface);
             if (surface == SurfaceProfile.PIT_LANE && subSpeedBlocksPerTick >= pitSpeedLimit) {
                 subDriveForceRequest = 0.0;
                 pendingErsDriveForce = Math.min(0.0, pendingErsDriveForce);
@@ -2310,8 +2376,8 @@ public class OpenwheelCarEntity extends Entity {
             double rlMuLong = loadSensitiveMu(rlSurfaceMuLong * subTyreWearGrip, rlNormal, subReferenceRearWheelLoad);
             double rrMuLong = loadSensitiveMu(rrSurfaceMuLong * subTyreWearGrip, rrNormal, subReferenceRearWheelLoad);
 
-            double brakeFront = subBrakeForceRequest * BRAKE_FRONT_BIAS * 0.5;
-            double brakeRear = subBrakeForceRequest * (1.0 - BRAKE_FRONT_BIAS) * 0.5;
+            double brakeFront = subBrakeForceRequest * brakeFrontBias * 0.5;
+            double brakeRear = subBrakeForceRequest * (1.0 - brakeFrontBias) * 0.5;
             double trailBrakeSteerUse = Math.min(1.0, Math.abs(steeringAngle) / TRAIL_BRAKE_REAR_RELIEF_MAX_STEER);
             double trailBrakeRelease = brake * trailBrakeSteerUse * TRAIL_BRAKE_REAR_PRESSURE_RELIEF * 0.35;
             brakeRear *= 1.0 - trailBrakeRelease;
@@ -2333,8 +2399,8 @@ public class OpenwheelCarEntity extends Entity {
             double frLatLimit = frMuLat * frNormal;
             double rlLatLimit = rlMuLat * rlNormal;
             double rrLatLimit = rrMuLat * rrNormal;
-            if (estimatedSubRpm > ENGINE_HARD_LIMIT_RPM) {
-                double hardLimitT = smoothstep((estimatedSubRpm / ENGINE_HARD_LIMIT_RPM - 1.0) / ENGINE_HARD_LIMIT_FULL_OVERSPEED_RATIO);
+            if (estimatedSubRpm > profile.hardLimitRpm()) {
+                double hardLimitT = smoothstep((estimatedSubRpm / profile.hardLimitRpm() - 1.0) / ENGINE_HARD_LIMIT_FULL_OVERSPEED_RATIO);
                 double hardLimitGripForce = (rlLongLimit + rrLongLimit) * (ENGINE_HARD_LIMIT_GRIP_FORCE_MULTIPLIER + ENGINE_HARD_LIMIT_EXTRA_GRIP_FORCE_MULTIPLIER * hardLimitT);
                 engineBrakeForce = Math.max(engineBrakeForce, hardLimitGripForce);
                 engineBrakeRear = engineBrakeForce * 0.5;
@@ -2439,7 +2505,7 @@ public class OpenwheelCarEntity extends Entity {
             velocityLat += subAccelerationLat * subDt;
             yawRate += yawAcceleration * subDt;
             if (Math.abs(steeringAngle) > SLIP_ANGLE_DEADBAND && velocityLong > 1.0) {
-                double targetYawRate = velocityLong / wheelbase * Math.tan(steeringAngle);
+                double targetYawRate = velocityLong / wheelbase * Math.tan(steeringAngle) * profile.steeringResponseMultiplier();
                 double targetSign = Math.signum(targetYawRate);
                 double yawSign = Math.signum(yawRate);
                 if (targetSign != 0.0 && yawSign != 0.0 && targetSign != yawSign) {
@@ -2554,6 +2620,7 @@ public class OpenwheelCarEntity extends Entity {
                 surface,
                 steeringWear,
                 brake,
+                brakeFrontBias,
                 new WheelWearSample(finalFlDemand, finalFlSlipAngle, finalFlLongForce, finalFlLatForce, finalFlLoad),
                 new WheelWearSample(finalFrDemand, finalFrSlipAngle, finalFrLongForce, finalFrLatForce, finalFrLoad),
                 new WheelWearSample(finalRlDemand, finalRlSlipAngle, finalRlLongForce, finalRlLatForce, finalRlLoad),
@@ -3191,6 +3258,7 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private int updateEngineRpm(double speed, int gear, double gearTopSpeed, double throttle, boolean launchClutch, boolean clutchReleasing) {
+        VehicleProfile profile = vehicleProfile();
         int currentRpm = getRpm();
         if (gear == NEUTRAL_GEAR) {
             double rpm = currentRpm;
@@ -3199,64 +3267,61 @@ public class OpenwheelCarEntity extends Entity {
             } else {
                 rpm -= NEUTRAL_RPM_DECAY_PER_SECOND * PHYSICS_DT;
             }
-            return clampRpm(rpm);
+            return clampRpm(rpm, profile);
         }
 
-        double wheelRpm = wheelRpm(speed, gearTopSpeed);
-        double rpm = Math.max(IDLE_RPM, wheelRpm);
+        double wheelRpm = wheelRpm(speed, gearTopSpeed, profile);
+        double rpm = Math.max(profile.idleRpm(), wheelRpm);
         if (launchClutch || clutchReleasing) {
             int storedRpm = Math.max(currentRpm, clutchReleaseRpm);
             double releasedRpm = storedRpm - CLUTCH_RPM_DROP_PER_SECOND * PHYSICS_DT;
-            clutchReleaseRpm = clampRpm(releasedRpm);
+            clutchReleaseRpm = clampRpm(releasedRpm, profile);
             rpm = Math.max(rpm, releasedRpm);
             if (launchClutch) {
-                rpm = Math.max(rpm, LAUNCH_RPM);
+                rpm = Math.max(rpm, profile.launchRpm());
             }
         } else if (throttle == 0.0 && currentRpm > rpm) {
             rpm = Math.max(rpm, currentRpm - ENGINE_BRAKE_RPM_DROP_PER_SECOND * PHYSICS_DT);
         }
-        return clampRpm(rpm);
+        return clampRpm(rpm, profile);
     }
 
-    private static double wheelRpm(double speed, double gearTopSpeed) {
-        return gearTopSpeed <= 0.0 ? IDLE_RPM : speed / gearTopSpeed * REDLINE_RPM;
+    private static double wheelRpm(double speed, double gearTopSpeed, VehicleProfile profile) {
+        return gearTopSpeed <= 0.0 ? profile.idleRpm() : speed / gearTopSpeed * profile.redlineRpm();
     }
 
-    private static int clampRpm(double rpm) {
-        return (int) Math.max(IDLE_RPM, Math.min(REDLINE_RPM, rpm));
-    }
-
-    private static double powerAcceleration(double powerWatts, double speedBlocksPerTick) {
-        double speedMetersPerSecond = Math.max(MIN_POWER_SPEED, speedBlocksPerTick * 20.0);
-        double accelerationMetersPerSecondSquared = powerWatts / (CAR_MASS_KG * speedMetersPerSecond);
-        return accelerationMetersPerSecondSquared / 400.0;
+    private static int clampRpm(double rpm, VehicleProfile profile) {
+        return (int) Math.max(profile.idleRpm(), Math.min(profile.redlineRpm(), rpm));
     }
 
     private double enginePowerWatts(int rpm) {
-        if (rpm <= ENGINE_RPM_POINTS[0]) {
-            return vehicleProfile().peakPowerWatts() * ENGINE_POWER_POINTS[0];
+        VehicleProfile profile = vehicleProfile();
+        double[] rpmPoints = profile.engineRpmPoints();
+        double[] powerPoints = profile.enginePowerPoints();
+        if (rpm <= rpmPoints[0]) {
+            return profile.peakPowerWatts() * powerPoints[0];
         }
-        for (int i = 1; i < ENGINE_RPM_POINTS.length; i++) {
-            if (rpm <= ENGINE_RPM_POINTS[i]) {
-                double t = (rpm - ENGINE_RPM_POINTS[i - 1]) / (ENGINE_RPM_POINTS[i] - ENGINE_RPM_POINTS[i - 1]);
-                double power = ENGINE_POWER_POINTS[i - 1] + (ENGINE_POWER_POINTS[i] - ENGINE_POWER_POINTS[i - 1]) * t;
-                return vehicleProfile().peakPowerWatts() * power;
+        for (int i = 1; i < rpmPoints.length; i++) {
+            if (rpm <= rpmPoints[i]) {
+                double t = (rpm - rpmPoints[i - 1]) / (rpmPoints[i] - rpmPoints[i - 1]);
+                double power = powerPoints[i - 1] + (powerPoints[i] - powerPoints[i - 1]) * t;
+                return profile.peakPowerWatts() * power;
             }
         }
-        return vehicleProfile().peakPowerWatts() * ENGINE_POWER_POINTS[ENGINE_POWER_POINTS.length - 1];
+        return profile.peakPowerWatts() * powerPoints[powerPoints.length - 1];
     }
 
     private double combustionPowerWatts(int rpm) {
-        double peakPowerWatts = vehicleProfile().peakPowerWatts();
-        return enginePowerWatts(rpm) * Math.max(0.0, peakPowerWatts - ERS_POWER_SHARE_WATTS) / peakPowerWatts;
+        VehicleProfile profile = vehicleProfile();
+        return enginePowerWatts(rpm) * Math.max(0.0, profile.peakPowerWatts() - profile.ersPowerShareWatts()) / profile.peakPowerWatts();
     }
 
-    private static double engineBrakeForce(int gear, double estimatedRpm, double speedBlocksPerTick, double speedMetersPerSecond, double pitSpeedLimit, SurfaceProfile surface) {
+    private static double engineBrakeForce(VehicleProfile profile, int gear, double estimatedRpm, double speedBlocksPerTick, double speedMetersPerSecond, double pitSpeedLimit, SurfaceProfile surface) {
         if (gear <= NEUTRAL_GEAR || speedMetersPerSecond <= 0.1) {
             return 0.0;
         }
-        double engineBrakePower = ENGINE_BRAKE_TORQUE_NM * estimatedRpm * Math.PI / 30.0;
-        double redlinePower = engineBrakePower * smoothstep((estimatedRpm / REDLINE_RPM - 1.0) / ENGINE_BRAKE_FULL_OVERSPEED_RATIO);
+        double engineBrakePower = profile.engineBrakeTorqueNm() * estimatedRpm * Math.PI / 30.0;
+        double redlinePower = engineBrakePower * smoothstep((estimatedRpm / profile.redlineRpm() - 1.0) / ENGINE_BRAKE_FULL_OVERSPEED_RATIO);
         double pitGovernorPower = 0.0;
         if (surface == SurfaceProfile.PIT_LANE && speedBlocksPerTick > pitSpeedLimit) {
             double pitOverspeedRatio = speedBlocksPerTick / pitSpeedLimit - 1.0;
@@ -3435,8 +3500,11 @@ public class OpenwheelCarEntity extends Entity {
         double yawInertia,
         double dragArea,
         double downforceArea,
+        double frontAeroBalance,
         double peakPowerWatts,
+        double ersPowerShareWatts,
         double maxBrakeForce,
+        double brakeFrontBias,
         double asphaltMuLateral,
         double asphaltMuLongitudinal,
         double frontCorneringStiffness,
@@ -3447,8 +3515,38 @@ public class OpenwheelCarEntity extends Entity {
         double highSpeedSteerAngle,
         double powerMultiplier,
         double tyreWearMultiplier,
+        double idleRpm,
+        double launchRpm,
+        double redlineRpm,
+        double hardLimitRpm,
+        double engineBrakeTorqueNm,
+        double[] engineRpmPoints,
+        double[] enginePowerPoints,
+        double reverseTopSpeedKmh,
+        double[] gearTopSpeedsKmh,
+        double steeringResponseMultiplier,
         net.neoforged.neoforge.registries.DeferredHolder<net.minecraft.world.item.Item, net.minecraft.world.item.Item> pickupItem
-    ) {}
+    ) {
+        protected VehicleProfile {
+            if (engineRpmPoints.length != enginePowerPoints.length || engineRpmPoints.length < 2) {
+                throw new IllegalArgumentException("Engine curve requires matching RPM/power points");
+            }
+            if (gearTopSpeedsKmh.length < 2) {
+                throw new IllegalArgumentException("Vehicle profile requires neutral plus at least one forward gear");
+            }
+            engineRpmPoints = engineRpmPoints.clone();
+            enginePowerPoints = enginePowerPoints.clone();
+            gearTopSpeedsKmh = gearTopSpeedsKmh.clone();
+        }
+
+        int maxForwardGear() {
+            return gearTopSpeedsKmh.length - 1;
+        }
+
+        double gearTopSpeedKmh(int gear) {
+            return gearTopSpeedsKmh[Math.max(0, Math.min(maxForwardGear(), gear))];
+        }
+    }
 
     private void resetTyreRelaxation() {
         relaxedFlLatForce = 0.0;
@@ -3609,11 +3707,19 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private void addDamage(float amount) {
+        if (!takesDamage()) {
+            return;
+        }
         entityData.set(DAMAGE, Math.min(100.0f, getDamagePercent() + amount * raceControlDamageModifier()));
     }
 
-    private void tickTyreCondition(double speedMetersPerSecond, SurfaceProfile surface, double steeringWear, double brakeInput,
+    private void tickTyreCondition(double speedMetersPerSecond, SurfaceProfile surface, double steeringWear, double brakeInput, double brakeFrontBias,
             WheelWearSample fl, WheelWearSample fr, WheelWearSample rl, WheelWearSample rr) {
+        if (!usesTyreCondition()) {
+            resetTyreThermalState();
+            setTyreWearPercent(0.0f);
+            return;
+        }
         double speedFactor = clamp(speedMetersPerSecond / 52.0, 0.0, 1.35);
         double demand = (fl.demand + fr.demand + rl.demand + rr.demand) * 0.25;
         double excess = (Math.max(0.0, fl.demand - 1.0) + Math.max(0.0, fr.demand - 1.0) + Math.max(0.0, rl.demand - 1.0) + Math.max(0.0, rr.demand - 1.0)) * 0.25;
@@ -3623,8 +3729,8 @@ public class OpenwheelCarEntity extends Entity {
         double compoundRollingHeatGain = tyreRollingHeatGainMultiplier(getTyreCompound());
         double compoundNearSaturationHeatGain = tyreNearSaturationHeatGainMultiplier(getTyreCompound());
         double compoundCoolingGain = tyreCoolingMultiplier(getTyreCompound());
-        double frontBrakeHeatPower = brakeInput * TYRE_BRAKE_HEAT_POWER_PER_INPUT * BRAKE_FRONT_BIAS;
-        double rearBrakeHeatPower = brakeInput * TYRE_BRAKE_HEAT_POWER_PER_INPUT * (1.0 - BRAKE_FRONT_BIAS);
+        double frontBrakeHeatPower = brakeInput * TYRE_BRAKE_HEAT_POWER_PER_INPUT * brakeFrontBias;
+        double rearBrakeHeatPower = brakeInput * TYRE_BRAKE_HEAT_POWER_PER_INPUT * (1.0 - brakeFrontBias);
         double workingMin = tyreWorkingTemperatureMin(getTyreCompound());
         double workingMax = tyreWorkingTemperatureMax(getTyreCompound());
         tyreTemperatureFlC = nextWheelTyreTemperature(tyreTemperatureFlC, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPower, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fl);
@@ -3646,25 +3752,18 @@ public class OpenwheelCarEntity extends Entity {
         tyrePatching = clamp(tyrePatching + (dirtySurface * (0.25 + speedFactor) + excess * 0.30) * TYRE_PATCH_BUILD_RATE - cleanRunning * TYRE_PATCH_CLEAN_RATE, 0.0, 1.0);
 
         if (speedMetersPerSecond > 1.0) {
-            double frontWearLoad = (wheelSlipAngleLoad(fl) + wheelSlipAngleLoad(fr)) * 0.5 + steeringWear * 0.10;
-            double rearWearLoad = (wheelSlipAngleLoad(rl) + wheelSlipAngleLoad(rr)) * 0.5;
-            double frontExcess = (Math.max(0.0, fl.demand - 1.0) + Math.max(0.0, fr.demand - 1.0)) * 0.5;
-            double rearExcess = (Math.max(0.0, rl.demand - 1.0) + Math.max(0.0, rr.demand - 1.0)) * 0.5;
-            double frontWear = (TYRE_WEAR_BASE_RATE * (0.25 + (fl.demand + fr.demand) * 0.5)
-                + TYRE_WEAR_SLIP_RATE * frontWearLoad
-                + TYRE_WEAR_EXCESS_RATE * frontExcess)
-                * tyreTemperatureWearMultiplier(getTyreCompound(), frontTyreTemperatureC);
-            double rearWear = (TYRE_WEAR_BASE_RATE * (0.25 + (rl.demand + rr.demand) * 0.5)
-                + TYRE_WEAR_SLIP_RATE * rearWearLoad
-                + TYRE_WEAR_EXCESS_RATE * rearExcess)
-                * tyreTemperatureWearMultiplier(getTyreCompound(), rearTyreTemperatureC);
-            double wear = (frontWear + rearWear) * 0.5
-                * speedMetersPerSecond
+            double wearScale = speedMetersPerSecond
                 * setup.tyreWearMultiplier()
                 * vehicleProfile().tyreWearMultiplier()
                 * surface.wearMult
-                * (1.0 + tyreGraining * 0.95 + tyrePatching * 0.45);
-            addTyreWear((float) wear);
+                * (1.0 + tyreGraining * 0.95 + tyrePatching * 0.45)
+                * raceControlTyreWearModifier();
+            addWheelTyreWear(
+                wheelTyreWear(fl, steeringWear * 0.10, frontTyreTemperatureC, getTyreCompound()) * wearScale,
+                wheelTyreWear(fr, steeringWear * 0.10, frontTyreTemperatureC, getTyreCompound()) * wearScale,
+                wheelTyreWear(rl, 0.0, rearTyreTemperatureC, getTyreCompound()) * wearScale,
+                wheelTyreWear(rr, 0.0, rearTyreTemperatureC, getTyreCompound()) * wearScale
+            );
         }
         syncTyreTemperature();
     }
@@ -3716,7 +3815,15 @@ public class OpenwheelCarEntity extends Entity {
         return (temperatureC - TYRE_AMBIENT_TEMPERATURE_C) * (1.0 - Math.exp(-coolingRate * PHYSICS_DT));
     }
 
-    private void resetTyreThermalState() {
+    protected boolean takesDamage() {
+        return true;
+    }
+
+    protected boolean usesTyreCondition() {
+        return true;
+    }
+
+    protected void resetTyreThermalState() {
         tyreTemperatureFlC = TYRE_INITIAL_TEMPERATURE_C;
         tyreTemperatureFrC = TYRE_INITIAL_TEMPERATURE_C;
         tyreTemperatureRlC = TYRE_INITIAL_TEMPERATURE_C;
@@ -3746,7 +3853,7 @@ public class OpenwheelCarEntity extends Entity {
         lastSyncedTyreTemperatureRrC = Float.NaN;
     }
 
-    private void syncTyreTemperature() {
+    protected void syncTyreTemperature() {
         float fl = (float) clamp(tyreTemperatureFlC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
         float fr = (float) clamp(tyreTemperatureFrC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
         float rl = (float) clamp(tyreTemperatureRlC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
@@ -3843,8 +3950,22 @@ public class OpenwheelCarEntity extends Entity {
         };
     }
 
-    private void addTyreWear(float amount) {
-        entityData.set(TYRE_WEAR, Math.min(100.0f, getTyreWearPercent() + amount * raceControlTyreWearModifier()));
+    private static double wheelTyreWear(WheelWearSample sample, double steeringWear, double tyreTemperatureC, int compound) {
+        double wearLoad = wheelSlipAngleLoad(sample) + steeringWear;
+        double excess = Math.max(0.0, sample.demand - 1.0);
+        return (TYRE_WEAR_BASE_RATE * (0.25 + sample.demand)
+            + TYRE_WEAR_SLIP_RATE * wearLoad
+            + TYRE_WEAR_EXCESS_RATE * excess)
+            * tyreTemperatureWearMultiplier(compound, tyreTemperatureC);
+    }
+
+    private void addWheelTyreWear(double flWear, double frWear, double rlWear, double rrWear) {
+        setTyreWearPercents(
+            getTyreWearFlPercent() + (float) flWear,
+            getTyreWearFrPercent() + (float) frWear,
+            getTyreWearRlPercent() + (float) rlWear,
+            getTyreWearRrPercent() + (float) rrWear
+        );
     }
 
     private float raceControlDamageModifier() {
