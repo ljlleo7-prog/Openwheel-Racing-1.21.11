@@ -8,6 +8,8 @@ import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.content.race.TeamCarRow;
+import com.openwheelracing.content.track.TrackDefinition;
+import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.TrackMapAutoDetector;
 import com.openwheelracing.content.track.TrackMapData;
 import com.openwheelracing.content.track.TrackMapSnapshot;
@@ -183,7 +185,41 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     }
 
     private TrackMapSnapshot trackMap(ServerLevel level) {
-        return TrackMapData.get(level).snapshot(level.dimension().identifier().toString()).orElse(TrackMapSnapshot.EMPTY);
+        TrackMapSnapshot base = TrackMapData.get(level).snapshot(level.dimension().identifier().toString()).orElse(TrackMapSnapshot.EMPTY);
+        return withStewardTimingMarkers(level, base);
+    }
+
+    private TrackMapSnapshot withStewardTimingMarkers(ServerLevel level, TrackMapSnapshot base) {
+        if (!base.present()) {
+            return base;
+        }
+        java.util.ArrayList<TrackMapSnapshot.MapPoint> checkpoints = new java.util.ArrayList<>(base.checkpointMarkers());
+        java.util.ArrayList<TrackMapSnapshot.MapPoint> startFinish = new java.util.ArrayList<>(base.startFinishMarkers());
+        TrackDefinitionsData.get(level)
+            .activeTrack(level.dimension().identifier().toString())
+            .ifPresent(track -> {
+                for (TrackDefinition.StewardLine line : track.stewardLines()) {
+                    if (line.type() == TrackDefinition.StewardLineType.CHECKPOINT || line.type() == TrackDefinition.StewardLineType.SECTOR_SPLIT) {
+                        checkpoints.add(midpoint(line));
+                    }
+                }
+                track.startFinish().ifPresent(sf -> startFinish.add(midpoint(sf)));
+            });
+        return new TrackMapSnapshot(base.present(), base.source(), base.name(), base.dimensionId(), base.revision(), base.minX(), base.minZ(), base.maxX(), base.maxZ(), base.asphaltRuns(), base.pitRuns(), startFinish, checkpoints);
+    }
+
+    private TrackMapSnapshot.MapPoint midpoint(TrackDefinition.StewardLine line) {
+        return new TrackMapSnapshot.MapPoint(
+            (int) Math.round((line.left().x() + line.right().x()) * 0.5),
+            (int) Math.round((line.left().z() + line.right().z()) * 0.5)
+        );
+    }
+
+    private TrackMapSnapshot.MapPoint midpoint(TrackDefinition.StartFinishLine line) {
+        return new TrackMapSnapshot.MapPoint(
+            (int) Math.round((line.left().x() + line.right().x()) * 0.5),
+            (int) Math.round((line.left().z() + line.right().z()) * 0.5)
+        );
     }
 
     @Override

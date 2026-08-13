@@ -37,7 +37,7 @@ public final class OWRCommands {
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("owr")
-            .requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER))
+            .requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_MODERATOR))
             .then(Commands.literal("regulation")
                 .then(Commands.literal("wheel")
                     .then(Commands.literal("allow")
@@ -158,12 +158,7 @@ public final class OWRCommands {
     }
 
     private static int showActiveTrack(CommandContext<CommandSourceStack> context) {
-        Optional<TrackDefinition> active = trackData(context).activeTrack(dimensionId(context));
-        if (active.isEmpty()) {
-            send(context, "No active stewarding track selected.");
-            return 0;
-        }
-        TrackDefinition track = active.get();
+        TrackDefinition track = activeOrDefaultTrack(context);
         send(context, "Active stewarding track: " + track.name() + " [" + track.trackId() + "] nodes=" + track.centerline().size() + " length=" + Math.round(track.length()) + "m");
         return 1;
     }
@@ -261,13 +256,8 @@ public final class OWRCommands {
 
     private static int setStartFinishHere(CommandContext<CommandSourceStack> context, int width) throws CommandSyntaxException {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
-        if (active.isEmpty()) {
-            send(context, "No active stewarding track selected.");
-            return 0;
-        }
+        TrackDefinition track = activeOrDefaultTrack(context);
         ServerPlayer player = context.getSource().getPlayerOrException();
-        TrackDefinition track = active.get();
         TrackDefinition updated = track.withStartFinish(lineAtPlayer(player, width));
         data.upsert(updated);
         send(context, "Set start/finish for " + updated.name() + " at " + BlockPos.containing(player.position()).toShortString() + ".");
@@ -276,13 +266,8 @@ public final class OWRCommands {
 
     private static int addCheckpointHere(CommandContext<CommandSourceStack> context, int width) throws CommandSyntaxException {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
-        if (active.isEmpty()) {
-            send(context, "No active stewarding track selected.");
-            return 0;
-        }
+        TrackDefinition track = activeOrDefaultTrack(context);
         ServerPlayer player = context.getSource().getPlayerOrException();
-        TrackDefinition track = active.get();
         int index = track.checkpoints().stream().mapToInt(TrackDefinition.Checkpoint::index).max().orElse(0) + 1;
         TrackDefinition.StartFinishLine line = lineAtPlayer(player, width);
         List<TrackDefinition.Checkpoint> checkpoints = new ArrayList<>(track.checkpoints());
@@ -409,7 +394,7 @@ public final class OWRCommands {
         double centerY = (raisedLeft.y() + raisedRight.y()) * 0.5;
         double centerZ = (raisedLeft.z() + raisedRight.z()) * 0.5;
         Vec3 center = new Vec3(centerX, centerY, centerZ);
-        TrackDefinition track = trackData(context).activeTrack(dimensionId(context)).orElse(null);
+        TrackDefinition track = activeOrDefaultTrack(context);
         double distance = track == null ? 0.0 : TrackGeometry.sample(track, center).map(TrackGeometry.ProgressSample::distanceAlongTrack).orElse(0.0);
         double lineAngle = Math.atan2(raisedRight.z() - raisedLeft.z(), raisedRight.x() - raisedLeft.x());
         double heading = lineAngle - Math.PI * 0.5;
@@ -422,12 +407,7 @@ public final class OWRCommands {
 
     private static int upsertStewardLine(CommandContext<CommandSourceStack> context, TrackDefinition.StewardLine line) {
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
-        if (active.isEmpty()) {
-            send(context, "No active stewarding track selected.");
-            return 0;
-        }
-        TrackDefinition track = active.get();
+        TrackDefinition track = activeOrDefaultTrack(context);
         List<TrackDefinition.StewardLine> lines = new ArrayList<>(track.stewardLines().stream()
             .filter(existing -> existing.type() != line.type() || existing.index() != line.index())
             .toList());
@@ -439,17 +419,13 @@ public final class OWRCommands {
     }
 
     private static int listStewardLines(CommandContext<CommandSourceStack> context) {
-        Optional<TrackDefinition> active = trackData(context).activeTrack(dimensionId(context));
-        if (active.isEmpty()) {
-            send(context, "No active stewarding track selected.");
-            return 0;
-        }
-        List<TrackDefinition.StewardLine> lines = active.get().stewardLines();
+        TrackDefinition track = activeOrDefaultTrack(context);
+        List<TrackDefinition.StewardLine> lines = track.stewardLines();
         if (lines.isEmpty()) {
-            send(context, "No stewarding lines defined for " + active.get().name() + ".");
+            send(context, "No stewarding lines defined for " + track.name() + ".");
             return 0;
         }
-        send(context, "Stewarding lines for " + active.get().name() + ":");
+        send(context, "Stewarding lines for " + track.name() + ":");
         for (TrackDefinition.StewardLine line : lines) {
             send(context, "- " + line.type().serializedName() + " " + line.index() + " [" + formatPoint(line.left()) + " -> " + formatPoint(line.right()) + "]");
         }
@@ -501,14 +477,10 @@ public final class OWRCommands {
             return 1;
         }
         TrackDefinitionsData data = trackData(context);
-        Optional<TrackDefinition> active = data.activeTrack(dimensionId(context));
-        if (active.isEmpty()) {
-            send(context, "No active stewarding track selected.");
-            return 0;
-        }
-        OWRNetwork.sendStewardLineOverlay(player, true, active.get(), data.getRevision());
-        send(context, "Showing " + active.get().stewardLines().size() + " stewarding lines for your client.");
-        return active.get().stewardLines().size();
+        TrackDefinition track = activeOrDefaultTrack(context);
+        OWRNetwork.sendStewardLineOverlay(player, true, track, data.getRevision());
+        send(context, "Showing " + track.stewardLines().size() + " stewarding lines for your client.");
+        return track.stewardLines().size();
     }
 
     private static TrackDefinition.StewardLineType parseStewardLineType(CommandContext<CommandSourceStack> context) {
@@ -578,6 +550,25 @@ public final class OWRCommands {
             send(context, "Invalid track id: " + value);
             return null;
         }
+    }
+
+    private static TrackDefinition activeOrDefaultTrack(CommandContext<CommandSourceStack> context) {
+        TrackDefinitionsData data = trackData(context);
+        String dimensionId = dimensionId(context);
+        Optional<TrackDefinition> active = data.activeTrack(dimensionId);
+        if (active.isPresent()) {
+            return active.get();
+        }
+        List<TrackDefinition> tracks = data.tracksInDimension(dimensionId);
+        if (!tracks.isEmpty()) {
+            TrackDefinition selected = tracks.getFirst();
+            data.setActiveTrack(selected.trackId(), dimensionId);
+            send(context, "Selected stewarding track " + selected.name() + " [" + selected.trackId() + "].");
+            return selected;
+        }
+        TrackDefinition created = data.createEmpty("Default Track", dimensionId);
+        send(context, "Created and selected stewarding track " + created.name() + " [" + created.trackId() + "].");
+        return created;
     }
 
     private static TrackDefinitionsData trackData(CommandContext<CommandSourceStack> context) {

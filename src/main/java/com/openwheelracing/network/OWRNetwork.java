@@ -1709,11 +1709,10 @@ public final class OWRNetwork {
         try {
             Class<?> minecraftClass = Class.forName("net.minecraft.client.Minecraft");
             Object minecraft = minecraftClass.getMethod("getInstance").invoke(null);
-            Object player = minecraftClass.getField("player").get(minecraft);
-            if (player != null) {
-                Method sendSystemMessage = player.getClass().getMethod("sendSystemMessage", Component.class);
-                sendSystemMessage.invoke(player, Component.literal("[OWR] " + message.message));
-            }
+            Object gui = minecraftClass.getField("gui").get(minecraft);
+            Object chat = gui.getClass().getMethod("getChat").invoke(gui);
+            Method addMessage = chat.getClass().getMethod("addMessage", Component.class);
+            addMessage.invoke(chat, Component.literal("[OWR] " + message.message));
         } catch (ReflectiveOperationException ignored) {
         }
     }

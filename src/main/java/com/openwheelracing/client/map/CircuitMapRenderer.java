@@ -44,7 +44,6 @@ public final class CircuitMapRenderer {
         }
         Projection projection = new Projection(map, x + 4, y + 4, Math.max(1, width - 8), Math.max(1, height - 8));
         drawSurface(graphics, map, projection);
-        drawMapMarkers(graphics, map, projection);
         drawMarker(graphics, projection.screenX(carX), projection.screenY(carZ), headingDegrees, color, true);
     }
 

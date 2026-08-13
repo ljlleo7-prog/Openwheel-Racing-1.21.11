@@ -235,24 +235,61 @@ public final class CarHudOverlay {
 
     private static void renderCarStatus(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {
         int width = 146;
-        int height = 96;
+        int height = 184;
         int x = graphics.guiWidth() - width - 8;
         int y = graphics.guiHeight() - height - 8;
 
+        renderComponentDamageDiagram(graphics, car, x + 9, y + 5);
+
+        int tyreY = y + 88;
         float min = car.getTyreWorkingTemperatureMinCelsius();
         float max = car.getTyreWorkingTemperatureMaxCelsius();
-        drawTyreStatus(graphics, font, x + 22, y + 18, car.getTyreTemperatureFlCelsius(), min, max, car.getTyreWearFlPercent());
-        drawTyreStatus(graphics, font, x + 76, y + 18, car.getTyreTemperatureFrCelsius(), min, max, car.getTyreWearFrPercent());
-        drawTyreStatus(graphics, font, x + 22, y + 51, car.getTyreTemperatureRlCelsius(), min, max, car.getTyreWearRlPercent());
-        drawTyreStatus(graphics, font, x + 76, y + 51, car.getTyreTemperatureRrCelsius(), min, max, car.getTyreWearRrPercent());
+        drawTyreStatus(graphics, font, x + 22, tyreY + 18, car.getTyreTemperatureFlCelsius(), min, max, car.getTyreWearFlPercent());
+        drawTyreStatus(graphics, font, x + 76, tyreY + 18, car.getTyreTemperatureFrCelsius(), min, max, car.getTyreWearFrPercent());
+        drawTyreStatus(graphics, font, x + 22, tyreY + 51, car.getTyreTemperatureRlCelsius(), min, max, car.getTyreWearRlPercent());
+        drawTyreStatus(graphics, font, x + 76, tyreY + 51, car.getTyreTemperatureRrCelsius(), min, max, car.getTyreWearRrPercent());
 
         int damageColor = damageColor(car.getDamagePercent());
-        drawVerticalMeter(graphics, x + 121, y + 18, 10, 50, car.getDamagePercent() / 100.0f, damageColor, 0xFF251B1B);
-        graphics.drawString(font, "DMG", x + 110, y + 73, damageColor, false);
+        drawVerticalMeter(graphics, x + 121, tyreY + 18, 10, 50, car.getDamagePercent() / 100.0f, damageColor, 0xFF251B1B);
+        graphics.drawString(font, "DMG", x + 110, tyreY + 73, damageColor, false);
 
-        drawStatusChip(graphics, font, "ABS", x + 9, y + 80, car.isAbsEnabled() ? 0xFF7EE787 : 0xFFFFD044);
-        drawStatusChip(graphics, font, "TC", x + 45, y + 80, car.isTractionControlEnabled() ? 0xFF7EE787 : 0xFFFFD044);
-        drawStatusChip(graphics, font, "DRS", x + 80, y + 80, car.isDrsActive() ? 0xFF00DD44 : 0xFF555B63);
+        drawStatusChip(graphics, font, "ABS", x + 9, y + 168, car.isAbsEnabled() ? 0xFF7EE787 : 0xFFFFD044);
+        drawStatusChip(graphics, font, "TC", x + 45, y + 168, car.isTractionControlEnabled() ? 0xFF7EE787 : 0xFFFFD044);
+        drawStatusChip(graphics, font, "DRS", x + 80, y + 168, car.isDrsActive() ? 0xFF00DD44 : 0xFF555B63);
+    }
+
+    private static void renderComponentDamageDiagram(GuiGraphics graphics, OpenwheelCarEntity car, int x, int y) {
+        int cx = x + 64;
+        int top = y;
+        int frontColor = damageColor(car.getFrontEndDamagePercent());
+        int rearColor = damageColor(car.getRearEndDamagePercent());
+        int chassisColor = damageColor(car.getChassisDamagePercent());
+        int flColor = damageColor(car.getFrontLeftSuspensionDamagePercent());
+        int frColor = damageColor(car.getFrontRightSuspensionDamagePercent());
+        int rlColor = damageColor(car.getRearLeftSuspensionDamagePercent());
+        int rrColor = damageColor(car.getRearRightSuspensionDamagePercent());
+        graphics.fill(cx - 30, top, cx + 30, top + 4, frontColor);
+        graphics.fill(cx - 5, top + 4, cx + 5, top + 13, frontColor);
+        graphics.fill(cx - 20, top + 22, cx - 7, top + 25, flColor);
+        graphics.fill(cx + 7, top + 22, cx + 20, top + 25, frColor);
+        drawSuspensionWheel(graphics, cx - 34, top + 12, flColor);
+        drawSuspensionWheel(graphics, cx + 22, top + 12, frColor);
+        graphics.fill(cx - 6, top + 13, cx + 6, top + 28, chassisColor);
+        graphics.fill(cx - 8, top + 28, cx + 8, top + 42, chassisColor);
+        graphics.fill(cx - 20, top + 42, cx + 20, top + 62, chassisColor);
+        graphics.fill(cx - 15, top + 62, cx + 15, top + 73, chassisColor);
+        graphics.fill(cx - 10, top + 73, cx + 10, top + 79, chassisColor);
+        graphics.fill(cx - 20, top + 68, cx - 7, top + 71, rlColor);
+        graphics.fill(cx + 7, top + 68, cx + 20, top + 71, rrColor);
+        drawSuspensionWheel(graphics, cx - 34, top + 58, rlColor);
+        drawSuspensionWheel(graphics, cx + 22, top + 58, rrColor);
+        graphics.fill(cx - 5, top + 79, cx + 5, top + 84, rearColor);
+        graphics.fill(cx - 28, top + 84, cx + 28, top + 88, rearColor);
+    }
+
+    private static void drawSuspensionWheel(GuiGraphics graphics, int x, int y, int color) {
+        graphics.fill(x, y, x + 12, y + 19, 0xFF050608);
+        graphics.fill(x + 2, y + 2, x + 10, y + 17, color);
     }
 
     private static void drawTyreStatus(GuiGraphics graphics, Font font, int x, int y, float temperature, float min, float max, float wearPercent) {
@@ -373,13 +410,11 @@ public final class CarHudOverlay {
     }
 
     private static int damageColor(float damagePercent) {
-        if (damagePercent > 70.0f) {
-            return 0xFFFF7777;
+        float damage = clamp(damagePercent, 0.0f, 100.0f);
+        if (damage <= 50.0f) {
+            return interpolateColor(0xFF7EE787, 0xFFFFD044, damage / 50.0f);
         }
-        if (damagePercent > 35.0f) {
-            return 0xFFFFD044;
-        }
-        return 0xFF7EE787;
+        return interpolateColor(0xFFFFD044, 0xFFFF7777, (damage - 50.0f) / 50.0f);
     }
 
     private static void renderRankingBoard(GuiGraphics graphics, Font font) {

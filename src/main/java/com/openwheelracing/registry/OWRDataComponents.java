@@ -1,6 +1,7 @@
 package com.openwheelracing.registry;
 
 import com.openwheelracing.OpenwheelRacing;
+import com.openwheelracing.content.car.CarComponentDamage;
 import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.PrototypeCarSetup;
@@ -25,6 +26,13 @@ public final class OWRDataComponents {
         () -> DataComponentType.<Integer>builder()
             .persistent(Codec.intRange(0, 100))
             .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.VAR_INT)
+            .build()
+    );
+
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<CarComponentDamage>> CAR_COMPONENT_DAMAGE = DATA_COMPONENTS.register("car_component_damage",
+        () -> DataComponentType.<CarComponentDamage>builder()
+            .persistent(CarComponentDamage.CODEC)
+            .networkSynchronized(CarComponentDamage.STREAM_CODEC)
             .build()
     );
 

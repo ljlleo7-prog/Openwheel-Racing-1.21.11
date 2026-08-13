@@ -1,5 +1,6 @@
 package com.openwheelracing.content.item;
 
+import com.openwheelracing.content.car.CarComponentDamage;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.car.CarLiveryTexture;
@@ -46,9 +47,15 @@ public class PrototypeCarItem extends Item {
     }
 
     public static ItemStack create(PrototypeCarSetup setup, float damage, float tyreWear, int livery, int ersMode, int ersEnergyPercent) {
+        return create(setup, CarComponentDamage.fromLegacyDamage(Math.round(damage)), tyreWear, livery, ersMode, ersEnergyPercent);
+    }
+
+    public static ItemStack create(PrototypeCarSetup setup, CarComponentDamage componentDamage, float tyreWear, int livery, int ersMode, int ersEnergyPercent) {
         ItemStack stack = new ItemStack(com.openwheelracing.registry.OWRItems.PROTOTYPE_CAR_SPAWN.get());
+        CarComponentDamage normalizedDamage = componentDamage == null ? CarComponentDamage.NONE : componentDamage;
         stack.set(OWRDataComponents.CAR_SETUP.get(), setup);
-        stack.set(OWRDataComponents.CAR_DAMAGE.get(), Math.max(0, Math.min(100, Math.round(damage))));
+        stack.set(OWRDataComponents.CAR_DAMAGE.get(), normalizedDamage.aggregate());
+        stack.set(OWRDataComponents.CAR_COMPONENT_DAMAGE.get(), normalizedDamage);
         stack.set(OWRDataComponents.TYRE_WEAR.get(), Math.max(0, Math.min(100, Math.round(tyreWear))));
         stack.set(OWRDataComponents.ERS_MODE.get(), Math.max(OpenwheelCarEntity.ERS_MODE_HARVEST, Math.min(OpenwheelCarEntity.ERS_MODE_ATTACK, ersMode)));
         stack.set(OWRDataComponents.ERS_ENERGY_PERCENT.get(), Math.max(0, Math.min(100, ersEnergyPercent)));
@@ -62,8 +69,22 @@ public class PrototypeCarItem extends Item {
     }
 
     public static int getCarDamage(ItemStack stack) {
-        Integer damage = stack.get(OWRDataComponents.CAR_DAMAGE.get());
-        return damage == null ? 0 : damage;
+        return getComponentDamage(stack).aggregate();
+    }
+
+    public static CarComponentDamage getComponentDamage(ItemStack stack) {
+        CarComponentDamage damage = stack.get(OWRDataComponents.CAR_COMPONENT_DAMAGE.get());
+        if (damage != null) {
+            return damage;
+        }
+        Integer legacyDamage = stack.get(OWRDataComponents.CAR_DAMAGE.get());
+        return legacyDamage == null ? CarComponentDamage.NONE : CarComponentDamage.fromLegacyDamage(legacyDamage);
+    }
+
+    public static void setComponentDamage(ItemStack stack, CarComponentDamage damage) {
+        CarComponentDamage normalized = damage == null ? CarComponentDamage.NONE : damage;
+        stack.set(OWRDataComponents.CAR_COMPONENT_DAMAGE.get(), normalized);
+        stack.set(OWRDataComponents.CAR_DAMAGE.get(), normalized.aggregate());
     }
 
     public static int getTyreWear(ItemStack stack) {
@@ -124,7 +145,7 @@ public class PrototypeCarItem extends Item {
             car.setPos(spawnPos.x, spawnPos.y, spawnPos.z);
             car.setYRot(player.getYRot());
             car.setSetup(getSetup(stack));
-            car.setDamagePercent(getCarDamage(stack));
+            car.setComponentDamage(getComponentDamage(stack));
             car.setTyreWearPercent(getTyreWear(stack));
             car.setLivery(getLivery(stack));
             car.setLiveryColors(getLiveryColors(stack));
