@@ -72,6 +72,7 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Float> DAMAGE_FRONT_END = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DAMAGE_REAR_END = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DAMAGE_CHASSIS = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> DAMAGE_ENGINE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DAMAGE_WHEEL_FL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DAMAGE_WHEEL_FR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DAMAGE_WHEEL_RL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
@@ -287,6 +288,7 @@ public class OpenwheelCarEntity extends Entity {
     private static final double FRONT_END_ENDURANCE_POINTS = 72.0;
     private static final double REAR_END_ENDURANCE_POINTS = 82.0;
     private static final double CHASSIS_ENDURANCE_POINTS = 165.0;
+    private static final double ENGINE_ENDURANCE_POINTS = 42.0;
     private static final double SUSPENSION_ENDURANCE_POINTS = 58.0;
     private static final double DRS_DRAG_FACTOR = 0.78;
     private static final double DRS_DOWNFORCE_FACTOR = 0.72;
@@ -327,6 +329,7 @@ public class OpenwheelCarEntity extends Entity {
         FRONT_END,
         REAR_END,
         CHASSIS,
+        ENGINE,
         FRONT_LEFT_WHEEL,
         FRONT_RIGHT_WHEEL,
         REAR_LEFT_WHEEL,
@@ -338,6 +341,9 @@ public class OpenwheelCarEntity extends Entity {
     private static final double COMPONENT_BOX_HALF_HEIGHT = 0.36;
     private static final double COMPONENT_BOX_CENTER_Y = 0.38;
 
+    private static final CarComponentDefinition ENGINE_COMPONENT_DEFINITION =
+        new CarComponentDefinition(CarDamageComponent.ENGINE, 0.0, 0.02, 0.28, 0.34);
+
     private static final CarComponentDefinition[] COMPONENT_DEFINITIONS = {
         new CarComponentDefinition(CarDamageComponent.FRONT_END, 0.0, 2.52, 0.78, 0.24),
         new CarComponentDefinition(CarDamageComponent.FRONT_LEFT_WHEEL, -0.73, 1.52, 0.22, 0.48),
@@ -346,6 +352,17 @@ public class OpenwheelCarEntity extends Entity {
         new CarComponentDefinition(CarDamageComponent.REAR_LEFT_WHEEL, -0.73, -1.52, 0.22, 0.48),
         new CarComponentDefinition(CarDamageComponent.REAR_RIGHT_WHEEL, 0.73, -1.52, 0.22, 0.48),
         new CarComponentDefinition(CarDamageComponent.REAR_END, 0.0, -2.54, 0.68, 0.22)
+    };
+
+    private static final CarComponentDefinition[] COMPONENT_DEFINITIONS_WITH_ENGINE = {
+        COMPONENT_DEFINITIONS[0],
+        COMPONENT_DEFINITIONS[1],
+        COMPONENT_DEFINITIONS[2],
+        ENGINE_COMPONENT_DEFINITION,
+        COMPONENT_DEFINITIONS[3],
+        COMPONENT_DEFINITIONS[4],
+        COMPONENT_DEFINITIONS[5],
+        COMPONENT_DEFINITIONS[6]
     };
 
     private PrototypeCarSetup setup = PrototypeCarSetup.DEFAULT;
@@ -381,6 +398,14 @@ public class OpenwheelCarEntity extends Entity {
     private float inputThrottle;
     private float inputBrake;
     private float inputSteering;
+    private boolean inputUsesKeyboardSteeringTuning;
+    private double keyboardLowSpeedSteeringRate = 1.0;
+    private double keyboardHighSpeedSteeringRate = 1.0;
+    private double keyboardLowSpeedCenteringRate = 1.0;
+    private double keyboardHighSpeedCenteringRate = 1.0;
+    private double keyboardLowSpeedSteeringGain = 1.0;
+    private double keyboardHighSpeedSteeringGain = 1.0;
+    private double keyboardSpeedResponseCurve = 1.0;
     private int lastAcceptedInputSequence;
     private int lastAckedInputSequence;
     private long lastDriveInputAckAt = -DRIVE_INPUT_ACK_MIN_GAP_TICKS;
@@ -389,6 +414,7 @@ public class OpenwheelCarEntity extends Entity {
     private long lastMovementWarningAt = -200L;
     private final java.util.HashMap<Integer, Long> lastEntityImpactById = new java.util.HashMap<>();
     private boolean wasRiddenLastTick;
+    private boolean destructionTriggered;
     private double steeringAngle;
     private double frontSteeringOffGripRelief;
     private double yawRate;
@@ -437,7 +463,7 @@ public class OpenwheelCarEntity extends Entity {
     private int ersLiftConfirmTicks;
     private boolean ersLiftAndCoastArmed;
 
-    public boolean applyDriveInput(int sequence, float throttle, float brake, float steering) {
+    public boolean applyDriveInput(int sequence, float throttle, float brake, float steering, boolean keyboardSteering) {
         if (hasAcceptedInputSequence) {
             if (!VehiclePhysics.isNewerSequence(sequence, lastAcceptedInputSequence)) {
                 return false;
@@ -451,11 +477,23 @@ public class OpenwheelCarEntity extends Entity {
         this.inputThrottle = throttle;
         this.inputBrake = brake;
         this.inputSteering = steering;
+        this.inputUsesKeyboardSteeringTuning = keyboardSteering;
         return true;
     }
 
     public int getLastAcceptedInputSequence() {
         return lastAcceptedInputSequence;
+    }
+
+    public void setKeyboardSteeringTuning(double lowSpeedSteeringRate, double highSpeedSteeringRate, double lowSpeedCenteringRate, double highSpeedCenteringRate,
+            double lowSpeedSteeringGain, double highSpeedSteeringGain, double speedResponseCurve) {
+        keyboardLowSpeedSteeringRate = clamp(lowSpeedSteeringRate, 0.5, 2.0);
+        keyboardHighSpeedSteeringRate = clamp(highSpeedSteeringRate, 0.5, 2.0);
+        keyboardLowSpeedCenteringRate = clamp(lowSpeedCenteringRate, 0.5, 2.0);
+        keyboardHighSpeedCenteringRate = clamp(highSpeedCenteringRate, 0.5, 2.0);
+        keyboardLowSpeedSteeringGain = clamp(lowSpeedSteeringGain, 0.7, 1.3);
+        keyboardHighSpeedSteeringGain = clamp(highSpeedSteeringGain, 0.5, 1.3);
+        keyboardSpeedResponseCurve = clamp(speedResponseCurve, 0.6, 1.4);
     }
 
     public double getYawRateRadiansPerSecond() {
@@ -509,6 +547,7 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(DAMAGE_FRONT_END, 0.0f);
         builder.define(DAMAGE_REAR_END, 0.0f);
         builder.define(DAMAGE_CHASSIS, 0.0f);
+        builder.define(DAMAGE_ENGINE, 0.0f);
         builder.define(DAMAGE_WHEEL_FL, 0.0f);
         builder.define(DAMAGE_WHEEL_FR, 0.0f);
         builder.define(DAMAGE_WHEEL_RL, 0.0f);
@@ -587,7 +626,7 @@ public class OpenwheelCarEntity extends Entity {
 
     public void setDamagePercent(float damage) {
         float normalized = normalizeDamagePercent(damage);
-        setComponentDamage(new CarComponentDamage(Math.round(normalized), Math.round(normalized), Math.round(normalized), Math.round(normalized), Math.round(normalized), Math.round(normalized), Math.round(normalized)));
+        setComponentDamage(new CarComponentDamage(Math.round(normalized), Math.round(normalized), Math.round(normalized), 0, Math.round(normalized), Math.round(normalized), Math.round(normalized), Math.round(normalized)));
     }
 
     public void setComponentDamage(CarComponentDamage damage) {
@@ -595,6 +634,7 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(DAMAGE_FRONT_END, normalizeDamagePercent(normalized.frontEnd()));
         entityData.set(DAMAGE_REAR_END, normalizeDamagePercent(normalized.rearEnd()));
         entityData.set(DAMAGE_CHASSIS, normalizeDamagePercent(normalized.chassis()));
+        entityData.set(DAMAGE_ENGINE, normalizeDamagePercent(normalized.engine()));
         entityData.set(DAMAGE_WHEEL_FL, normalizeDamagePercent(normalized.frontLeftWheel()));
         entityData.set(DAMAGE_WHEEL_FR, normalizeDamagePercent(normalized.frontRightWheel()));
         entityData.set(DAMAGE_WHEEL_RL, normalizeDamagePercent(normalized.rearLeftWheel()));
@@ -607,6 +647,7 @@ public class OpenwheelCarEntity extends Entity {
             Math.round(getFrontEndDamagePercent()),
             Math.round(getRearEndDamagePercent()),
             Math.round(getChassisDamagePercent()),
+            Math.round(getEngineDamagePercent()),
             Math.round(getFrontLeftWheelDamagePercent()),
             Math.round(getFrontRightWheelDamagePercent()),
             Math.round(getRearLeftWheelDamagePercent()),
@@ -740,6 +781,10 @@ public class OpenwheelCarEntity extends Entity {
 
     public float getChassisDamagePercent() {
         return entityData.get(DAMAGE_CHASSIS);
+    }
+
+    public float getEngineDamagePercent() {
+        return entityData.get(DAMAGE_ENGINE);
     }
 
     public float getFrontLeftWheelDamagePercent() {
@@ -1458,6 +1503,7 @@ public class OpenwheelCarEntity extends Entity {
             sendPendingDriveInputAck();
             clearHollowCollisionBlocks(true);
             tickImpactDamage();
+            tickEngineDamageEffects();
             tickWarnings();
         }
     }
@@ -1568,9 +1614,7 @@ public class OpenwheelCarEntity extends Entity {
     public boolean hurtServer(ServerLevel level, net.minecraft.world.damagesource.DamageSource damageSource, float amount) {
         if (isRemoved()) return false;
         addDamage(amount * 4.0f);
-        if (getDamagePercent() >= 100.0f) {
-            destroyIntoMaterials(level);
-        }
+        destroyIfChassisFailed();
         return true;
     }
 
@@ -1591,6 +1635,7 @@ public class OpenwheelCarEntity extends Entity {
             Math.round((float) input.getDoubleOr("DamageFrontEnd", savedDamage)),
             Math.round((float) input.getDoubleOr("DamageRearEnd", savedDamage)),
             Math.round((float) input.getDoubleOr("DamageChassis", savedDamage)),
+            Math.round((float) input.getDoubleOr("DamageEngine", 0.0)),
             Math.round((float) input.getDoubleOr("DamageWheelFl", savedDamage)),
             Math.round((float) input.getDoubleOr("DamageWheelFr", savedDamage)),
             Math.round((float) input.getDoubleOr("DamageWheelRl", savedDamage)),
@@ -1663,6 +1708,7 @@ public class OpenwheelCarEntity extends Entity {
         output.putDouble("DamageFrontEnd", getFrontEndDamagePercent());
         output.putDouble("DamageRearEnd", getRearEndDamagePercent());
         output.putDouble("DamageChassis", getChassisDamagePercent());
+        output.putDouble("DamageEngine", getEngineDamagePercent());
         output.putDouble("DamageWheelFl", getFrontLeftWheelDamagePercent());
         output.putDouble("DamageWheelFr", getFrontRightWheelDamagePercent());
         output.putDouble("DamageWheelRl", getRearLeftWheelDamagePercent());
@@ -1744,7 +1790,7 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(PIT_STOP_TICKS, ticks);
 
         if (ticks == 0) {
-            setDamagePercent(0.0f);
+            setComponentDamage(CarComponentDamage.NONE);
             setTyreWearPercent(0.0f);
             resetTyreThermalState();
             messageDriver(Component.literal("Pit stop complete — car serviced"));
@@ -2121,7 +2167,7 @@ public class OpenwheelCarEntity extends Entity {
         return level().getGameTime() - (1.0 - clamp(movementT, 0.0, 1.0));
     }
 
-    public void tickLocalClientMovement(int sequence, float throttle, float brake, float steering) {
+    public void tickLocalClientMovement(int sequence, float throttle, float brake, float steering, boolean keyboardSteering) {
         Entity passenger = getControllingPassenger();
         if (level().isClientSide() && passenger != null) {
             clientCurrentInputSequence = sequence;
@@ -2139,25 +2185,25 @@ public class OpenwheelCarEntity extends Entity {
             }
 
             float previousYaw = getYRot();
-            tickMovement(throttle, brake, steering, false);
+            tickMovement(throttle, brake, steering, keyboardSteering, false);
             float yawDelta = getYRot() - previousYaw;
             positionRider(passenger);
             passenger.setYRot(passenger.getYRot() + yawDelta);
             passenger.setYHeadRot(passenger.getYRot());
             passenger.setYBodyRot(passenger.getYRot());
 
-            recordClientPredictionFrame(sequence, throttle, brake, steering);
+            recordClientPredictionFrame(sequence, throttle, brake, steering, keyboardSteering);
             clientLastSyncedCarYaw = getYRot();
         }
     }
 
     public void tickLocalClientMovement(float throttle, float brake, float steering) {
-        tickLocalClientMovement(clientCurrentInputSequence + 1, throttle, brake, steering);
+        tickLocalClientMovement(clientCurrentInputSequence + 1, throttle, brake, steering, true);
     }
 
-    private void recordClientPredictionFrame(int sequence, float throttle, float brake, float steering) {
+    private void recordClientPredictionFrame(int sequence, float throttle, float brake, float steering, boolean keyboardSteering) {
         int index = Math.floorMod(sequence, CLIENT_PREDICTION_HISTORY_SIZE);
-        clientPredictionHistory[index] = new ClientPredictionFrame(sequence, throttle, brake, steering, position(), getDeltaMovement(), getYRot(), yawRate, steeringAngle);
+        clientPredictionHistory[index] = new ClientPredictionFrame(sequence, throttle, brake, steering, keyboardSteering, position(), getDeltaMovement(), getYRot(), yawRate, steeringAngle);
         clientPredictionHistoryCount = Math.min(CLIENT_PREDICTION_HISTORY_SIZE, clientPredictionHistoryCount + 1);
     }
 
@@ -2190,8 +2236,8 @@ public class OpenwheelCarEntity extends Entity {
         this.relaxedRlLatForce = relaxedRlLatForce;
         this.relaxedRrLatForce = relaxedRrLatForce;
         for (ClientPredictionFrame frame : replayFrames) {
-            tickMovement(frame.throttle(), frame.brake(), frame.steering(), false);
-            recordClientPredictionFrame(frame.sequence(), frame.throttle(), frame.brake(), frame.steering());
+            tickMovement(frame.throttle(), frame.brake(), frame.steering(), frame.keyboardSteering(), false);
+            recordClientPredictionFrame(frame.sequence(), frame.throttle(), frame.brake(), frame.steering(), frame.keyboardSteering());
         }
         if (passenger != null) {
             positionRider(passenger);
@@ -2247,7 +2293,7 @@ public class OpenwheelCarEntity extends Entity {
         return wrapped;
     }
 
-    private record ClientPredictionFrame(int sequence, float throttle, float brake, float steering, Vec3 position, Vec3 deltaMovement, float yaw, double yawRate, double steeringAngle) {
+    private record ClientPredictionFrame(int sequence, float throttle, float brake, float steering, boolean keyboardSteering, Vec3 position, Vec3 deltaMovement, float yaw, double yawRate, double steeringAngle) {
     }
 
     private void tickMovement(boolean debugMovement) {
@@ -2261,7 +2307,7 @@ public class OpenwheelCarEntity extends Entity {
             tickPassiveMovement(debugMovement);
             return;
         }
-        tickMovement(throttle, brake, steering, debugMovement);
+        tickMovement(throttle, brake, steering, inputUsesKeyboardSteeringTuning, debugMovement);
     }
 
     private void tickPassiveMovement(boolean debugMovement) {
@@ -2305,7 +2351,7 @@ public class OpenwheelCarEntity extends Entity {
         previousHorizontalSpeed = requestedMovement.horizontalDistance();
     }
 
-    private void tickMovement(double throttle, double brake, double steering, boolean debugMovement) {
+    private void tickMovement(double throttle, double brake, double steering, boolean keyboardSteering, boolean debugMovement) {
 
         VehicleProfile profile = vehicleProfile();
         double carMassKg = profile.massKg();
@@ -2334,32 +2380,38 @@ public class OpenwheelCarEntity extends Entity {
             setDrsActive(false);
         }
 
-        double frontDamage = getFrontEndDamagePercent() / 100.0;
-        double rearDamage = getRearEndDamagePercent() / 100.0;
-        double chassisDamage = getChassisDamagePercent() / 100.0;
-        double flWheelDamage = getFrontLeftWheelDamagePercent() / 100.0;
-        double frWheelDamage = getFrontRightWheelDamagePercent() / 100.0;
-        double rlWheelDamage = getRearLeftWheelDamagePercent() / 100.0;
-        double rrWheelDamage = getRearRightWheelDamagePercent() / 100.0;
-        double damageFactor = 1.0 - chassisDamage * 100.0 / 140.0;
+        double frontDamage = getFrontEndDamagePercent();
+        double rearDamage = getRearEndDamagePercent();
+        double chassisDamage = getChassisDamagePercent();
+        double engineDamage = getEngineDamagePercent();
+        double flWheelDamage = getFrontLeftWheelDamagePercent();
+        double frWheelDamage = getFrontRightWheelDamagePercent();
+        double rlWheelDamage = getRearLeftWheelDamagePercent();
+        double rrWheelDamage = getRearRightWheelDamagePercent();
+        double damageFactor = CarComponentDamage.chassisPowerMultiplier(chassisDamage)
+            * CarComponentDamage.enginePowerMultiplier(engineDamage);
         double flTyreWearFactor = 1.0 - getTyreWearFlPercent() / 180.0;
         double frTyreWearFactor = 1.0 - getTyreWearFrPercent() / 180.0;
         double rlTyreWearFactor = 1.0 - getTyreWearRlPercent() / 180.0;
         double rrTyreWearFactor = 1.0 - getTyreWearRrPercent() / 180.0;
         double averageTyreWear = (getTyreWearFlPercent() + getTyreWearFrPercent() + getTyreWearRlPercent() + getTyreWearRrPercent()) * 0.25;
-        double frontGripDamageFactor = Math.max(0.55, 1.0 - frontDamage * FRONT_DAMAGE_GRIP_LOSS);
-        double rearGripDamageFactor = Math.max(0.58, 1.0 - rearDamage * REAR_DAMAGE_GRIP_LOSS);
-        double flGripDamageFactor = Math.max(0.48, frontGripDamageFactor * (1.0 - flWheelDamage * WHEEL_DAMAGE_GRIP_LOSS));
-        double frGripDamageFactor = Math.max(0.48, frontGripDamageFactor * (1.0 - frWheelDamage * WHEEL_DAMAGE_GRIP_LOSS));
-        double rlGripDamageFactor = Math.max(0.50, rearGripDamageFactor * (1.0 - rlWheelDamage * WHEEL_DAMAGE_GRIP_LOSS));
-        double rrGripDamageFactor = Math.max(0.50, rearGripDamageFactor * (1.0 - rrWheelDamage * WHEEL_DAMAGE_GRIP_LOSS));
-        double flBrakeDamageFactor = Math.max(0.40, 1.0 - flWheelDamage * WHEEL_DAMAGE_BRAKE_LOSS);
-        double frBrakeDamageFactor = Math.max(0.40, 1.0 - frWheelDamage * WHEEL_DAMAGE_BRAKE_LOSS);
-        double rlBrakeDamageFactor = Math.max(0.40, 1.0 - rlWheelDamage * WHEEL_DAMAGE_BRAKE_LOSS);
-        double rrBrakeDamageFactor = Math.max(0.40, 1.0 - rrWheelDamage * WHEEL_DAMAGE_BRAKE_LOSS);
-        double frontAeroDamageFactor = Math.max(0.45, 1.0 - frontDamage * 0.55);
-        double rearAeroDamageFactor = Math.max(0.48, 1.0 - rearDamage * 0.52);
-        double componentDragFactor = 1.0 + WHEEL_DAMAGE_DRAG_PER_PERCENT * 100.0 * (flWheelDamage + frWheelDamage + rlWheelDamage + rrWheelDamage);
+        double frontGripDamageFactor = Math.max(0.55, 1.0 - (frontDamage / 100.0) * FRONT_DAMAGE_GRIP_LOSS);
+        double rearGripDamageFactor = Math.max(0.58, 1.0 - (rearDamage / 100.0) * REAR_DAMAGE_GRIP_LOSS);
+        double flGripDamageFactor = Math.max(0.48, frontGripDamageFactor * CarComponentDamage.wheelGripMultiplier(flWheelDamage));
+        double frGripDamageFactor = Math.max(0.48, frontGripDamageFactor * CarComponentDamage.wheelGripMultiplier(frWheelDamage));
+        double rlGripDamageFactor = Math.max(0.50, rearGripDamageFactor * CarComponentDamage.wheelGripMultiplier(rlWheelDamage));
+        double rrGripDamageFactor = Math.max(0.50, rearGripDamageFactor * CarComponentDamage.wheelGripMultiplier(rrWheelDamage));
+        double flBrakeDamageFactor = Math.max(0.40, CarComponentDamage.wheelGripMultiplier(flWheelDamage));
+        double frBrakeDamageFactor = Math.max(0.40, CarComponentDamage.wheelGripMultiplier(frWheelDamage));
+        double rlBrakeDamageFactor = Math.max(0.40, CarComponentDamage.wheelGripMultiplier(rlWheelDamage));
+        double rrBrakeDamageFactor = Math.max(0.40, CarComponentDamage.wheelGripMultiplier(rrWheelDamage));
+        double frontAeroDamageFactor = Math.max(0.45, CarComponentDamage.frontWingAeroMultiplier(frontDamage));
+        double rearAeroDamageFactor = Math.max(0.48, CarComponentDamage.rearWingAeroMultiplier(rearDamage));
+        double componentDragFactor = CarComponentDamage.chassisDragMultiplier(chassisDamage)
+            + CarComponentDamage.wheelDragPenalty(flWheelDamage)
+            + CarComponentDamage.wheelDragPenalty(frWheelDamage)
+            + CarComponentDamage.wheelDragPenalty(rlWheelDamage)
+            + CarComponentDamage.wheelDragPenalty(rrWheelDamage);
         int gear = clampGear(getGear());
         if (gear != getGear()) {
             entityData.set(GEAR, gear);
@@ -2385,7 +2437,7 @@ public class OpenwheelCarEntity extends Entity {
         boolean clutchReleasing = clutchReleaseTicks > 0 && gear != NEUTRAL_GEAR;
         double estimatedRpm = wheelRpm(horizontalSpeed, gearTopSpeed, profile);
         if (!level().isClientSide() && estimatedRpm > profile.hardLimitRpm()) {
-            addComponentDamage(CarDamageComponent.CHASSIS, ENGINE_OVERLOAD_DAMAGE_PER_TICK);
+            addComponentDamage(CarDamageComponent.ENGINE, ENGINE_OVERLOAD_DAMAGE_PER_TICK * 5.0f);
         }
         int engineRpm = updateEngineRpm(horizontalSpeed, gear, gearTopSpeed, throttle, launchClutch, clutchReleasing);
         double power = combustionPowerWatts(engineRpm) * profile.powerMultiplier() * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
@@ -2395,13 +2447,20 @@ public class OpenwheelCarEntity extends Entity {
         double steerInput = Math.abs(steering) > STEERING_DEADZONE ? steering : 0.0;
         double speedRatio = speedMetersPerSecond / STEERING_SPEED_SCALE;
         double speedSteerT = square(speedRatio) / (1.0 + square(speedRatio));
-        double steeringLockT = Math.pow(speedSteerT, STEERING_HIGH_SPEED_CURVE_POWER);
         double offGripRelief = frontSteeringOffGripRelief;
-        double steeringLock = (lowSpeedSteerAngle + (highSpeedSteerAngle - lowSpeedSteerAngle) * steeringLockT)
+        double speedCurveMultiplier = keyboardSteering ? keyboardSpeedResponseCurve : 1.0;
+        double steeringLockT = Math.pow(speedSteerT, STEERING_HIGH_SPEED_CURVE_POWER * speedCurveMultiplier);
+        double lowLockGain = keyboardSteering ? keyboardLowSpeedSteeringGain : 1.0;
+        double highLockGain = keyboardSteering ? keyboardHighSpeedSteeringGain : 1.0;
+        double steeringLock = (lowSpeedSteerAngle * lowLockGain + (highSpeedSteerAngle * highLockGain - lowSpeedSteerAngle * lowLockGain) * steeringLockT)
             * (1.0 + offGripRelief * STEERING_OFF_GRIP_LOCK_BONUS);
-        double rackRate = (LOW_SPEED_STEERING_RACK_RATE + (HIGH_SPEED_STEERING_RACK_RATE - LOW_SPEED_STEERING_RACK_RATE) * speedSteerT)
+        double lowRackRate = LOW_SPEED_STEERING_RACK_RATE * (keyboardSteering ? keyboardLowSpeedSteeringRate : 1.0);
+        double highRackRate = HIGH_SPEED_STEERING_RACK_RATE * (keyboardSteering ? keyboardHighSpeedSteeringRate : 1.0);
+        double rackRate = (lowRackRate + (highRackRate - lowRackRate) * speedSteerT)
             * (1.0 + offGripRelief * STEERING_OFF_GRIP_RATE_BONUS);
-        double centeringRate = LOW_SPEED_STEERING_CENTERING_RATE + (HIGH_SPEED_STEERING_CENTERING_RATE - LOW_SPEED_STEERING_CENTERING_RATE) * speedSteerT;
+        double lowCenteringRate = LOW_SPEED_STEERING_CENTERING_RATE * (keyboardSteering ? keyboardLowSpeedCenteringRate : 1.0);
+        double highCenteringRate = HIGH_SPEED_STEERING_CENTERING_RATE * (keyboardSteering ? keyboardHighSpeedCenteringRate : 1.0);
+        double centeringRate = lowCenteringRate + (highCenteringRate - lowCenteringRate) * speedSteerT;
         double targetSteeringAngle = steerInput * steeringLock;
         double steeringError = targetSteeringAngle - steeringAngle;
         boolean centering = Math.abs(targetSteeringAngle) < Math.abs(steeringAngle) && Math.signum(targetSteeringAngle) != Math.signum(steeringError);
@@ -2929,7 +2988,7 @@ public class OpenwheelCarEntity extends Entity {
         Vec3 beforeMove = position();
         Vec3 terrainMovement = terrainFollowingMovement(beforeMove, requestedMovement);
         if (terrainMovement != null) {
-            if (componentBoxesIntersectMovement(beforeMove, terrainMovement) || emptyShapeBlockIntersectsMovement(beforeMove, terrainMovement)) {
+            if (emptyShapeBlockIntersectsMovement(beforeMove, terrainMovement)) {
                 return stopHorizontalAtEmptyShapeBlock(beforeMove, requestedMovement);
             }
             setPos(beforeMove.x + terrainMovement.x, beforeMove.y + terrainMovement.y, beforeMove.z + terrainMovement.z);
@@ -2938,7 +2997,7 @@ public class OpenwheelCarEntity extends Entity {
             setOnGround(true);
             return terrainMovement;
         }
-        if (componentBoxesIntersectMovement(beforeMove, requestedMovement) || emptyShapeBlockIntersectsMovement(beforeMove, requestedMovement)) {
+        if (emptyShapeBlockIntersectsMovement(beforeMove, requestedMovement)) {
             return stopHorizontalAtEmptyShapeBlock(beforeMove, requestedMovement);
         }
         move(MoverType.SELF, requestedMovement);
@@ -2952,26 +3011,6 @@ public class OpenwheelCarEntity extends Entity {
         }
         move(MoverType.SELF, new Vec3(0.0, requestedMovement.y, 0.0));
         return position().subtract(beforeMove);
-    }
-
-    private boolean componentBoxesIntersectMovement(Vec3 beforeMove, Vec3 movement) {
-        double horizontalDistance = movement.horizontalDistance();
-        if (horizontalDistance < 1.0E-6) {
-            return false;
-        }
-        int samples = Math.max(1, (int) Math.ceil(horizontalDistance / 0.12));
-        Vec3 baseOffset = beforeMove.subtract(position());
-        for (int sample = 1; sample <= samples; sample++) {
-            double t = sample / (double) samples;
-            Vec3 sampleOffset = baseOffset.add(movement.x * t, movement.y * t, movement.z * t);
-            for (CarComponentDefinition definition : COMPONENT_DEFINITIONS) {
-                AABB componentBox = definition.worldBox(this).move(sampleOffset).inflate(0.01, 0.0, 0.01);
-                if (componentBoxIntersectsBlockingShape(componentBox)) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private boolean emptyShapeBlockIntersectsMovement(Vec3 beforeMove, Vec3 movement) {
@@ -3020,7 +3059,7 @@ public class OpenwheelCarEntity extends Entity {
             return null;
         }
         double step = maxUpStep();
-        AABB currentFootprint = getBoundingBox().move(beforeMove.subtract(position()));
+        AABB currentFootprint = terrainDetectionFootprint(beforeMove);
         double currentFloor = footprintFloorHeight(currentFootprint, currentFootprint.minY - step - 0.15, currentFootprint.minY + 0.15);
         if (Double.isNaN(currentFloor)) {
             return null;
@@ -3052,6 +3091,17 @@ public class OpenwheelCarEntity extends Entity {
         }
         lastTerrainPositionCorrectionY = -snapCorrection;
         return new Vec3(requestedMovement.x, requestedMovement.y + dyTotal, requestedMovement.z);
+    }
+
+    private AABB terrainDetectionFootprint(Vec3 worldPosition) {
+        Vec3 forward = Vec3.directionFromRotation(0.0f, getYRot());
+        Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
+        double halfX = Math.abs(right.x) * COMPONENT_BODY_HALF_WIDTH + Math.abs(forward.x) * COMPONENT_BODY_HALF_LENGTH;
+        double halfZ = Math.abs(right.z) * COMPONENT_BODY_HALF_WIDTH + Math.abs(forward.z) * COMPONENT_BODY_HALF_LENGTH;
+        AABB base = getBoundingBox().move(worldPosition.subtract(position()));
+        double centerY = (base.minY + base.maxY) * 0.5;
+        return new AABB(worldPosition.x - halfX, centerY - base.getYsize() * 0.5, worldPosition.z - halfZ,
+            worldPosition.x + halfX, centerY + base.getYsize() * 0.5, worldPosition.z + halfZ);
     }
 
     private boolean hasBlockingShapeAbove(AABB currentFootprint, Vec3 requestedMovement, double targetFloor) {
@@ -3181,12 +3231,10 @@ public class OpenwheelCarEntity extends Entity {
             }
 
             Entity passenger = getControllingPassenger();
-            if (passenger instanceof Player player) {
+            if (component == CarDamageComponent.CHASSIS && passenger instanceof Player player) {
                 player.hurt(damageSources().flyIntoWall(), Math.max(1.0f, severity * 0.35f));
             }
-            if (getDamagePercent() >= 100.0f && level() instanceof ServerLevel serverLevel) {
-                destroyIntoMaterials(serverLevel);
-            }
+            destroyIfChassisFailed();
         }
     }
 
@@ -3243,8 +3291,8 @@ public class OpenwheelCarEntity extends Entity {
             }
 
             applyEntityImpactResponse(target, normal, resolvedSpeed, carTarget);
-            if (getDamagePercent() >= 100.0f) {
-                destroyIntoMaterials(serverLevel);
+            destroyIfChassisFailed();
+            if (isRemoved()) {
                 return;
             }
         }
@@ -3303,6 +3351,23 @@ public class OpenwheelCarEntity extends Entity {
         double targetPush = Math.min(carTarget ? 0.45 : 0.80, impactSpeed * (carTarget ? 0.65 : 1.15));
         Vec3 targetVelocity = target.getDeltaMovement();
         target.setDeltaMovement(targetVelocity.add(normal.x * targetPush, carTarget ? 0.0 : 0.08, normal.z * targetPush));
+    }
+
+    private void tickEngineDamageEffects() {
+        float damage = getEngineDamagePercent();
+        if (damage < 55.0f || !(level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        Vec3 forward = Vec3.directionFromRotation(0.0f, getYRot());
+        double x = getX() - forward.x * 1.05;
+        double z = getZ() - forward.z * 1.05;
+        if (tickCount % (damage >= 95.0f ? 3 : damage >= 70.0f ? 6 : 10) == 0) {
+            int count = damage >= 70.0f ? 6 : 3;
+            serverLevel.sendParticles(ParticleTypes.SMOKE, x, getY() + 0.45, z, count, 0.22, 0.18, 0.22, 0.025);
+        }
+        if (damage >= 85.0f && tickCount % (damage >= 95.0f ? 6 : 12) == 0) {
+            serverLevel.sendParticles(ParticleTypes.FLAME, x, getY() + 0.35, z, damage >= 95.0f ? 3 : 1, 0.16, 0.12, 0.16, 0.01);
+        }
     }
 
     private void tickWarnings() {
@@ -3576,7 +3641,7 @@ public class OpenwheelCarEntity extends Entity {
                 case ERS_MODE_BALANCED -> interpolatePowerWatts(speedKmh, balancedClipStartKmh, balancedClipEndKmh, getErsBalancedStartPowerKw(), getErsBalancedEndPowerKw());
                 default -> 0.0;
             };
-            requestedPower *= throttle;
+            requestedPower *= throttle * CarComponentDamage.engineErsEfficiencyMultiplier(getEngineDamagePercent());
             powerWatts = Math.min(requestedPower, storedEnergy / Math.max(1.0E-6, dt));
             if (powerWatts > 0.0) {
                 storedEnergy -= powerWatts * dt;
@@ -3601,8 +3666,9 @@ public class OpenwheelCarEntity extends Entity {
         return powerWatts < 0.0 ? ERS_ACTIVITY_NEGATIVE : ERS_ACTIVITY_NEUTRAL;
     }
 
-    private static double applyErsPowerToEnergy(double storedEnergy, double capacityJoules, double powerWatts, double dt) {
-        return Math.min(capacityJoules, storedEnergy + Math.max(0.0, -powerWatts) * dt * ERS_RECOVERY_EFFICIENCY);
+    private double applyErsPowerToEnergy(double storedEnergy, double capacityJoules, double powerWatts, double dt) {
+        double efficiency = CarComponentDamage.engineErsEfficiencyMultiplier(getEngineDamagePercent());
+        return Math.min(capacityJoules, storedEnergy + Math.max(0.0, -powerWatts) * dt * ERS_RECOVERY_EFFICIENCY * efficiency);
     }
 
     private void reconcilePowerLimitedErsEnergy(double requestedIceEnergyJoules, double requestedPositiveErsEnergyJoules, double requestedNegativeErsEnergyJoules, double actualPositiveDriveEnergyJoules, double dt) {
@@ -3920,17 +3986,72 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private void addComponentDamage(CarDamageComponent component, float amount) {
-        if (!takesDamage()) {
+        if (!takesDamage() || level().isClientSide()) {
             return;
         }
         float scaled = amount * raceControlDamageModifier() * componentDamageScale(component);
         if (scaled <= 0.0f) {
             return;
         }
-        setComponentDamage(component, componentDamage(component) + scaled);
-        if (component != CarDamageComponent.CHASSIS) {
-            setComponentDamage(CarDamageComponent.CHASSIS, componentDamage(CarDamageComponent.CHASSIS) + scaled * (float) COMPONENT_DAMAGE_STRUCTURAL_SHARE);
+        if (!componentCanAbsorbDamage(component)) {
+            component = fallbackDamageComponent(component);
+            if (component == null) {
+                return;
+            }
         }
+        float before = componentDamage(component);
+        float applied = Math.min(scaled, 100.0f - before);
+        if (applied <= 0.0f) {
+            return;
+        }
+        setComponentDamage(component, before + applied);
+        if (component == CarDamageComponent.CHASSIS) {
+            if (!isComponentDestroyed(CarDamageComponent.ENGINE)) {
+                float transfer = applied * (float) CarComponentDamage.chassisToEngineTransferFraction(before);
+                setComponentDamage(CarDamageComponent.ENGINE, componentDamage(CarDamageComponent.ENGINE) + transfer);
+            }
+            if (componentDamage(CarDamageComponent.CHASSIS) >= 100.0f) {
+                destroyIfChassisFailed();
+            }
+        } else {
+            addStructuralDamage(applied);
+        }
+    }
+
+    private void addStructuralDamage(float applied) {
+        if (!componentCanAbsorbDamage(CarDamageComponent.CHASSIS)) {
+            return;
+        }
+        setComponentDamage(CarDamageComponent.CHASSIS, componentDamage(CarDamageComponent.CHASSIS) + applied * (float) COMPONENT_DAMAGE_STRUCTURAL_SHARE);
+        if (componentDamage(CarDamageComponent.CHASSIS) >= 100.0f) {
+            destroyIfChassisFailed();
+        }
+    }
+
+    private boolean componentCanAbsorbDamage(CarDamageComponent component) {
+        return componentDamage(component) < 100.0f;
+    }
+
+    private boolean isComponentDestroyed(CarDamageComponent component) {
+        return componentDamage(component) >= 100.0f;
+    }
+
+    private CarDamageComponent fallbackDamageComponent(CarDamageComponent requested) {
+        if (requested != CarDamageComponent.CHASSIS && componentCanAbsorbDamage(CarDamageComponent.CHASSIS)) {
+            return CarDamageComponent.CHASSIS;
+        }
+        if (requested != CarDamageComponent.ENGINE && componentCanAbsorbDamage(CarDamageComponent.ENGINE)) {
+            return CarDamageComponent.ENGINE;
+        }
+        return null;
+    }
+
+    private void destroyIfChassisFailed() {
+        if (destructionTriggered || componentDamage(CarDamageComponent.CHASSIS) < 100.0f || !(level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        destructionTriggered = true;
+        destroyIntoMaterials(serverLevel);
     }
 
     private static float componentDamageScale(CarDamageComponent component) {
@@ -3942,6 +4063,7 @@ public class OpenwheelCarEntity extends Entity {
             case FRONT_END -> FRONT_END_ENDURANCE_POINTS;
             case REAR_END -> REAR_END_ENDURANCE_POINTS;
             case CHASSIS -> CHASSIS_ENDURANCE_POINTS;
+            case ENGINE -> ENGINE_ENDURANCE_POINTS;
             case FRONT_LEFT_WHEEL, FRONT_RIGHT_WHEEL, REAR_LEFT_WHEEL, REAR_RIGHT_WHEEL -> SUSPENSION_ENDURANCE_POINTS;
         };
     }
@@ -3967,6 +4089,7 @@ public class OpenwheelCarEntity extends Entity {
             case FRONT_END -> entityData.set(DAMAGE_FRONT_END, normalizeDamagePercent(damage));
             case REAR_END -> entityData.set(DAMAGE_REAR_END, normalizeDamagePercent(damage));
             case CHASSIS -> entityData.set(DAMAGE_CHASSIS, normalizeDamagePercent(damage));
+            case ENGINE -> entityData.set(DAMAGE_ENGINE, normalizeDamagePercent(damage));
             case FRONT_LEFT_WHEEL -> entityData.set(DAMAGE_WHEEL_FL, normalizeDamagePercent(damage));
             case FRONT_RIGHT_WHEEL -> entityData.set(DAMAGE_WHEEL_FR, normalizeDamagePercent(damage));
             case REAR_LEFT_WHEEL -> entityData.set(DAMAGE_WHEEL_RL, normalizeDamagePercent(damage));
@@ -3980,6 +4103,7 @@ public class OpenwheelCarEntity extends Entity {
             case FRONT_END -> getFrontEndDamagePercent();
             case REAR_END -> getRearEndDamagePercent();
             case CHASSIS -> getChassisDamagePercent();
+            case ENGINE -> getEngineDamagePercent();
             case FRONT_LEFT_WHEEL -> getFrontLeftWheelDamagePercent();
             case FRONT_RIGHT_WHEEL -> getFrontRightWheelDamagePercent();
             case REAR_LEFT_WHEEL -> getRearLeftWheelDamagePercent();
@@ -4023,41 +4147,7 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private CarDamageComponent classifyBlockImpactComponent(Vec3 impactDirection, Vec3 movement) {
-        CarDamageComponent component = componentHitByBlockingShape(movement);
-        return component == null ? classifyImpactComponent(impactDirection, movement) : component;
-    }
-
-    private CarDamageComponent componentHitByBlockingShape(Vec3 movement) {
-        double horizontalDistance = movement.horizontalDistance();
-        if (horizontalDistance < 1.0E-6) {
-            return null;
-        }
-        int samples = Math.max(1, (int) Math.ceil(horizontalDistance / 0.20));
-        for (int sample = samples; sample >= 1; sample--) {
-            Vec3 sampleOffset = new Vec3(movement.x * sample / (double) samples, 0.0, movement.z * sample / (double) samples);
-            CarDamageComponent component = componentHitByBlockingShapeAt(sampleOffset);
-            if (component != null) {
-                return component;
-            }
-        }
-        return null;
-    }
-
-    private CarDamageComponent componentHitByBlockingShapeAt(Vec3 offset) {
-        CarDamageComponent best = null;
-        double bestScore = Double.MAX_VALUE;
-        for (CarComponentDefinition definition : COMPONENT_DEFINITIONS) {
-            AABB box = definition.worldBox(this).move(offset).inflate(0.015, 0.0, 0.015);
-            if (!componentBoxIntersectsBlockingShape(box)) {
-                continue;
-            }
-            double score = componentPriority(definition.component);
-            if (score < bestScore) {
-                bestScore = score;
-                best = definition.component;
-            }
-        }
-        return best;
+        return classifyImpactComponent(impactDirection, movement);
     }
 
     private boolean componentBoxIntersectsBlockingShape(AABB box) {
@@ -4086,11 +4176,21 @@ public class OpenwheelCarEntity extends Entity {
         return false;
     }
 
+    private CarComponentDefinition[] damageableComponentDefinitions() {
+        java.util.ArrayList<CarComponentDefinition> definitions = new java.util.ArrayList<>();
+        for (CarComponentDefinition definition : COMPONENT_DEFINITIONS_WITH_ENGINE) {
+            if (componentCanAbsorbDamage(definition.component)) {
+                definitions.add(definition);
+            }
+        }
+        return definitions.toArray(CarComponentDefinition[]::new);
+    }
+
     private CarDamageComponent componentHitByBox(AABB worldBox) {
         CarDamageComponent best = null;
         double bestScore = Double.MAX_VALUE;
-        for (CarComponentDefinition definition : COMPONENT_DEFINITIONS) {
-            if (!definition.worldBox(this).intersects(worldBox)) {
+        for (CarComponentDefinition definition : damageableComponentDefinitions()) {
+            if (!componentCanAbsorbDamage(definition.component) || !definition.worldBox(this).intersects(worldBox)) {
                 continue;
             }
             double score = componentPriority(definition.component);
@@ -4107,6 +4207,7 @@ public class OpenwheelCarEntity extends Entity {
             case FRONT_END, REAR_END -> 0.0;
             case FRONT_LEFT_WHEEL, FRONT_RIGHT_WHEEL, REAR_LEFT_WHEEL, REAR_RIGHT_WHEEL -> 0.25;
             case CHASSIS -> 1.0;
+            case ENGINE -> 2.0;
         };
     }
 

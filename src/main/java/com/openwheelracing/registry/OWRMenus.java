@@ -3,6 +3,7 @@ package com.openwheelracing.registry;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.block.entity.RaceMonitorType;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
+import com.openwheelracing.content.menu.CarPartsReplacementMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.menu.RefineryMenu;
 import net.minecraft.core.registries.Registries;
@@ -17,6 +18,10 @@ public final class OWRMenus {
 
     public static final DeferredHolder<MenuType<?>, MenuType<CarAssemblyMenu>> CAR_ASSEMBLY = MENUS.register("car_assembly",
         () -> IMenuTypeExtension.create(CarAssemblyMenu::new)
+    );
+
+    public static final DeferredHolder<MenuType<?>, MenuType<CarPartsReplacementMenu>> CAR_PARTS_REPLACEMENT = MENUS.register("car_parts_replacement",
+        () -> IMenuTypeExtension.create(CarPartsReplacementMenu::new)
     );
 
     public static final DeferredHolder<MenuType<?>, MenuType<RefineryMenu>> REFINERY = MENUS.register("refinery",

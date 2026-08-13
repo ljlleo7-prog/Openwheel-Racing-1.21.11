@@ -2,6 +2,7 @@ package com.openwheelracing.registry;
 
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.block.CarAssemblyWorkstationBlock;
+import com.openwheelracing.content.block.CarPartsReplacementWorkstationBlock;
 import com.openwheelracing.content.block.CrudeOilBlock;
 import com.openwheelracing.content.block.DirectionalTrackBlock;
 import com.openwheelracing.content.block.LapMarkerBlock;
@@ -30,6 +31,13 @@ public final class OWRBlocks {
     public static final DeferredHolder<Block, Block> CAR_CONSTRUCTION_STATION = registerCarStation("car_construction_station", CarWorkstationType.CONSTRUCTION);
     public static final DeferredHolder<Block, Block> CAR_SETUP_STATION = registerCarStation("car_setup_station", CarWorkstationType.SETUP);
     public static final DeferredHolder<Block, Block> CAR_LIVERY_STATION = registerCarStation("car_livery_station", CarWorkstationType.LIVERY);
+    public static final DeferredHolder<Block, Block> CAR_PARTS_REPLACEMENT_STATION = BLOCKS.register("car_parts_replacement_station",
+        () -> new CarPartsReplacementWorkstationBlock(BlockBehaviour.Properties.of()
+            .setId(key("car_parts_replacement_station"))
+            .mapColor(MapColor.METAL)
+            .strength(3.5f, 6.0f)
+            .requiresCorrectToolForDrops())
+    );
 
     public static final DeferredHolder<Block, Block> REFINERY = BLOCKS.register("refinery",
         () -> new RefineryBlock(BlockBehaviour.Properties.of()
@@ -66,6 +74,7 @@ public final class OWRBlocks {
     public static final DeferredHolder<Item, Item> CAR_CONSTRUCTION_STATION_ITEM = registerBlockItem("car_construction_station", CAR_CONSTRUCTION_STATION);
     public static final DeferredHolder<Item, Item> CAR_SETUP_STATION_ITEM = registerBlockItem("car_setup_station", CAR_SETUP_STATION);
     public static final DeferredHolder<Item, Item> CAR_LIVERY_STATION_ITEM = registerBlockItem("car_livery_station", CAR_LIVERY_STATION);
+    public static final DeferredHolder<Item, Item> CAR_PARTS_REPLACEMENT_STATION_ITEM = registerBlockItem("car_parts_replacement_station", CAR_PARTS_REPLACEMENT_STATION);
     public static final DeferredHolder<Item, Item> REFINERY_ITEM = registerBlockItem("refinery", REFINERY);
     public static final DeferredHolder<Item, Item> RACE_DIRECTOR_ITEM = registerBlockItem("race_director", RACE_DIRECTOR);
     public static final DeferredHolder<Item, Item> RACE_BOARD_TERMINAL_ITEM = registerBlockItem("race_board_terminal", RACE_BOARD_TERMINAL);

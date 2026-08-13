@@ -24,6 +24,7 @@ public final class OWRCreativeTabs {
             output.accept(OWRBlocks.CAR_CONSTRUCTION_STATION_ITEM.get());
             output.accept(OWRBlocks.CAR_SETUP_STATION_ITEM.get());
             output.accept(OWRBlocks.CAR_LIVERY_STATION_ITEM.get());
+            output.accept(OWRBlocks.CAR_PARTS_REPLACEMENT_STATION_ITEM.get());
             output.accept(OWRBlocks.REFINERY_ITEM.get());
             output.accept(OWRBlocks.RACE_DIRECTOR_ITEM.get());
             output.accept(OWRBlocks.RACE_BOARD_TERMINAL_ITEM.get());
@@ -53,6 +54,8 @@ public final class OWRCreativeTabs {
                 output.accept(TyreItem.create(compound));
             }
             output.accept(OWRItems.AERO_KIT.get());
+            output.accept(OWRItems.FRONT_WING.get());
+            output.accept(OWRItems.REAR_WING.get());
             output.accept(OWRItems.GEARBOX.get());
             output.accept(OWRItems.STEERING_CONTROLS.get());
             for (int livery = 0; livery < CarLivery.count(); livery++) {

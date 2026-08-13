@@ -1,0 +1,6 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [" CC", "CCC", " CC"],
+  "key": { "C": "openwheelracing:carbon_fiber" },
+  "result": { "id": "openwheelracing:front_wing", "count": 1 }
+}

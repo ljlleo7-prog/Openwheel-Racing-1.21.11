@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["IPI", "ACA", "III"],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "P": "openwheelracing:racing_electronics",
+    "A": "openwheelracing:aero_kit",
+    "C": "minecraft:crafting_table"
+  },
+  "result": { "id": "openwheelracing:car_parts_replacement_station", "count": 1 }
+}

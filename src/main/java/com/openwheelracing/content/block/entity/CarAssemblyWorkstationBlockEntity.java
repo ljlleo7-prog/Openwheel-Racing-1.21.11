@@ -268,23 +268,11 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
         ItemStack stack = getItem(SLOT_OUTPUT);
         switch (pendingOperation) {
             case OPERATION_SETUP -> applySetupTune(stack);
-            case OPERATION_REPAIR -> PrototypeCarItem.setComponentDamage(stack, repairComponentDamage(PrototypeCarItem.getComponentDamage(stack), 25));
+            case OPERATION_REPAIR -> PrototypeCarItem.setComponentDamage(stack, PrototypeCarItem.getComponentDamage(stack).repairAll(25));
             case OPERATION_LIVERY -> applyLiveryOperation(stack);
             default -> {
             }
         }
-    }
-
-    private static CarComponentDamage repairComponentDamage(CarComponentDamage damage, int amount) {
-        return new CarComponentDamage(
-            Math.max(0, damage.frontEnd() - amount),
-            Math.max(0, damage.rearEnd() - amount),
-            Math.max(0, damage.chassis() - amount),
-            Math.max(0, damage.frontLeftWheel() - amount),
-            Math.max(0, damage.frontRightWheel() - amount),
-            Math.max(0, damage.rearLeftWheel() - amount),
-            Math.max(0, damage.rearRightWheel() - amount)
-        );
     }
 
     private void applySetupTune(ItemStack stack) {

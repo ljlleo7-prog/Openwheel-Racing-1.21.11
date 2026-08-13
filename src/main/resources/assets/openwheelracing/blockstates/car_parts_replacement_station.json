@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "facing=north,lit=false": { "model": "openwheelracing:block/car_parts_replacement_station" },
+    "facing=north,lit=true": { "model": "openwheelracing:block/car_parts_replacement_station_lit" },
+    "facing=east,lit=false": { "model": "openwheelracing:block/car_parts_replacement_station", "y": 90 },
+    "facing=east,lit=true": { "model": "openwheelracing:block/car_parts_replacement_station_lit", "y": 90 },
+    "facing=south,lit=false": { "model": "openwheelracing:block/car_parts_replacement_station", "y": 180 },
+    "facing=south,lit=true": { "model": "openwheelracing:block/car_parts_replacement_station_lit", "y": 180 },
+    "facing=west,lit=false": { "model": "openwheelracing:block/car_parts_replacement_station", "y": 270 },
+    "facing=west,lit=true": { "model": "openwheelracing:block/car_parts_replacement_station_lit", "y": 270 }
+  }
+}

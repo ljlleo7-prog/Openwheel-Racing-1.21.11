@@ -5,6 +5,7 @@ import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.ServerLiveryTextures;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
+import com.openwheelracing.content.menu.CarPartsReplacementMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.OWRRaceControlState;
@@ -45,7 +46,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "8";
+    private static final String PROTOCOL = "10";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -59,6 +60,7 @@ public final class OWRNetwork {
         PayloadRegistrar registrar = event.registrar(PROTOCOL);
         registrar.playToServer(TuneCarMessage.TYPE, codec(TuneCarMessage::encode, TuneCarMessage::decode), TuneCarMessage::handle);
         registrar.playToServer(RepairCarMessage.TYPE, codec(RepairCarMessage::encode, RepairCarMessage::decode), RepairCarMessage::handle);
+        registrar.playToServer(StartPartReplacementMessage.TYPE, codec(StartPartReplacementMessage::encode, StartPartReplacementMessage::decode), StartPartReplacementMessage::handle);
         registrar.playToServer(CycleLiveryMessage.TYPE, codec(CycleLiveryMessage::encode, CycleLiveryMessage::decode), CycleLiveryMessage::handle);
         registrar.playToServer(SetLiveryColorMessage.TYPE, codec(SetLiveryColorMessage::encode, SetLiveryColorMessage::decode), SetLiveryColorMessage::handle);
         registrar.playToServer(UploadLiveryTextureMessage.TYPE, codec(UploadLiveryTextureMessage::encode, UploadLiveryTextureMessage::decode), UploadLiveryTextureMessage::handle);
@@ -260,6 +262,34 @@ public final class OWRNetwork {
         }
     }
 
+    public record StartPartReplacementMessage() implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<StartPartReplacementMessage> TYPE = payloadType("start_part_replacement_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(StartPartReplacementMessage message, FriendlyByteBuf buffer) {
+        }
+
+        private static StartPartReplacementMessage decode(FriendlyByteBuf buffer) {
+            return new StartPartReplacementMessage();
+        }
+
+        private static void handle(StartPartReplacementMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof CarPartsReplacementMenu menu)) {
+                    return;
+                }
+                if (menu.queueReplacement()) {
+                    menu.slotsChanged(menu.getContainer());
+                }
+            });
+        }
+    }
+
     public record CycleLiveryMessage(int delta) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<CycleLiveryMessage> TYPE = payloadType("cycle_livery_message");
 
@@ -442,7 +472,9 @@ public final class OWRNetwork {
         }
     }
 
-    public record DriveInputMessage(int sequence, float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering) implements CustomPacketPayload {
+    public record DriveInputMessage(int sequence, float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering,
+            float lowSpeedSteeringRate, float highSpeedSteeringRate, float lowSpeedCenteringRate, float highSpeedCenteringRate,
+            float lowSpeedSteeringGain, float highSpeedSteeringGain, float speedResponseCurve, boolean keyboardSteeringSource) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<DriveInputMessage> TYPE = payloadType("drive_input_message");
 
         @Override
@@ -458,10 +490,19 @@ public final class OWRNetwork {
             buffer.writeFloat(message.wheelThrottle);
             buffer.writeFloat(message.wheelBrake);
             buffer.writeFloat(message.wheelSteering);
+            buffer.writeFloat(message.lowSpeedSteeringRate);
+            buffer.writeFloat(message.highSpeedSteeringRate);
+            buffer.writeFloat(message.lowSpeedCenteringRate);
+            buffer.writeFloat(message.highSpeedCenteringRate);
+            buffer.writeFloat(message.lowSpeedSteeringGain);
+            buffer.writeFloat(message.highSpeedSteeringGain);
+            buffer.writeFloat(message.speedResponseCurve);
+            buffer.writeBoolean(message.keyboardSteeringSource);
         }
 
         private static DriveInputMessage decode(FriendlyByteBuf buffer) {
-            return new DriveInputMessage(buffer.readVarInt(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
+            return new DriveInputMessage(buffer.readVarInt(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
+                buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readBoolean());
         }
 
         private static void handle(DriveInputMessage message, IPayloadContext context) {
@@ -476,7 +517,8 @@ public final class OWRNetwork {
                 float throttle = keyboardThrottle;
                 float brake = keyboardBrake;
                 float steering = keyboardSteering;
-                if (OWRRaceControlState.get(player.level()).isWheelInputAllowed()) {
+                boolean wheelAllowed = OWRRaceControlState.get(player.level()).isWheelInputAllowed();
+                if (wheelAllowed) {
                     float wheelThrottle = sanitizePedal(message.wheelThrottle);
                     float wheelBrake = sanitizePedal(message.wheelBrake);
                     float wheelSteering = sanitizeSteering(message.wheelSteering);
@@ -486,7 +528,9 @@ public final class OWRNetwork {
                         steering = wheelSteering;
                     }
                 }
-                car.applyDriveInput(message.sequence, throttle, brake, steering);
+                car.applyDriveInput(message.sequence, throttle, brake, steering, wheelAllowed ? message.keyboardSteeringSource : true);
+                car.setKeyboardSteeringTuning(message.lowSpeedSteeringRate, message.highSpeedSteeringRate, message.lowSpeedCenteringRate, message.highSpeedCenteringRate,
+                    message.lowSpeedSteeringGain, message.highSpeedSteeringGain, message.speedResponseCurve);
             });
         }
     }

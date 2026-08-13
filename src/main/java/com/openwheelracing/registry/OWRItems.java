@@ -35,6 +35,8 @@ public final class OWRItems {
         () -> new TyreItem(new Item.Properties().setId(key("tires")))
     );
     public static final DeferredHolder<Item, Item> AERO_KIT = registerSimple("aero_kit");
+    public static final DeferredHolder<Item, Item> FRONT_WING = registerSimple("front_wing");
+    public static final DeferredHolder<Item, Item> REAR_WING = registerSimple("rear_wing");
     public static final DeferredHolder<Item, Item> GEARBOX = registerSimple("gearbox");
     public static final DeferredHolder<Item, Item> STEERING_CONTROLS = registerSimple("steering_controls");
     public static final DeferredHolder<Item, Item> PROTOTYPE_CAR_SPAWN = ITEMS.register("prototype_car_spawn",

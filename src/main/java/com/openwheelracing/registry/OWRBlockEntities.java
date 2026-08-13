@@ -2,6 +2,7 @@ package com.openwheelracing.registry;
 
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.block.entity.CarAssemblyWorkstationBlockEntity;
+import com.openwheelracing.content.block.entity.CarPartsReplacementWorkstationBlockEntity;
 import com.openwheelracing.content.block.entity.CarWorkstationType;
 import com.openwheelracing.content.block.entity.RaceDirectorBlockEntity;
 import com.openwheelracing.content.block.entity.RaceMonitorType;
@@ -31,6 +32,10 @@ public final class OWRBlockEntities {
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<CarAssemblyWorkstationBlockEntity>> CAR_LIVERY_STATION = BLOCK_ENTITIES.register("car_livery_station",
         () -> new BlockEntityType<>((pos, state) -> new CarAssemblyWorkstationBlockEntity(pos, state, CarWorkstationType.LIVERY), Set.of(OWRBlocks.CAR_LIVERY_STATION.get()))
+    );
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<CarPartsReplacementWorkstationBlockEntity>> CAR_PARTS_REPLACEMENT_STATION = BLOCK_ENTITIES.register("car_parts_replacement_station",
+        () -> new BlockEntityType<>(CarPartsReplacementWorkstationBlockEntity::new, Set.of(OWRBlocks.CAR_PARTS_REPLACEMENT_STATION.get()))
     );
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<RefineryBlockEntity>> REFINERY = BLOCK_ENTITIES.register("refinery",

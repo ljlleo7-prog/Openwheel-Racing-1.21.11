@@ -20,7 +20,7 @@ import org.lwjgl.glfw.GLFW;
 
 public class OpenwheelSetupScreen extends Screen {
     private static final int PANEL_WIDTH = 380;
-    private static final int CONTENT_HEIGHT = 792;
+    private static final int CONTENT_HEIGHT = 816;
     private static final int GRAPH_WIDTH = 156;
     private static final int GRAPH_HEIGHT = 74;
     private static final int GRAPH_TEMP_MIN = 50;
@@ -84,18 +84,21 @@ public class OpenwheelSetupScreen extends Screen {
         addRenderableWidget(new BatterySlider(left, ersY + 364, PANEL_WIDTH - 32, 20));
 
         int controlsY = y + 702;
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.wheel_setup"), button -> Minecraft.getInstance().setScreen(new WheelSetupScreen(this)))
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.keyboard_setup"), button -> Minecraft.getInstance().setScreen(new KeyboardSetupScreen(this)))
             .bounds(left, controlsY + 24, PANEL_WIDTH - 32, 20)
             .build());
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.keybind_setup"), button -> Minecraft.getInstance().setScreen(new KeyBindsScreen(this, Minecraft.getInstance().options)))
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.wheel_setup"), button -> Minecraft.getInstance().setScreen(new WheelSetupScreen(this)))
             .bounds(left, controlsY + 48, PANEL_WIDTH - 32, 20)
+            .build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.keybind_setup"), button -> Minecraft.getInstance().setScreen(new KeyBindsScreen(this, Minecraft.getInstance().options)))
+            .bounds(left, controlsY + 72, PANEL_WIDTH - 32, 20)
             .build());
 
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.done"), button -> saveAndClose())
-            .bounds(x + 106, y + 764, 76, 20)
+            .bounds(x + 106, y + 788, 76, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.cancel"), button -> closeToParent())
-            .bounds(x + 198, y + 764, 76, 20)
+            .bounds(x + 198, y + 788, 76, 20)
             .build());
         updateWidgetVisibility();
     }
@@ -118,7 +121,7 @@ public class OpenwheelSetupScreen extends Screen {
         fillPanel(graphics, x + 6, y + 22, y + 124, 0xFF2A3038);
         fillPanel(graphics, x + 6, y + 140, y + 478, 0xFF293443);
         fillPanel(graphics, x + 6, y + 494, y + 672, 0xFF242D38);
-        fillPanel(graphics, x + 6, y + 688, y + 752, 0xFF2F3640);
+        fillPanel(graphics, x + 6, y + 688, y + 776, 0xFF2F3640);
         drawIfVisible(graphics, title, x + 10, y + 8, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.visual"), x + 12, y + 24, 0xFFC9D1D9);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.shift_lights"), x + 24, y + 82, 0xFFE8EDF2);

@@ -16,6 +16,7 @@ public final class OWRClientInputHandler {
     private static final boolean[] onboardNumberWasDown = new boolean[9];
     private static boolean sentIdleDriveInput;
     private static int driveInputSequence;
+    private static boolean keyboardSteeringSource = true;
     private static int lastSyncedCarId = Integer.MIN_VALUE;
     private static int sentBalancedClipStart = Integer.MIN_VALUE;
     private static int sentBalancedClipEnd = Integer.MIN_VALUE;
@@ -63,23 +64,31 @@ public final class OWRClientInputHandler {
 
         if (!(mc.player.getVehicle() instanceof OpenwheelCarEntity)) {
             lastSyncedCarId = Integer.MIN_VALUE;
+            keyboardSteeringSource = true;
             return;
         }
 
         OpenwheelCarEntity car = (OpenwheelCarEntity) mc.player.getVehicle();
-        syncErsThresholdsIfNeeded(WheelInputSettings.get(), car);
-        float keyboardThrottle = isDown(OWRKeyMappings.THROTTLE)    ? 1.0f : 0.0f;
-        float keyboardBrake    = isDown(OWRKeyMappings.BRAKE)        ? 1.0f : 0.0f;
+        WheelInputSettings settings = WheelInputSettings.get();
+        syncErsThresholdsIfNeeded(settings, car);
+        KeyboardInputSettings keyboard = settings.keyboard.sanitized();
+        car.setKeyboardSteeringTuning(keyboard.lowSpeedSteeringRate, keyboard.highSpeedSteeringRate, keyboard.lowSpeedCenteringRate, keyboard.highSpeedCenteringRate,
+            keyboard.lowSpeedSteeringGain, keyboard.highSpeedSteeringGain, keyboard.speedResponseCurve);
+        float keyboardThrottle = isDown(OWRKeyMappings.THROTTLE) ? 1.0f : 0.0f;
+        float keyboardBrake = isDown(OWRKeyMappings.BRAKE) ? 1.0f : 0.0f;
         float keyboardSteering = (isDown(OWRKeyMappings.STEER_RIGHT) ? 1.0f : 0.0f)
-                              - (isDown(OWRKeyMappings.STEER_LEFT)  ? 1.0f : 0.0f);
+            - (isDown(OWRKeyMappings.STEER_LEFT) ? 1.0f : 0.0f);
         float throttle = Math.max(keyboardThrottle, wheel.throttle());
         float brake = Math.max(keyboardBrake, wheel.brake());
         float steering = keyboardSteering;
         if (Math.abs(wheel.steering()) > 0.0f) {
             steering = wheel.steering();
+            keyboardSteeringSource = false;
+        } else if (keyboardSteering != 0.0f) {
+            keyboardSteeringSource = true;
         }
-        car.tickLocalClientMovement(driveInputSequence + 1, throttle, brake, steering);
-        sendDriveInputIfNeeded(keyboardThrottle, keyboardBrake, keyboardSteering, wheel.throttle(), wheel.brake(), wheel.steering());
+        car.tickLocalClientMovement(driveInputSequence + 1, throttle, brake, steering, keyboardSteeringSource);
+        sendDriveInputIfNeeded(keyboardThrottle, keyboardBrake, keyboardSteering, wheel.throttle(), wheel.brake(), wheel.steering(), keyboard, keyboardSteeringSource);
 
         boolean shiftUpDown = isDown(OWRKeyMappings.SHIFT_UP) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_UP);
         boolean shiftDownDown = isDown(OWRKeyMappings.SHIFT_DOWN) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_DOWN);
@@ -269,13 +278,16 @@ public final class OWRClientInputHandler {
         ));
     }
 
-    private static void sendDriveInputIfNeeded(float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering) {
+    private static void sendDriveInputIfNeeded(float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering,
+            KeyboardInputSettings keyboard, boolean keyboardSteeringSource) {
         boolean idle = keyboardThrottle == 0.0f && keyboardBrake == 0.0f && keyboardSteering == 0.0f && wheelThrottle == 0.0f && wheelBrake == 0.0f && wheelSteering == 0.0f;
         if (idle && sentIdleDriveInput) {
             return;
         }
         sentIdleDriveInput = idle;
-        OWRNetwork.sendToServer(new OWRNetwork.DriveInputMessage(++driveInputSequence, keyboardThrottle, keyboardBrake, keyboardSteering, wheelThrottle, wheelBrake, wheelSteering));
+        OWRNetwork.sendToServer(new OWRNetwork.DriveInputMessage(++driveInputSequence, keyboardThrottle, keyboardBrake, keyboardSteering, wheelThrottle, wheelBrake, wheelSteering,
+            keyboard.lowSpeedSteeringRate, keyboard.highSpeedSteeringRate, keyboard.lowSpeedCenteringRate, keyboard.highSpeedCenteringRate,
+            keyboard.lowSpeedSteeringGain, keyboard.highSpeedSteeringGain, keyboard.speedResponseCurve, keyboardSteeringSource));
     }
 
     /** Poll the raw GLFW key state regardless of Minecraft conflict context. */

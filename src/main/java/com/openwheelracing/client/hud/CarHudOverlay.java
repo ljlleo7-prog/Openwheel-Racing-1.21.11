@@ -264,6 +264,7 @@ public final class CarHudOverlay {
         int frontColor = damageColor(car.getFrontEndDamagePercent());
         int rearColor = damageColor(car.getRearEndDamagePercent());
         int chassisColor = damageColor(car.getChassisDamagePercent());
+        int engineColor = damageColor(car.getEngineDamagePercent());
         int flColor = damageColor(car.getFrontLeftSuspensionDamagePercent());
         int frColor = damageColor(car.getFrontRightSuspensionDamagePercent());
         int rlColor = damageColor(car.getRearLeftSuspensionDamagePercent());
@@ -277,6 +278,8 @@ public final class CarHudOverlay {
         graphics.fill(cx - 6, top + 13, cx + 6, top + 28, chassisColor);
         graphics.fill(cx - 8, top + 28, cx + 8, top + 42, chassisColor);
         graphics.fill(cx - 20, top + 42, cx + 20, top + 62, chassisColor);
+        graphics.fill(cx - 6, top + 47, cx + 6, top + 59, 0xFF050608);
+        graphics.fill(cx - 4, top + 49, cx + 4, top + 57, engineColor);
         graphics.fill(cx - 15, top + 62, cx + 15, top + 73, chassisColor);
         graphics.fill(cx - 10, top + 73, cx + 10, top + 79, chassisColor);
         graphics.fill(cx - 20, top + 68, cx - 7, top + 71, rlColor);

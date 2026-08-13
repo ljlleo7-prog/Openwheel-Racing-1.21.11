@@ -5,6 +5,7 @@ import com.openwheelracing.client.input.WheelInputSettings;
 import com.openwheelracing.client.render.OpenwheelCarRenderer;
 import com.openwheelracing.client.render.SafetyCarRenderer;
 import com.openwheelracing.client.screen.CarAssemblyScreen;
+import com.openwheelracing.client.screen.CarPartsReplacementScreen;
 import com.openwheelracing.client.screen.RaceDirectorScreen;
 import com.openwheelracing.client.screen.RefineryScreen;
 import com.openwheelracing.registry.OWREntities;
@@ -41,6 +42,7 @@ public final class OpenwheelRacingClient {
 
     private void onRegisterMenuScreens(RegisterMenuScreensEvent event) {
         event.register(OWRMenus.CAR_ASSEMBLY.get(), CarAssemblyScreen::new);
+        event.register(OWRMenus.CAR_PARTS_REPLACEMENT.get(), CarPartsReplacementScreen::new);
         event.register(OWRMenus.REFINERY.get(), RefineryScreen::new);
         event.register(OWRMenus.RACE_DIRECTOR.get(), RaceDirectorScreen::new);
         event.register(OWRMenus.RACE_BOARD_TERMINAL.get(), RaceDirectorScreen::new);

@@ -43,6 +43,7 @@ public class WheelInputSettings {
     public Double ersCapacityMj;
     public Integer shiftLightStartRpm;
     public Integer shiftLightFullRpm;
+    public KeyboardInputSettings keyboard = KeyboardInputSettings.defaults();
     public AxisBinding steering = new AxisBinding(-1, false, -1.0f, 1.0f, 0.0f, 0.08f, 1.0f, 1.0f);
     public AxisBinding throttle = new AxisBinding(-1, true, -1.0f, 1.0f, 1.0f, 0.03f, 1.0f, 1.0f);
     public AxisBinding brake = new AxisBinding(-1, true, -1.0f, 1.0f, 1.0f, 0.03f, 1.0f, 1.0f);
@@ -138,6 +139,10 @@ public class WheelInputSettings {
         if (combinedPedal == null) {
             combinedPedal = defaults().combinedPedal;
         }
+        if (keyboard == null) {
+            keyboard = KeyboardInputSettings.defaults();
+        }
+        keyboard = keyboard.sanitized();
         if (showDrivingHud == null) {
             showDrivingHud = true;
         }
