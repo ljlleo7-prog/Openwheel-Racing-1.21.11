@@ -339,5 +339,15 @@
   "screen.openwheelracing.car_parts_replacement.start": "开始更换",
   "screen.openwheelracing.car_parts_replacement.car": "赛车",
   "screen.openwheelracing.car_parts_replacement.new_part": "新零件",
-  "screen.openwheelracing.car_parts_replacement.removed_part": "旧零件"
+  "screen.openwheelracing.car_parts_replacement.removed_part": "旧零件",
+  "screen.openwheelracing.damage.components": "部件损伤",
+  "screen.openwheelracing.damage.component_value": "%s：%s%%",
+  "screen.openwheelracing.damage.front_wing": "前翼",
+  "screen.openwheelracing.damage.rear_wing": "后翼",
+  "screen.openwheelracing.damage.chassis": "底盘",
+  "screen.openwheelracing.damage.engine": "引擎",
+  "screen.openwheelracing.damage.fl_wheel": "左前轮",
+  "screen.openwheelracing.damage.fr_wheel": "右前轮",
+  "screen.openwheelracing.damage.rl_wheel": "左后轮",
+  "screen.openwheelracing.damage.rr_wheel": "右后轮"
 }

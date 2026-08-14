@@ -4,9 +4,12 @@ import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.client.camera.OWRCameraMode;
 import com.openwheelracing.client.hud.CarHudOverlay;
 import com.openwheelracing.client.hud.LapDeltaClient;
+import com.openwheelracing.client.hud.LiveLapDeltaClient;
+import com.openwheelracing.client.hud.SurveyRouteHud;
 import com.openwheelracing.client.input.OWRClientInputHandler;
 import com.openwheelracing.client.input.OWRKeyMappings;
 import com.openwheelracing.client.render.StewardLineOverlay;
+import com.openwheelracing.client.render.SurveyRouteOverlay;
 import com.openwheelracing.client.screen.OpenwheelSetupScreen;
 import com.openwheelracing.client.sound.CarSoundManager;
 import net.minecraft.client.Minecraft;
@@ -26,6 +29,7 @@ import org.lwjgl.glfw.GLFW;
 
 public final class OpenwheelRacingClientEvents {
     private static final Identifier CAR_HUD = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "car_hud");
+    private static final Identifier SURVEY_ROUTE_HUD = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "survey_route_hud");
 
     private OpenwheelRacingClientEvents() {
     }
@@ -36,6 +40,7 @@ public final class OpenwheelRacingClientEvents {
 
     public static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
         event.registerAboveAll(CAR_HUD, CarHudOverlay::render);
+        event.registerAboveAll(SURVEY_ROUTE_HUD, SurveyRouteHud::render);
     }
 
     public static void onScreenInit(ScreenEvent.Init.Post event) {
@@ -54,8 +59,11 @@ public final class OpenwheelRacingClientEvents {
         CarSoundManager.onClientTick();
         boolean ridingCar = Minecraft.getInstance().player != null && Minecraft.getInstance().player.getVehicle() instanceof com.openwheelracing.content.entity.OpenwheelCarEntity;
         LapDeltaClient.tick(ridingCar);
+        LiveLapDeltaClient.tick();
+        SurveyRouteOverlay.tick();
         if (Minecraft.getInstance().level == null) {
             StewardLineOverlay.clear();
+            SurveyRouteOverlay.clear();
         }
     }
 
@@ -83,5 +91,6 @@ public final class OpenwheelRacingClientEvents {
 
     public static void onRenderLevelAfterEntities(RenderLevelStageEvent.AfterEntities event) {
         StewardLineOverlay.render(event);
+        SurveyRouteOverlay.render(event);
     }
 }

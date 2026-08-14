@@ -12,6 +12,10 @@ import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.TrackGeometry;
 import com.openwheelracing.content.track.TrackStewardingGeometryBuilder;
+import com.openwheelracing.content.track.survey.SurveyRoute;
+import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
+import com.openwheelracing.content.track.survey.TrackSurveyData;
+import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -60,6 +64,14 @@ public final class OWRCommands {
                 .then(Commands.literal("remove")
                     .then(Commands.argument("trackId", StringArgumentType.word())
                         .executes(OWRCommands::removeTrack)))
+                .then(Commands.literal("survey")
+                    .then(Commands.literal("start").executes(OWRCommands::startSurvey))
+                    .then(Commands.literal("finish").executes(OWRCommands::finishSurvey))
+                    .then(Commands.literal("cancel").executes(OWRCommands::cancelSurvey))
+                    .then(Commands.literal("status").executes(OWRCommands::showSurveyStatus))
+                    .then(Commands.literal("clear").executes(OWRCommands::clearSurvey))
+                    .then(Commands.literal("show").executes(OWRCommands::showSurvey))
+                    .then(Commands.literal("hide").executes(OWRCommands::hideSurvey)))
                 .then(Commands.literal("centerline")
                     .then(Commands.literal("add-here")
                         .executes(context -> addCenterlinePoint(context, 8))
@@ -129,6 +141,99 @@ public final class OWRCommands {
                         .executes(OWRCommands::generateAiLine)))));
     }
 
+    private static int startSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        TrackDefinition track = activeOrDefaultTrack(context);
+        if (!(player.getVehicle() instanceof OpenwheelCarEntity car) || car.getControllingPassenger() != player) {
+            send(context, "Drive an open-wheel car before starting a survey.");
+            return 0;
+        }
+        if (!SurveyRouteRuntime.start(player, car, track)) {
+            send(context, "A survey recording is already active.");
+            return 0;
+        }
+        send(context, "Survey armed for " + track.name() + ". Recording begins when this car next starts a lap.");
+        return 1;
+    }
+
+    private static int finishSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        SurveyRouteRuntime.FinishResult result = SurveyRouteRuntime.finish(player);
+        if (result instanceof SurveyRouteRuntime.FinishFailure failure) {
+            send(context, "Survey not saved: " + failure.reason() + ". Survey remains active.");
+            return 0;
+        }
+        SurveyRoute route = ((SurveyRouteRuntime.FinishSuccess) result).route();
+        send(context, "Survey saved: raw=" + route.rawSamples().size() + " nodes=" + route.nodes().size() + " length=" + Math.round(route.length()) + "m.");
+        return route.nodes().size();
+    }
+
+    private static int cancelSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        boolean cancelled = SurveyRouteRuntime.cancel(player);
+        send(context, cancelled ? "Survey recording cancelled." : "No active survey recording.");
+        return cancelled ? 1 : 0;
+    }
+
+    private static int showSurveyStatus(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        Optional<SurveyRouteRuntime.Status> recording = SurveyRouteRuntime.status(player);
+        if (recording.isPresent()) {
+            SurveyRouteRuntime.Status status = recording.get();
+            if (!status.recording()) {
+                send(context, "Survey armed for " + status.trackName() + ". Cross start/finish to begin recording.");
+                return 1;
+            }
+            send(context, "Survey recording " + status.trackName() + ": samples=" + status.samples() + " distance=" + Math.round(status.distance()) + "m closure=" + Math.round(status.closureGap()) + "m.");
+            return status.samples();
+        }
+        TrackDefinition track = activeOrDefaultTrack(context);
+        Optional<SurveyRoute> route = TrackSurveyData.get(context.getSource().getLevel()).get(track.trackId());
+        if (route.isEmpty()) {
+            send(context, "No survey route saved for " + track.name() + ".");
+            return 0;
+        }
+        send(context, "Survey " + track.name() + ": raw=" + route.get().rawSamples().size() + " nodes=" + route.get().nodes().size() + " length=" + Math.round(route.get().length()) + "m.");
+        return route.get().nodes().size();
+    }
+
+    private static int clearSurvey(CommandContext<CommandSourceStack> context) {
+        TrackDefinition track = activeOrDefaultTrack(context);
+        boolean cleared = TrackSurveyData.get(context.getSource().getLevel()).clear(track.trackId());
+        if (context.getSource().getEntity() instanceof ServerPlayer player) {
+            OWRNetwork.sendSurveyRouteOverlay(player, false, "", new UUID(0L, 0L), "", false, null);
+        }
+        send(context, cleared ? "Cleared saved survey route for " + track.name() + "." : "No saved survey route for " + track.name() + ".");
+        return cleared ? 1 : 0;
+    }
+
+    private static int showSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        Optional<SurveyRouteRuntime.RecorderView> recording = SurveyRouteRuntime.recorder(player);
+        if (recording.isPresent()) {
+            SurveyRouteRuntime.RecorderView view = recording.get();
+            SurveyRoute live = SurveyRoute.fromModel(new com.openwheelracing.content.track.survey.SurveyRouteModel(UUID.randomUUID(), view.trackId(), view.samples(), List.of(), view.distance(), 2.0));
+            OWRNetwork.sendSurveyRouteOverlay(player, true, view.dimensionId(), view.trackId(), view.trackName(), view.recording(), live);
+            send(context, "Showing active survey recording.");
+            return view.samples().size();
+        }
+        TrackDefinition track = activeOrDefaultTrack(context);
+        Optional<SurveyRoute> route = TrackSurveyData.get(context.getSource().getLevel()).get(track.trackId());
+        if (route.isEmpty()) {
+            send(context, "No survey route saved for " + track.name() + ".");
+            return 0;
+        }
+        OWRNetwork.sendSurveyRouteOverlay(player, true, dimensionId(context), track.trackId(), track.name(), false, route.get());
+        send(context, "Showing survey route for " + track.name() + ".");
+        return route.get().nodes().size();
+    }
+
+    private static int hideSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        OWRNetwork.sendSurveyRouteOverlay(context.getSource().getPlayerOrException(), false, "", new UUID(0, 0), "", false, null);
+        send(context, "Survey route overlay hidden.");
+        return 1;
+    }
+
     private static int setWheelInputAllowed(CommandContext<CommandSourceStack> context, boolean allowed) {
         OWRRaceControlState state = raceControl(context);
         state.setWheelInputAllowed(allowed);
@@ -152,14 +257,18 @@ public final class OWRCommands {
         send(context, "Stewarding tracks:");
         for (TrackDefinition track : tracks) {
             String active = data.activeTrack(dimensionId(context)).filter(track::equals).isPresent() ? " *" : "";
-            send(context, "- " + track.name() + " [" + track.trackId() + "]" + active + " nodes=" + track.centerline().size());
+            Optional<SurveyRoute> survey = TrackSurveyData.get(context.getSource().getLevel()).get(track.trackId());
+            String surveyStatus = survey.map(route -> " survey=" + Math.round(route.length()) + "m/" + route.nodes().size() + " nodes").orElse(" survey=none");
+            send(context, "- " + track.name() + " [" + track.trackId() + "]" + active + " centerline=" + Math.round(track.length()) + "m/" + track.centerline().size() + " nodes" + surveyStatus);
         }
         return tracks.size();
     }
 
     private static int showActiveTrack(CommandContext<CommandSourceStack> context) {
         TrackDefinition track = activeOrDefaultTrack(context);
-        send(context, "Active stewarding track: " + track.name() + " [" + track.trackId() + "] nodes=" + track.centerline().size() + " length=" + Math.round(track.length()) + "m");
+        Optional<SurveyRoute> survey = TrackSurveyData.get(context.getSource().getLevel()).get(track.trackId());
+        String surveyStatus = survey.map(route -> Math.round(route.length()) + "m/" + route.nodes().size() + " nodes").orElse("none");
+        send(context, "Active stewarding track: " + track.name() + " [" + track.trackId() + "] centerline=" + Math.round(track.length()) + "m/" + track.centerline().size() + " nodes survey=" + surveyStatus);
         return 1;
     }
 

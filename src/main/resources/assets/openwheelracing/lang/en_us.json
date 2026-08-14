@@ -339,5 +339,15 @@
   "screen.openwheelracing.car_parts_replacement.start": "Start Replacement",
   "screen.openwheelracing.car_parts_replacement.car": "Car",
   "screen.openwheelracing.car_parts_replacement.new_part": "New Part",
-  "screen.openwheelracing.car_parts_replacement.removed_part": "Old Part"
+  "screen.openwheelracing.car_parts_replacement.removed_part": "Old Part",
+  "screen.openwheelracing.damage.components": "Component Damage",
+  "screen.openwheelracing.damage.component_value": "%s: %s%%",
+  "screen.openwheelracing.damage.front_wing": "Front Wing",
+  "screen.openwheelracing.damage.rear_wing": "Rear Wing",
+  "screen.openwheelracing.damage.chassis": "Chassis",
+  "screen.openwheelracing.damage.engine": "Engine",
+  "screen.openwheelracing.damage.fl_wheel": "FL Wheel",
+  "screen.openwheelracing.damage.fr_wheel": "FR Wheel",
+  "screen.openwheelracing.damage.rl_wheel": "RL Wheel",
+  "screen.openwheelracing.damage.rr_wheel": "RR Wheel"
 }

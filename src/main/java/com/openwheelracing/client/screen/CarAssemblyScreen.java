@@ -109,6 +109,9 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
             graphics.drawString(font, "Livery", x + 190, y + 90, 0xFF404040, false);
         }
         graphics.drawString(font, playerInventoryTitle, x + 8, y + inventoryLabelY, 0xFF404040, false);
+        if (!menu.getOutputStack().isEmpty() && menu.allowsSetup()) {
+            ComponentDamageDisplay.drawCompact(graphics, font, PrototypeCarItem.getComponentDamage(menu.getOutputStack()), x + 178, y + 86, 0xFF404040);
+        }
         if (!menu.getOutputStack().isEmpty() && menu.allowsLivery()) {
             String name = CarLivery.fromIndex(PrototypeCarItem.getLivery(menu.getOutputStack())).displayName();
             graphics.drawString(font, name, x + 190, y + 104, 0xFF404040, false);

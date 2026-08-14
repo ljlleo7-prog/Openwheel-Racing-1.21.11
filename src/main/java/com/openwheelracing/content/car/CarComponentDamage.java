@@ -45,7 +45,7 @@ public record CarComponentDamage(int frontEnd, int rearEnd, int chassis, int eng
 
     public static CarComponentDamage fromLegacyDamage(int damage) {
         int normalized = clamp(damage);
-        return new CarComponentDamage(normalized, normalized, normalized, 0, normalized, normalized, normalized, normalized);
+        return new CarComponentDamage(0, 0, normalized, 0, 0, 0, 0, 0);
     }
 
     public int aggregate() {

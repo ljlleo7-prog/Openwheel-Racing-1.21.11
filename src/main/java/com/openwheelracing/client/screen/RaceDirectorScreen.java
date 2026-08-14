@@ -1,6 +1,8 @@
 package com.openwheelracing.client.screen;
 
 import com.openwheelracing.client.map.CircuitMapRenderer;
+import com.openwheelracing.client.telemetry.MonitorTelemetryClient;
+import com.openwheelracing.client.telemetry.SpeedTraceGraphRenderer;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
@@ -47,7 +49,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     public RaceDirectorScreen(RaceDirectorMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
         imageWidth = 584;
-        imageHeight = 342;
+        imageHeight = menu.getMonitorType() == com.openwheelracing.content.block.entity.RaceMonitorType.BOARD ? 342 : 420;
         inventoryLabelY = 1000;
     }
 
@@ -91,6 +93,9 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.fill(x + 6, y + 66, x + 192, y + 330, 0xFF2A3038);
         graphics.fill(x + MAP_X - 4, y + MAP_Y - 4, x + MAP_X + MAP_WIDTH + 4, y + MAP_Y + MAP_HEIGHT + 4, 0xFF15191F);
         graphics.fill(x + RIGHT_X - 4, y + 66, x + imageWidth - 6, y + 330, 0xFF2A3038);
+        if (menu.getMonitorType() != com.openwheelracing.content.block.entity.RaceMonitorType.BOARD) {
+            graphics.fill(x + MAP_X - 4, y + 342, x + MAP_X + MAP_WIDTH + 4, y + 416, 0xFF15191F);
+        }
         if (menu.showsTeamTerminal()) {
             graphics.fill(x + LEFT_X, y + 90, x + LEFT_X + COLUMN_WIDTH, y + 250, 0xFF242A31);
             graphics.fill(x + RIGHT_X, y + 90, x + RIGHT_X + COLUMN_WIDTH, y + 250, 0xFF242A31);
@@ -130,10 +135,23 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
                 return true;
             }
         }
+        if (menu.getMonitorType() == com.openwheelracing.content.block.entity.RaceMonitorType.DIRECTOR && event.button() == 0 && isInsideTelemetryCars(event.x(), event.y())) {
+            int localX = (int) (event.x() - leftPos - MAP_X);
+            int localY = (int) (event.y() - topPos - 250);
+            int index = localY / ROW_HEIGHT * 2 + Math.min(1, Math.max(0, localX / 90));
+            if (index >= 0 && index < menu.getSnapshot().teamCars().size()) {
+                selectedTeamCarId = menu.getSnapshot().teamCars().get(index).entityId();
+                MonitorTelemetryClient.clear();
+                OWRNetwork.sendToServer(new OWRNetwork.MonitorTelemetrySubscribeMessage(menu.containerId, selectedTeamCarId));
+                return true;
+            }
+        }
         if (menu.showsTeamTerminal() && event.button() == 0) {
             int index = teamListIndex(event.x(), event.y());
             if (index >= 0 && index < menu.getSnapshot().teamCars().size()) {
                 selectedTeamCarId = menu.getSnapshot().teamCars().get(index).entityId();
+                MonitorTelemetryClient.clear();
+                OWRNetwork.sendToServer(new OWRNetwork.MonitorTelemetrySubscribeMessage(menu.containerId, selectedTeamCarId));
                 rebuildWidgets();
                 return true;
             }
@@ -270,6 +288,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.drawString(font, "Damage", RIGHT_X + 24, 284, 0xFFC9D1D9, false);
         graphics.drawString(font, "Tyres", RIGHT_X + 24, 302, 0xFFC9D1D9, false);
         drawSelectedLap(graphics);
+        drawDirectorTelemetry(graphics, snapshot);
     }
 
     private void drawTeamTerminal(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
@@ -282,6 +301,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             graphics.drawString(font, Component.translatable("screen.openwheelracing.team_terminal.no_cars"), LEFT_X + 4, TEAM_LIST_Y, 0xFFC9D1D9, false);
             return;
         }
+        SpeedTraceGraphRenderer.render(graphics, font, MAP_X, 350, MAP_WIDTH, 62);
         int visibleCars = Math.min(TEAM_LIST_ROWS * 2, cars.size());
         for (int index = 0; index < visibleCars; index++) {
             TeamCarRow car = cars.get(index);
@@ -318,7 +338,23 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.drawString(font, String.format("ERS %3.0f%%  %+.0fkW", car.ersPercent(), car.ersPowerKw()), x + 8, y + 68, 0xFF99DDFF, false);
         graphics.drawString(font, String.format("TYRE %3.0f%%  %3.0fC", car.tyrePercent(), car.tyreTemperatureC()), x + 8, y + 82, 0xFFFFD866, false);
         graphics.drawString(font, String.format("DMG %3.0f%%", car.damagePercent()), x + 8, y + 96, car.damagePercent() > 70.0f ? 0xFFFF7777 : 0xFFC9D1D9, false);
-        graphics.drawString(font, car.inPitLane() ? "MAP PIT" : (car.onMap() ? "MAP TRACK" : "MAP OFF"), x + 8, y + 112, car.onMap() ? 0xFF7EE787 : 0xFFFF7777, false);
+        ComponentDamageDisplay.drawCompact(graphics, font, car.componentDamage(), x + 8, y + 108, 0xFFC9D1D9);
+        graphics.drawString(font, car.inPitLane() ? "MAP PIT" : (car.onMap() ? "MAP TRACK" : "MAP OFF"), x + 8, y + 134, car.onMap() ? 0xFF7EE787 : 0xFFFF7777, false);
+    }
+
+    private void drawDirectorTelemetry(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
+        if (menu.getMonitorType() != com.openwheelracing.content.block.entity.RaceMonitorType.DIRECTOR) return;
+        SpeedTraceGraphRenderer.render(graphics, font, MAP_X, 350, MAP_WIDTH, 62);
+        int count = Math.min(6, snapshot.teamCars().size());
+        for (int i = 0; i < count; i++) {
+            TeamCarRow car = snapshot.teamCars().get(i);
+            graphics.drawString(font, fit("#" + car.entityId() + " " + car.riderName(), 86), MAP_X + (i % 2) * 90, 250 + (i / 2) * ROW_HEIGHT, car.entityId() == selectedTeamCarId ? 0xFF009E73 : 0xFFC9D1D9, false);
+        }
+    }
+
+    private boolean isInsideTelemetryCars(double mouseX, double mouseY) {
+        double localX = mouseX - leftPos, localY = mouseY - topPos;
+        return localX >= MAP_X && localX <= MAP_X + MAP_WIDTH && localY >= 250 && localY < 250 + ((Math.min(6, menu.getSnapshot().teamCars().size()) + 1) / 2) * ROW_HEIGHT;
     }
 
     private boolean isInsideRows(double mouseX, double mouseY) {

@@ -7,6 +7,8 @@ import com.openwheelracing.content.car.ServerLiveryTextures;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.content.menu.CarPartsReplacementMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
+import com.openwheelracing.content.race.LapProfileCollector;
+import com.openwheelracing.content.race.OWRLapProfiles;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.RaceDirectorLapRow;
@@ -22,6 +24,7 @@ import com.openwheelracing.content.track.TrackEditorUndoStore;
 import com.openwheelracing.content.track.TrackMapSnapshot;
 import com.openwheelracing.content.track.TrackMapAutoDetector;
 import com.openwheelracing.content.track.TrackDefinition;
+import com.openwheelracing.content.track.survey.SurveyRoute;
 import com.openwheelracing.registry.OWRItems;
 import java.lang.reflect.Method;
 import java.util.List;
@@ -46,7 +49,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "10";
+    private static final String PROTOCOL = "13";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -88,6 +91,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
         registrar.playToServer(TeamTerminalSenseCarsMessage.TYPE, codec(TeamTerminalSenseCarsMessage::encode, TeamTerminalSenseCarsMessage::decode), TeamTerminalSenseCarsMessage::handle);
         registrar.playToServer(TeamTerminalBindCarMessage.TYPE, codec(TeamTerminalBindCarMessage::encode, TeamTerminalBindCarMessage::decode), TeamTerminalBindCarMessage::handle);
+        registrar.playToServer(MonitorTelemetrySubscribeMessage.TYPE, codec(MonitorTelemetrySubscribeMessage::encode, MonitorTelemetrySubscribeMessage::decode), MonitorTelemetrySubscribeMessage::handle);
         registrar.playToServer(RaceMonitorAutoDetectMapMessage.TYPE, codec(RaceMonitorAutoDetectMapMessage::encode, RaceMonitorAutoDetectMapMessage::decode), RaceMonitorAutoDetectMapMessage::handle);
         registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
         registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
@@ -97,7 +101,10 @@ public final class OWRNetwork {
         registrar.playToClient(RankingBoardMessage.TYPE, codec(RankingBoardMessage::encode, RankingBoardMessage::decode), RankingBoardMessage::handle);
         registrar.playToClient(CommandFeedbackMessage.TYPE, codec(CommandFeedbackMessage::encode, CommandFeedbackMessage::decode), CommandFeedbackMessage::handle);
         registrar.playToClient(StewardLineOverlayMessage.TYPE, codec(StewardLineOverlayMessage::encode, StewardLineOverlayMessage::decode), StewardLineOverlayMessage::handle);
+        registrar.playToClient(SurveyRouteOverlayMessage.TYPE, codec(SurveyRouteOverlayMessage::encode, SurveyRouteOverlayMessage::decode), SurveyRouteOverlayMessage::handle);
         registrar.playToClient(TimingDeltaHudMessage.TYPE, codec(TimingDeltaHudMessage::encode, TimingDeltaHudMessage::decode), TimingDeltaHudMessage::handle);
+        registrar.playToClient(LiveLapDeltaHudMessage.TYPE, codec(LiveLapDeltaHudMessage::encode, LiveLapDeltaHudMessage::decode), LiveLapDeltaHudMessage::handle);
+        registrar.playToClient(MonitorTelemetryMessage.TYPE, codec(MonitorTelemetryMessage::encode, MonitorTelemetryMessage::decode), MonitorTelemetryMessage::handle);
     }
 
     public static void sendDriveInputAck(ServerPlayer player, OpenwheelCarEntity car) {
@@ -892,6 +899,23 @@ public final class OWRNetwork {
         PacketDistributor.sendToPlayer(player, new StewardLineOverlayMessage(visible, trackId, trackName, revision, lines));
     }
 
+    public static void sendSurveyRouteOverlay(ServerPlayer player, boolean visible, String dimensionId, UUID trackId, String trackName, boolean recording, SurveyRoute route) {
+        PacketDistributor.sendToPlayer(player, new SurveyRouteOverlayMessage(visible, dimensionId, trackId, trackName, recording,
+            route == null ? List.of() : route.rawSamples(), route == null ? List.of() : route.nodes(), route == null ? 0.0 : route.length(), route == null ? 2.0 : route.spacing()));
+    }
+
+    public static void sendMonitorTelemetry(ServerPlayer viewer, int carEntityId, UUID driverId, LapProfileCollector.Latest latest, float carSpeedKmh, double routeLength, boolean profileUpdate, OWRLapProfiles.BestLapProfile best) {
+        int[] bestSpeeds = best == null ? new int[0] : best.speedCmps();
+        PacketDistributor.sendToPlayer(viewer, new MonitorTelemetryMessage(carEntityId, driverId, latest.active(), latest.status().ordinal(), latest.elapsedMillis(),
+            (float) latest.routeDistance(), carSpeedKmh, (float) routeLength, best == null ? 0.0f : (float) best.spacing(), profileUpdate, bestSpeeds));
+    }
+
+    public static void sendLiveLapDelta(ServerPlayer player, int carEntityId, LapProfileCollector.Latest latest, OWRLapProfiles.BestLapProfile best,
+            int referenceMillis, int deltaMillis, long serverGameTime) {
+        PacketDistributor.sendToPlayer(player, new LiveLapDeltaHudMessage(carEntityId, latest.active(), best != null, latest.status().ordinal(), latest.elapsedMillis(),
+            (float) latest.routeDistance(), best == null ? 0 : best.lapMillis(), referenceMillis, deltaMillis, serverGameTime));
+    }
+
     public static void sendTimingDeltaReset(ServerPlayer player, int segmentCount) {
         PacketDistributor.sendToPlayer(player, new TimingDeltaHudMessage(true, segmentCount, List.of(), "", -1, 0, 0));
     }
@@ -1443,6 +1467,21 @@ public final class OWRNetwork {
         }
     }
 
+    public record MonitorTelemetrySubscribeMessage(int containerId, int carEntityId) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<MonitorTelemetrySubscribeMessage> TYPE = payloadType("monitor_telemetry_subscribe_message");
+        @Override public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(MonitorTelemetrySubscribeMessage message, FriendlyByteBuf buffer) { buffer.writeVarInt(message.containerId); buffer.writeInt(message.carEntityId); }
+        private static MonitorTelemetrySubscribeMessage decode(FriendlyByteBuf buffer) { return new MonitorTelemetrySubscribeMessage(buffer.readVarInt(), buffer.readInt()); }
+        private static void handle(MonitorTelemetrySubscribeMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                if (context.player() instanceof ServerPlayer player && player.containerMenu instanceof RaceDirectorMenu menu && menu.containerId == message.containerId
+                        && menu.getMonitorType() != com.openwheelracing.content.block.entity.RaceMonitorType.BOARD) {
+                    menu.setTelemetryCarId(message.carEntityId);
+                }
+            });
+        }
+    }
+
     public record RaceMonitorAutoDetectMapMessage(int radiusBlocks) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<RaceMonitorAutoDetectMapMessage> TYPE = payloadType("race_monitor_auto_detect_map_message");
 
@@ -1504,6 +1543,7 @@ public final class OWRNetwork {
                                     recipient.sendSystemMessage(announcement);
                                 }
                             }
+                            OWRLapProfiles.get(serverLevel).removeByLapRecord(message.lapId);
                             broadcastRankingBoard(serverLevel.getServer(), serverLevel);
                         }
                         sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
@@ -1582,6 +1622,55 @@ public final class OWRNetwork {
         }
     }
 
+    public record LiveLapDeltaHudMessage(int carEntityId, boolean lapActive, boolean hasReference, int localizationStatus, int elapsedMillis,
+            float routeDistance, int bestLapMillis, int referenceMillis, int deltaMillis, long serverGameTime) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<LiveLapDeltaHudMessage> TYPE = payloadType("live_lap_delta_hud_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+
+        private static void encode(LiveLapDeltaHudMessage message, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(message.carEntityId);
+            buffer.writeBoolean(message.lapActive);
+            buffer.writeBoolean(message.hasReference);
+            buffer.writeByte(message.localizationStatus);
+            buffer.writeVarInt(message.elapsedMillis);
+            buffer.writeFloat(message.routeDistance);
+            buffer.writeVarInt(message.bestLapMillis);
+            buffer.writeVarInt(message.referenceMillis);
+            buffer.writeInt(message.deltaMillis);
+            buffer.writeLong(message.serverGameTime);
+        }
+
+        private static LiveLapDeltaHudMessage decode(FriendlyByteBuf buffer) {
+            return new LiveLapDeltaHudMessage(buffer.readVarInt(), buffer.readBoolean(), buffer.readBoolean(), buffer.readUnsignedByte(), buffer.readVarInt(),
+                buffer.readFloat(), buffer.readVarInt(), buffer.readVarInt(), buffer.readInt(), buffer.readLong());
+        }
+
+        private static void handle(LiveLapDeltaHudMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> applyLiveLapDeltaHud(message));
+        }
+    }
+
+    public record MonitorTelemetryMessage(int carEntityId, UUID driverId, boolean lapActive, int localizationStatus, int elapsedMillis,
+            float routeDistance, float speedKmh, float routeLength, float profileSpacing, boolean profileUpdate, int[] bestSpeedCmps) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<MonitorTelemetryMessage> TYPE = payloadType("monitor_telemetry_message");
+        @Override public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(MonitorTelemetryMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.carEntityId); buffer.writeUUID(message.driverId); buffer.writeBoolean(message.lapActive); buffer.writeByte(message.localizationStatus);
+            buffer.writeVarInt(message.elapsedMillis); buffer.writeFloat(message.routeDistance); buffer.writeFloat(message.speedKmh); buffer.writeFloat(message.routeLength); buffer.writeFloat(message.profileSpacing); buffer.writeBoolean(message.profileUpdate);
+            buffer.writeVarInt(message.bestSpeedCmps.length); for (int speed : message.bestSpeedCmps) buffer.writeVarInt(speed);
+        }
+        private static MonitorTelemetryMessage decode(FriendlyByteBuf buffer) {
+            int carId = buffer.readInt(); UUID driver = buffer.readUUID(); boolean active = buffer.readBoolean(); int status = buffer.readUnsignedByte(); int elapsed = buffer.readVarInt();
+            float distance = buffer.readFloat(); float speed = buffer.readFloat(); float length = buffer.readFloat(); float spacing = buffer.readFloat(); boolean profileUpdate = buffer.readBoolean(); int count = buffer.readVarInt();
+            if (count < 0 || count > OWRLapProfiles.MAX_PROFILE_SAMPLES) throw new IllegalArgumentException("monitor profile too large");
+            int[] speeds = new int[count]; for (int i = 0; i < count; i++) speeds[i] = buffer.readVarInt();
+            return new MonitorTelemetryMessage(carId, driver, active, status, elapsed, distance, speed, length, spacing, profileUpdate, speeds);
+        }
+        private static void handle(MonitorTelemetryMessage message, IPayloadContext context) { context.enqueueWork(() -> applyMonitorTelemetry(message)); }
+    }
+
     public record CommandFeedbackMessage(String message) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<CommandFeedbackMessage> TYPE = payloadType("command_feedback_message");
 
@@ -1651,6 +1740,66 @@ public final class OWRNetwork {
         private static void handle(StewardLineOverlayMessage message, IPayloadContext context) {
             context.enqueueWork(() -> applyStewardLineOverlay(message));
         }
+    }
+
+    public record SurveyRouteOverlayMessage(boolean visible, String dimensionId, UUID trackId, String trackName, boolean recording,
+            List<SurveyRoute.Sample> rawSamples, List<SurveyRoute.Node> nodes, double length, double spacing) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<SurveyRouteOverlayMessage> TYPE = payloadType("survey_route_overlay_message");
+        private static final int MAX_POINTS = SurveyRoute.MAX_POINTS;
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+
+        private static void encode(SurveyRouteOverlayMessage message, FriendlyByteBuf buffer) {
+            buffer.writeBoolean(message.visible);
+            buffer.writeUtf(message.dimensionId, 128);
+            buffer.writeUUID(message.trackId);
+            buffer.writeUtf(message.trackName, 128);
+            buffer.writeBoolean(message.recording);
+            buffer.writeVarInt(message.rawSamples.size());
+            for (SurveyRoute.Sample sample : message.rawSamples) {
+                writeSurveyPoint(buffer, sample.position());
+                buffer.writeDouble(sample.headingRadians());
+            }
+            buffer.writeVarInt(message.nodes.size());
+            for (SurveyRoute.Node node : message.nodes) {
+                buffer.writeVarInt(node.index());
+                writeSurveyPoint(buffer, node.position());
+                buffer.writeDouble(node.headingRadians());
+                buffer.writeDouble(node.distanceAlongRoute());
+            }
+            buffer.writeDouble(message.length);
+            buffer.writeDouble(message.spacing);
+        }
+
+        private static SurveyRouteOverlayMessage decode(FriendlyByteBuf buffer) {
+            boolean visible = buffer.readBoolean();
+            String dimensionId = buffer.readUtf(128);
+            UUID trackId = buffer.readUUID();
+            String trackName = buffer.readUtf(128);
+            boolean recording = buffer.readBoolean();
+            int rawCount = Math.min(buffer.readVarInt(), MAX_POINTS);
+            java.util.ArrayList<SurveyRoute.Sample> raw = new java.util.ArrayList<>(rawCount);
+            for (int i = 0; i < rawCount; i++) raw.add(new SurveyRoute.Sample(readSurveyPoint(buffer), buffer.readDouble()));
+            int nodeCount = Math.min(buffer.readVarInt(), MAX_POINTS);
+            java.util.ArrayList<SurveyRoute.Node> nodes = new java.util.ArrayList<>(nodeCount);
+            for (int i = 0; i < nodeCount; i++) nodes.add(new SurveyRoute.Node(buffer.readVarInt(), readSurveyPoint(buffer), buffer.readDouble(), buffer.readDouble()));
+            return new SurveyRouteOverlayMessage(visible, dimensionId, trackId, trackName, recording, raw, nodes, buffer.readDouble(), buffer.readDouble());
+        }
+
+        private static void handle(SurveyRouteOverlayMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> applySurveyRouteOverlay(message));
+        }
+    }
+
+    private static void writeSurveyPoint(FriendlyByteBuf buffer, SurveyRoute.Point point) {
+        buffer.writeDouble(point.x());
+        buffer.writeDouble(point.y());
+        buffer.writeDouble(point.z());
+    }
+
+    private static SurveyRoute.Point readSurveyPoint(FriendlyByteBuf buffer) {
+        return new SurveyRoute.Point(buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
     }
 
     private static void writePoint(FriendlyByteBuf buffer, TrackDefinition.Point3 point) {
@@ -1723,6 +1872,24 @@ public final class OWRNetwork {
         }
     }
 
+    private static void applyMonitorTelemetry(MonitorTelemetryMessage message) {
+        try {
+            Class<?> cache = Class.forName("com.openwheelracing.client.telemetry.MonitorTelemetryClient");
+            Method method = cache.getMethod("apply", MonitorTelemetryMessage.class);
+            method.invoke(null, message);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applyLiveLapDeltaHud(LiveLapDeltaHudMessage message) {
+        try {
+            Class<?> client = Class.forName("com.openwheelracing.client.hud.LiveLapDeltaClient");
+            Method method = client.getMethod("apply", LiveLapDeltaHudMessage.class);
+            method.invoke(null, message);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
     private static void applyTimingDeltaHud(TimingDeltaHudMessage message) {
         try {
             Class<?> client = Class.forName("com.openwheelracing.client.hud.LapDeltaClient");
@@ -1757,6 +1924,15 @@ public final class OWRNetwork {
             Object chat = gui.getClass().getMethod("getChat").invoke(gui);
             Method addMessage = chat.getClass().getMethod("addMessage", Component.class);
             addMessage.invoke(chat, Component.literal("[OWR] " + message.message));
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applySurveyRouteOverlay(SurveyRouteOverlayMessage message) {
+        try {
+            Class<?> overlay = Class.forName("com.openwheelracing.client.render.SurveyRouteOverlay");
+            Method method = overlay.getMethod("apply", SurveyRouteOverlayMessage.class);
+            method.invoke(null, message);
         } catch (ReflectiveOperationException ignored) {
         }
     }

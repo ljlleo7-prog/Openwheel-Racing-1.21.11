@@ -51,27 +51,56 @@ public final class CarHudOverlay {
     }
 
     private static void renderLiveTiming(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {
-        int panelWidth = 146;
-        int panelHeight = 106;
+        int panelWidth = 178;
+        int panelHeight = 76;
         int x = graphics.guiWidth() - panelWidth - 8;
         int y = 8;
 
-        int displayedLapTicks = car.getCompletedLapLingerTicks() > 0 ? car.getCompletedLapTicks() : car.getCurrentLapTicks();
-        int lapColor = car.getCompletedLapLingerTicks() > 0 ? completedLapColor(car.getCompletedLapResult()) : 0xFFE8E8E8;
+        int displayedLapTicks = LiveLapDeltaClient.active() ? LiveLapDeltaClient.elapsedMillis() : car.getCompletedLapLingerTicks() > 0 ? car.getCompletedLapTicks() : car.getCurrentLapTicks();
+        int lapColor = car.getCompletedLapLingerTicks() > 0 ? completedLapColor(car.getCompletedLapResult()) : 0xFFFFFFFF;
         String lap = formatLapTime(displayedLapTicks);
-        String best = formatLapTime(car.getBestLapTicks());
+        int bestMillis = LiveLapDeltaClient.bestLapMillis() > 0 ? LiveLapDeltaClient.bestLapMillis() : car.getBestLapTicks();
+        String best = formatLapTime(bestMillis);
+        String delta = "Delta  " + liveDeltaText();
         String checkpointProgress = LapDeltaClient.segmentCount() > 0 ? LapDeltaClient.hitCount() + "/" + LapDeltaClient.segmentCount() : (car.hasCheckpoint() ? "1/1" : "0/1");
-        graphics.drawString(font, "LAP", x + 7, y + 5, 0xFF88909A, false);
-        graphics.drawString(font, lap, x + panelWidth - 7 - font.width(lap), y + 5, lapColor, false);
-        graphics.drawString(font, "BEST", x + 7, y + 16, 0xFF88909A, false);
-        graphics.drawString(font, best, x + panelWidth - 7 - font.width(best), y + 16, 0xFFFFFF99, false);
-        graphics.drawString(font, "CP", x + 7, y + 27, 0xFF88909A, false);
-        graphics.drawString(font, checkpointProgress, x + panelWidth - 7 - font.width(checkpointProgress), y + 27, LapDeltaClient.hitCount() > 0 || car.hasCheckpoint() ? 0xFF7EE787 : 0xFFFFD044, false);
+
+        graphics.fill(x, y, x + panelWidth, y + panelHeight, 0xB8142638);
+        graphics.fill(x, y, x + panelWidth, y + 1, 0xAA55718B);
+        graphics.fill(x, y + panelHeight - 1, x + panelWidth, y + panelHeight, 0xAA09131E);
+        int checkpointColor = LapDeltaClient.hitCount() > 0 || car.hasCheckpoint() ? 0xFFE8EDF2 : 0xFFFFD76A;
+        drawScaledText(graphics, font, "LAP  " + lap, x + panelWidth / 2, y + 6, 1.22f, lapColor, true);
+        drawScaledText(graphics, font, "BEST  " + best + "    CP  " + checkpointProgress, x + panelWidth / 2, y + 19, 0.95f, checkpointColor, true);
+
+        int deltaTop = y + 34;
+        int deltaBottom = y + 70;
+        graphics.fill(x + 5, deltaTop, x + panelWidth - 5, deltaBottom, liveDeltaColor());
+        float deltaScale = delta.length() > 18 ? 1.35f : 1.65f;
+        drawScaledText(graphics, font, delta, x + panelWidth / 2, deltaTop + 10, deltaScale, 0xFFFFFFFF, true);
 
         TrackMapSnapshot map = ClientTrackMapCache.current();
         if (map.present()) {
-            CircuitMapRenderer.renderLocal(graphics, map, car.getX(), car.getZ(), car.getYRot(), car.getLiveryColors().bodySide(), x + 7, y + 40, panelWidth - 14, 58);
+            CircuitMapRenderer.renderLocal(graphics, map, car.getX(), car.getZ(), car.getYRot(), car.getLiveryColors().bodySide(), x + 7, y + panelHeight + 6, panelWidth - 14, 58);
         }
+    }
+
+    private static String liveDeltaText() {
+        if (!LiveLapDeltaClient.active()) return "--";
+        if (!LiveLapDeltaClient.hasReference()) return "NO REF";
+        return switch (LiveLapDeltaClient.status()) {
+            case AMBIGUOUS -> "AMBIG";
+            case UNTRACKED -> "UNTRACKED";
+            case LOW_CONFIDENCE, TRACKED -> formatSignedTicks(LiveLapDeltaClient.deltaMillis());
+        };
+    }
+
+    private static int liveDeltaColor() {
+        if (!LiveLapDeltaClient.active() || !LiveLapDeltaClient.hasReference()) return 0xE044586B;
+        return switch (LiveLapDeltaClient.status()) {
+            case AMBIGUOUS -> 0xE06A3D8F;
+            case UNTRACKED -> 0xE08F2D2D;
+            case LOW_CONFIDENCE -> 0xE08A5A00;
+            case TRACKED -> LiveLapDeltaClient.deltaMillis() <= 0 ? 0xE0176B4A : 0xE08F2D2D;
+        };
     }
 
     private static void renderGlobalFlagMarker(GuiGraphics graphics) {

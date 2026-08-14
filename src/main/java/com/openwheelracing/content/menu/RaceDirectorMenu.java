@@ -17,6 +17,7 @@ import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRBlocks;
 import com.openwheelracing.registry.OWRMenus;
 import java.util.List;
+import java.util.UUID;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -40,6 +41,10 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private int lastMapRevision = Integer.MIN_VALUE;
     private int lastMapScanScannedChunks = -1;
     private int lastMapScanDetectedCells = -1;
+    private int telemetryCarId = -1;
+    private long lastTelemetrySendTick = Long.MIN_VALUE;
+    private UUID lastTelemetryDriverId = new UUID(0L, 0L);
+    private long lastTelemetryProfileLapId = -1L;
     private RaceDirectorSnapshot snapshot = RaceDirectorSnapshot.empty();
 
     public RaceDirectorMenu(int containerId, Inventory playerInventory, FriendlyByteBuf extraData) {
@@ -115,6 +120,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         if (!(player instanceof ServerPlayer serverPlayer) || !(serverPlayer.level() instanceof ServerLevel serverLevel)) {
             return;
         }
+        sendTelemetry(serverPlayer, serverLevel);
         OWRRaceControlState controlState = OWRRaceControlState.get(serverLevel);
         OWRLapRecords records = OWRLapRecords.get(serverLevel);
         TrackMapSnapshot map = trackMap(serverLevel);
@@ -178,6 +184,28 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             laps,
             senseTeamCars(level)
         );
+    }
+
+    public void setTelemetryCarId(int entityId) {
+        if (monitorType != RaceMonitorType.BOARD && telemetryCarId != entityId) {
+            telemetryCarId = entityId;
+            lastTelemetryDriverId = new UUID(0L, 0L);
+            lastTelemetryProfileLapId = -1L;
+        }
+    }
+
+    private void sendTelemetry(ServerPlayer viewer, ServerLevel level) {
+        if (telemetryCarId < 0 || monitorType == RaceMonitorType.BOARD || level.getGameTime() - lastTelemetrySendTick < 4L) return;
+        lastTelemetrySendTick = level.getGameTime();
+        if (!(level.getEntity(telemetryCarId) instanceof OpenwheelCarEntity car) || !(car.getControllingPassenger() instanceof ServerPlayer driver)) return;
+        var latest = car.getLatestLapProfileTelemetry();
+        var best = car.getCurrentBestLapProfile();
+        boolean includeBest = !driver.getUUID().equals(lastTelemetryDriverId) || best != null && best.lapRecordId() != lastTelemetryProfileLapId;
+        if (includeBest) {
+            lastTelemetryDriverId = driver.getUUID();
+            lastTelemetryProfileLapId = best == null ? -1L : best.lapRecordId();
+        }
+        OWRNetwork.sendMonitorTelemetry(viewer, car.getId(), driver.getUUID(), latest, car.getSpeedKmh(), car.getCurrentLapProfileRouteLength(), includeBest, best);
     }
 
     public void autoDetectTrackMap(ServerLevel level, int radiusBlocks) {

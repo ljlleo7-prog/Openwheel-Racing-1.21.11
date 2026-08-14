@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import com.openwheelracing.content.command.OWRCommands;
 import com.openwheelracing.content.race.OWRLegacyDimensionDataImporter;
 import com.openwheelracing.content.track.TrackMapAutoDetector;
+import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRBlockEntities;
 import com.openwheelracing.registry.OWRBlocks;
@@ -49,6 +50,7 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(OWRFuelHandler::onFuelBurnTime);
         NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> OWRCommands.register(event));
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
+        NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedOut);
         NeoForge.EVENT_BUS.addListener(this::onPlayerChangedDimension);
         NeoForge.EVENT_BUS.addListener(this::onPlayerRespawn);
         NeoForge.EVENT_BUS.addListener(this::onServerStarted);
@@ -64,11 +66,17 @@ public final class OpenwheelRacing {
         syncPlayerCircuit(event);
     }
 
+    private void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        SurveyRouteRuntime.clearPlayer(event.getEntity().getUUID());
+    }
+
     private void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        SurveyRouteRuntime.clearPlayer(event.getEntity().getUUID());
         syncPlayerCircuit(event);
     }
 
     private void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
+        SurveyRouteRuntime.clearPlayer(event.getEntity().getUUID());
         syncPlayerCircuit(event);
     }
 
@@ -79,6 +87,7 @@ public final class OpenwheelRacing {
 
     private void onServerStopped(ServerStoppedEvent event) {
         TrackMapAutoDetector.clearJobs();
+        SurveyRouteRuntime.clearAll();
     }
 
     private void syncPlayerCircuit(PlayerEvent event) {
@@ -87,6 +96,7 @@ public final class OpenwheelRacing {
         }
         OWRNetwork.sendRankingBoard(serverPlayer, level);
         OWRNetwork.sendRaceFlag(serverPlayer, level, false);
+        OWRNetwork.sendSurveyRouteOverlay(serverPlayer, false, "", new java.util.UUID(0L, 0L), "", false, null);
         OWRNetwork.syncVisibleLiveries(serverPlayer);
     }
 }
