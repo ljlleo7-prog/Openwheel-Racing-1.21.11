@@ -6,12 +6,16 @@ import com.openwheelracing.client.map.ClientTrackMapCache;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.RaceFlagMode;
+import com.openwheelracing.content.race.timing.RaceGap;
+import com.openwheelracing.content.race.timing.RaceProgressConfidence;
+import com.openwheelracing.content.race.timing.RaceTimingRow;
 import com.openwheelracing.content.track.TrackMapSnapshot;
 import java.util.List;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.network.chat.Component;
 
 public final class CarHudOverlay {
     private static final int PRIMARY_WIDTH = 236;
@@ -46,7 +50,11 @@ public final class CarHudOverlay {
         }
 
         if (settings.showRankingHud) {
-            renderRankingBoard(graphics, font);
+            if (LiveRaceTimingClient.active()) {
+                renderRaceTimingTower(graphics, font, minecraft.player.getUUID());
+            } else {
+                renderRankingBoard(graphics, font);
+            }
         }
     }
 
@@ -449,6 +457,75 @@ public final class CarHudOverlay {
         return interpolateColor(0xFFFFD044, 0xFFFF7777, (damage - 50.0f) / 50.0f);
     }
 
+    private static void renderRaceTimingTower(GuiGraphics graphics, Font font, java.util.UUID localParticipantId) {
+        List<RaceTimingRow> allRows = LiveRaceTimingClient.rows();
+        int localIndex = -1;
+        for (int index = 0; index < allRows.size(); index++) {
+            if (allRows.get(index).participant().id().equals(localParticipantId)) {
+                localIndex = index;
+                break;
+            }
+        }
+        int start = localIndex < 0 ? 0 : Math.max(0, Math.min(localIndex - 3, allRows.size() - 8));
+        List<RaceTimingRow> rows = allRows.stream().skip(start).limit(8).toList();
+        int panelWidth = 166;
+        int headerHeight = 19;
+        int rowHeight = 10;
+        int panelHeight = headerHeight + Math.max(1, rows.size()) * rowHeight + 4;
+        int px = 8;
+        int py = 8;
+        graphics.fill(px, py, px + panelWidth, py + panelHeight, 0xB8142638);
+        graphics.fill(px, py, px + panelWidth, py + 1, 0xAA55718B);
+        String session = fit(font, LiveRaceTimingClient.snapshot().sessionName(), 112);
+        graphics.drawString(font, session, px + 6, py + 3, 0xFFE8E8E8, false);
+        String raceLabel = Component.translatable("hud.openwheelracing.race").getString();
+        graphics.drawString(font, raceLabel, px + panelWidth - 6 - font.width(raceLabel), py + 3, 0xFF7EE787, false);
+        if (rows.isEmpty()) {
+            graphics.drawString(font, Component.translatable("hud.openwheelracing.race.no_cars").getString(), px + 6, py + headerHeight + 1, 0xFF777777, false);
+            return;
+        }
+        for (int index = 0; index < rows.size(); index++) {
+            RaceTimingRow row = rows.get(index);
+            int y = py + headerHeight + index * rowHeight;
+            boolean local = row.participant().id().equals(localParticipantId);
+            int color = local ? 0xFFFFDD44 : confidenceColor(row.confidence());
+            String position = Integer.toString(row.position());
+            String marker = confidenceMarker(row.confidence());
+            String name = fit(font, row.displayName(), 72);
+            String gap = formatRaceGap(row.gapToLeader());
+            graphics.drawString(font, position, px + 5, y, color, false);
+            graphics.drawString(font, marker + name, px + 20, y, color, false);
+            graphics.drawString(font, gap, px + panelWidth - 6 - font.width(gap), y, color, false);
+        }
+    }
+
+    private static String formatRaceGap(RaceGap gap) {
+        return switch (gap.type()) {
+            case LEADER -> Component.translatable("hud.openwheelracing.race.leader").getString();
+            case LAPS -> "+" + gap.laps() + " " + Component.translatable(gap.laps() == 1 ? "hud.openwheelracing.race.lap" : "hud.openwheelracing.race.laps").getString();
+            case UNAVAILABLE -> "--.---";
+            case TIME_MILLIS -> "+" + formatGap((int) Math.min(Integer.MAX_VALUE, gap.millis()));
+        };
+    }
+
+    private static String confidenceMarker(RaceProgressConfidence confidence) {
+        return switch (confidence) {
+            case CONFIRMED -> "";
+            case DEGRADED -> "~";
+            case AMBIGUOUS -> "?";
+            case UNTRACKED, STALE -> "!";
+        };
+    }
+
+    private static int confidenceColor(RaceProgressConfidence confidence) {
+        return switch (confidence) {
+            case CONFIRMED -> 0xFFCCCCCC;
+            case DEGRADED -> 0xFFFFD76A;
+            case AMBIGUOUS -> 0xFFD89BFF;
+            case UNTRACKED, STALE -> 0xFFFF7777;
+        };
+    }
+
     private static void renderRankingBoard(GuiGraphics graphics, Font font) {
         List<OWRLapRecords.DriverBest> ranking = LapRankingClient.getRanking();
         String sessionName = LapRankingClient.getSessionName();
@@ -461,7 +538,8 @@ public final class CarHudOverlay {
         int py = 8;
 
         graphics.drawString(font, fit(font, sessionName, 88), px + 6, py + 3, 0xFFE8E8E8, false);
-        graphics.drawString(font, "LIVE", px + panelWidth - 6 - font.width("LIVE"), py + 3, 0xFF7EE787, false);
+        String bestLabel = Component.translatable("hud.openwheelracing.best").getString();
+        graphics.drawString(font, bestLabel, px + panelWidth - 6 - font.width(bestLabel), py + 3, 0xFF79C0FF, false);
 
         if (ranking.isEmpty()) {
             graphics.drawString(font, "No laps yet", px + 6, py + headerHeight + 1, 0xFF666666, false);

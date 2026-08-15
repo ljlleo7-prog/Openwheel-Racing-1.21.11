@@ -4,6 +4,10 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 import com.mojang.logging.LogUtils;
+import com.openwheelracing.content.ai.BasicAiDriveCommand;
+import com.openwheelracing.content.ai.BasicAiDriverIdentity;
+import com.openwheelracing.content.ai.AiGearboxPolicy;
+import com.openwheelracing.content.ai.BasicAiFleetManager;
 import com.openwheelracing.content.car.CarComponentDamage;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
@@ -21,6 +25,7 @@ import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
 import com.openwheelracing.content.track.survey.TrackSurveyData;
 import com.openwheelracing.content.track.TrackGeometry;
+import com.openwheelracing.content.track.PlacedMarkerGateGeometry;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRBlocks;
 import com.openwheelracing.registry.OWRItems;
@@ -342,6 +347,8 @@ public class OpenwheelCarEntity extends Entity {
 
     private static final double COMPONENT_BODY_HALF_WIDTH = 0.95;
     private static final double COMPONENT_BODY_HALF_LENGTH = 2.80;
+    private static final double MARKER_GATE_TOLERANCE = 0.12;
+    private static final double MARKER_GATE_REARM_DISTANCE = 0.25;
     private static final double COMPONENT_BOX_HALF_HEIGHT = 0.36;
     private static final double COMPONENT_BOX_CENTER_Y = 0.38;
 
@@ -378,6 +385,9 @@ public class OpenwheelCarEntity extends Entity {
     private final LapProfileCollector lapProfileCollector = new LapProfileCollector();
     private long lastStartFinishMarker;
     private long lastStartFinishTriggerAt = -20L;
+    private String lockedStartFinishGate = "";
+    private double lockedStartFinishPlane = Double.NaN;
+    private boolean lockedStartFinishAxisX;
     private long lastLowTyreWarningAt = -200L;
     private long lastDamageWarningAt = -200L;
     private long lastFrontUndersteerWarningAt = -200L;
@@ -404,6 +414,14 @@ public class OpenwheelCarEntity extends Entity {
     private float inputBrake;
     private float inputSteering;
     private boolean inputUsesKeyboardSteeringTuning;
+    private BasicAiDriverIdentity basicAiIdentity;
+    private boolean autonomousControlEnabled;
+    private float autonomousThrottle;
+    private float autonomousBrake;
+    private float autonomousSteering;
+    private int aiLaunchTicks;
+    private int aiShiftCooldownTicks;
+    private final AiGearboxPolicy aiGearboxPolicy = new AiGearboxPolicy();
     private double keyboardLowSpeedSteeringRate = 1.0;
     private double keyboardHighSpeedSteeringRate = 1.0;
     private double keyboardLowSpeedCenteringRate = 1.0;
@@ -433,6 +451,14 @@ public class OpenwheelCarEntity extends Entity {
     private double tyreTemperatureFrC = TYRE_INITIAL_TEMPERATURE_C;
     private double tyreTemperatureRlC = TYRE_INITIAL_TEMPERATURE_C;
     private double tyreTemperatureRrC = TYRE_INITIAL_TEMPERATURE_C;
+    private double tyreCarcassTemperatureFlC = TYRE_INITIAL_TEMPERATURE_C;
+    private double tyreCarcassTemperatureFrC = TYRE_INITIAL_TEMPERATURE_C;
+    private double tyreCarcassTemperatureRlC = TYRE_INITIAL_TEMPERATURE_C;
+    private double tyreCarcassTemperatureRrC = TYRE_INITIAL_TEMPERATURE_C;
+    private double tyreSlipExposureFl;
+    private double tyreSlipExposureFr;
+    private double tyreSlipExposureRl;
+    private double tyreSlipExposureRr;
     private float lastSyncedTyreTemperatureFlC = (float) TYRE_INITIAL_TEMPERATURE_C;
     private float lastSyncedTyreTemperatureFrC = (float) TYRE_INITIAL_TEMPERATURE_C;
     private float lastSyncedTyreTemperatureRlC = (float) TYRE_INITIAL_TEMPERATURE_C;
@@ -488,6 +514,106 @@ public class OpenwheelCarEntity extends Entity {
 
     public int getLastAcceptedInputSequence() {
         return lastAcceptedInputSequence;
+    }
+
+    public void setBasicAiIdentity(BasicAiDriverIdentity identity) {
+        basicAiIdentity = identity;
+        if (identity == null) {
+            setAutonomousControlEnabled(false);
+        }
+    }
+
+    public Optional<BasicAiDriverIdentity> getBasicAiIdentity() {
+        return Optional.ofNullable(basicAiIdentity);
+    }
+
+    public boolean isBasicAiOwned() {
+        return basicAiIdentity != null;
+    }
+
+    public boolean isAutonomousControlEnabled() {
+        return autonomousControlEnabled;
+    }
+
+    public void resetAiDrivetrain() {
+        aiLaunchTicks = AiGearboxPolicy.PRE_REV_TICKS;
+        aiShiftCooldownTicks = 0;
+    }
+
+    public boolean isAiObstacleAhead() {
+        if (!isBasicAiOwned() || !autonomousControlEnabled || level().isClientSide()) {
+            return false;
+        }
+        Vec3 forward = Vec3.directionFromRotation(0.0f, getYRot());
+        double probeDistance = Math.max(2.0, Math.min(8.0, getDeltaMovement().horizontalDistance() * 20.0 + 2.0));
+        Vec3 requested = new Vec3(forward.x * probeDistance, 0.0, forward.z * probeDistance);
+        Vec3 before = position();
+        if (emptyShapeBlockIntersectsMovement(before, requested)) {
+            return true;
+        }
+        if (!onGround()) {
+            return false;
+        }
+        Vec3 terrainMovement = terrainFollowingMovement(before, requested);
+        return terrainMovement == null;
+    }
+    public void tickAiDrivetrain() {
+        if (!isBasicAiOwned() || !autonomousControlEnabled || getControllingPassenger() != null) {
+            return;
+        }
+        if (aiLaunchTicks > 0) {
+            if (getGear() != NEUTRAL_GEAR) {
+                setGear(NEUTRAL_GEAR);
+            }
+            autonomousThrottle = 0.0f;
+            autonomousBrake = 1.0f;
+            entityData.set(RPM, Math.max(getRpm(), (int) Math.round(vehicleProfile().launchRpm() + 500.0)));
+            aiLaunchTicks--;
+            return;
+        }
+        if (getGear() == NEUTRAL_GEAR) {
+            entityData.set(RPM, Math.max(getRpm(), (int) Math.round(vehicleProfile().launchRpm() + 500.0)));
+            shiftLocal(1);
+            return;
+        }
+        int maxGear = vehicleProfile().maxForwardGear();
+        int gear = Math.max(1, getGear());
+        int projectedLowerRpm = gear <= 1 ? getRpm() : (int) Math.round(getSpeedKmh() / Math.max(1.0, vehicleProfile().gearTopSpeedKmh(gear - 1) * setup.topSpeedCoefficient()) * vehicleProfile().redlineRpm());
+        AiGearboxPolicy.Decision decision = aiGearboxPolicy.decide(new AiGearboxPolicy.State(gear, maxGear, getRpm(), (int) Math.round(vehicleProfile().redlineRpm()), autonomousThrottle, autonomousBrake,
+            0, aiShiftCooldownTicks, projectedLowerRpm));
+        aiShiftCooldownTicks = decision.cooldownTicks();
+        if (decision.action() == AiGearboxPolicy.Action.SHIFT_UP) {
+            shiftLocal(1);
+        } else if (decision.action() == AiGearboxPolicy.Action.SHIFT_DOWN) {
+            shiftLocal(-1);
+        }
+    }
+
+    public int getAiMaxForwardGear() {
+        return vehicleProfile().maxForwardGear();
+    }
+
+    public void setAutonomousControlEnabled(boolean enabled) {
+        autonomousControlEnabled = enabled && basicAiIdentity != null && getControllingPassenger() == null;
+        if (!autonomousControlEnabled) {
+            clearAutonomousDriveInput();
+        }
+    }
+
+    public void applyAutonomousDriveInput(BasicAiDriveCommand command) {
+        if (!autonomousControlEnabled || !isBasicAiOwned()) {
+            clearAutonomousDriveInput();
+            return;
+        }
+        autonomousThrottle = command.throttle();
+        autonomousBrake = command.brake();
+        autonomousSteering = command.steering();
+    }
+
+    public void clearAutonomousDriveInput() {
+        autonomousThrottle = 0.0f;
+        autonomousBrake = 0.0f;
+        autonomousSteering = 0.0f;
     }
 
     public void setKeyboardSteeringTuning(double lowSpeedSteeringRate, double highSpeedSteeringRate, double lowSpeedCenteringRate, double highSpeedCenteringRate,
@@ -1289,19 +1415,29 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public void crossStartFinishLine(BlockPos pos, Direction markerFacing) {
-        crossStartFinishLine(pos, markerFacing, 1.0);
+        crossStartFinishLine(pos, markerFacing, 1.0, "block:" + pos.asLong());
     }
 
     private void crossStartFinishLine(BlockPos pos, Direction markerFacing, double movementT) {
+        crossStartFinishLine(pos, markerFacing, movementT, "block:" + pos.asLong());
+    }
+
+    private void crossStartFinishLine(BlockPos pos, Direction markerFacing, double movementT, String gateKey) {
         if (!participatesInRaceTiming()) {
             return;
         }
         long packed = pos.asLong();
+        if (gateKey.equals(lockedStartFinishGate)) {
+            return;
+        }
         if (packed == lastStartFinishMarker && level().getGameTime() == lastStartFinishTriggerAt) {
             return;
         }
         lastStartFinishMarker = packed;
         lastStartFinishTriggerAt = level().getGameTime();
+        lockedStartFinishGate = gateKey;
+        lockedStartFinishPlane = markerFacing.getAxis() == Direction.Axis.X ? pos.getX() + 0.5 : pos.getZ() + 0.5;
+        lockedStartFinishAxisX = markerFacing.getAxis() == Direction.Axis.X;
         if (!isForwardPass(markerFacing)) {
             invalidateLap("reverse pass");
             return;
@@ -1460,6 +1596,8 @@ public class OpenwheelCarEntity extends Entity {
     private void resetLapProgress() {
         visitedCheckpoints.clear();
         visitedCheckpointSet.clear();
+        lockedStartFinishGate = "";
+        lockedStartFinishPlane = Double.NaN;
         visitedTimingSegments.clear();
         currentLapCumulativeBySegment.clear();
         currentLapMiniBySegment.clear();
@@ -1524,6 +1662,10 @@ public class OpenwheelCarEntity extends Entity {
             tickLiveLapDelta();
             tickCompletedLapLinger();
             tickPitStop();
+            BasicAiFleetManager.prepareCarTick(this);
+            if (isBasicAiOwned() && autonomousControlEnabled) {
+                tickAiDrivetrain();
+            }
             Vec3 preDelta = getDeltaMovement();
             if (preDelta.horizontalDistanceSqr() > 1.0E-4) {
                 clearHollowCollisionBlocks(false);
@@ -1574,6 +1716,11 @@ public class OpenwheelCarEntity extends Entity {
             return InteractionResult.PASS;
         }
 
+        if (autonomousControlEnabled) {
+            player.displayClientMessage(Component.literal("Stop the AI fleet before interacting with this car."), true);
+            return InteractionResult.CONSUME;
+        }
+
         // Sneak + empty hand on empty car → pick up as item
         if (getPassengers().isEmpty() && player.isShiftKeyDown() && heldStack.isEmpty()) {
             ItemStack item = createPickupItem();
@@ -1607,7 +1754,7 @@ public class OpenwheelCarEntity extends Entity {
 
     @Override
     protected boolean canAddPassenger(Entity passenger) {
-        return getPassengers().isEmpty() && passenger instanceof Player;
+        return !autonomousControlEnabled && getPassengers().isEmpty() && passenger instanceof Player;
     }
 
     @Override
@@ -1690,6 +1837,14 @@ public class OpenwheelCarEntity extends Entity {
         tyreTemperatureFrC = input.getDoubleOr("TyreTemperatureFr", savedTyreTemperature);
         tyreTemperatureRlC = input.getDoubleOr("TyreTemperatureRl", savedTyreTemperature);
         tyreTemperatureRrC = input.getDoubleOr("TyreTemperatureRr", savedTyreTemperature);
+        tyreCarcassTemperatureFlC = input.getDoubleOr("TyreCarcassTemperatureFl", tyreTemperatureFlC);
+        tyreCarcassTemperatureFrC = input.getDoubleOr("TyreCarcassTemperatureFr", tyreTemperatureFrC);
+        tyreCarcassTemperatureRlC = input.getDoubleOr("TyreCarcassTemperatureRl", tyreTemperatureRlC);
+        tyreCarcassTemperatureRrC = input.getDoubleOr("TyreCarcassTemperatureRr", tyreTemperatureRrC);
+        tyreSlipExposureFl = input.getDoubleOr("TyreSlipExposureFl", 0.0);
+        tyreSlipExposureFr = input.getDoubleOr("TyreSlipExposureFr", 0.0);
+        tyreSlipExposureRl = input.getDoubleOr("TyreSlipExposureRl", 0.0);
+        tyreSlipExposureRr = input.getDoubleOr("TyreSlipExposureRr", 0.0);
         resetSyncedTyreTemperatureCache();
         tyreGraining = input.getDoubleOr("TyreGraining", 0.0);
         tyrePatching = input.getDoubleOr("TyrePatching", 0.0);
@@ -1729,6 +1884,27 @@ public class OpenwheelCarEntity extends Entity {
         steeringAngle = input.getDoubleOr("SteeringAngle", 0.0);
         yawRate = input.getDoubleOr("YawRate", 0.0);
         lapStartedAt = input.getDoubleOr("LapStartedAtPrecise", input.getLongOr("LapStartedAt", -1L));
+        basicAiIdentity = readBasicAiIdentity(input);
+        autonomousControlEnabled = false;
+        clearAutonomousDriveInput();
+    }
+
+    private BasicAiDriverIdentity readBasicAiIdentity(ValueInput input) {
+        if (!input.getBooleanOr("BasicAiOwned", false)) {
+            return null;
+        }
+        try {
+            return new BasicAiDriverIdentity(
+                UUID.fromString(input.getStringOr("BasicAiDriverId", "")),
+                UUID.fromString(input.getStringOr("BasicAiFleetId", "")),
+                UUID.fromString(input.getStringOr("BasicAiTrackId", "")),
+                input.getIntOr("BasicAiGridIndex", 1),
+                input.getStringOr("BasicAiDisplayName", "AI-01"),
+                input.getLongOr("BasicAiSeed", 0L)
+            );
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     @Override
@@ -1760,6 +1936,14 @@ public class OpenwheelCarEntity extends Entity {
         output.putDouble("TyreTemperatureFr", tyreTemperatureFrC);
         output.putDouble("TyreTemperatureRl", tyreTemperatureRlC);
         output.putDouble("TyreTemperatureRr", tyreTemperatureRrC);
+        output.putDouble("TyreCarcassTemperatureFl", tyreCarcassTemperatureFlC);
+        output.putDouble("TyreCarcassTemperatureFr", tyreCarcassTemperatureFrC);
+        output.putDouble("TyreCarcassTemperatureRl", tyreCarcassTemperatureRlC);
+        output.putDouble("TyreCarcassTemperatureRr", tyreCarcassTemperatureRrC);
+        output.putDouble("TyreSlipExposureFl", tyreSlipExposureFl);
+        output.putDouble("TyreSlipExposureFr", tyreSlipExposureFr);
+        output.putDouble("TyreSlipExposureRl", tyreSlipExposureRl);
+        output.putDouble("TyreSlipExposureRr", tyreSlipExposureRr);
         output.putDouble("TyreGraining", tyreGraining);
         output.putDouble("TyrePatching", tyrePatching);
         output.putInt("Livery", getLivery());
@@ -1795,6 +1979,15 @@ public class OpenwheelCarEntity extends Entity {
         output.putDouble("YawRate", yawRate);
         output.putDouble("LapStartedAtPrecise", lapStartedAt);
         output.putLong("LapStartedAt", lapStartedAt < 0.0 ? -1L : (long) Math.floor(lapStartedAt));
+        if (basicAiIdentity != null) {
+            output.putBoolean("BasicAiOwned", true);
+            output.putString("BasicAiDriverId", basicAiIdentity.driverId().toString());
+            output.putString("BasicAiFleetId", basicAiIdentity.fleetId().toString());
+            output.putString("BasicAiTrackId", basicAiIdentity.trackId().toString());
+            output.putInt("BasicAiGridIndex", basicAiIdentity.gridIndex());
+            output.putString("BasicAiDisplayName", basicAiIdentity.displayName());
+            output.putLong("BasicAiSeed", basicAiIdentity.seed());
+        }
     }
 
     private boolean isOnPitStopMark() {
@@ -2014,72 +2207,112 @@ public class OpenwheelCarEntity extends Entity {
             return;
         }
         Vec3 current = position();
-        VirtualMarkerCrossing best = null;
-        AABB swept = new AABB(
-            Math.min(beforeMove.x, current.x) - 1.5,
-            getBoundingBox().minY - 0.2,
-            Math.min(beforeMove.z, current.z) - 1.5,
-            Math.max(beforeMove.x, current.x) + 1.5,
-            getBoundingBox().maxY + 0.2,
-            Math.max(beforeMove.z, current.z) + 1.5
-        );
+        releaseStartFinishGateIfClear(current);
+        AABB swept = sweptBoundingBox(beforeMove).inflate(1.5, 0.2, 1.5);
         int minX = (int) Math.floor(swept.minX);
         int maxX = (int) Math.floor(swept.maxX);
         int minY = (int) Math.floor(swept.minY);
         int maxY = (int) Math.floor(swept.maxY);
         int minZ = (int) Math.floor(swept.minZ);
         int maxZ = (int) Math.floor(swept.maxZ);
+        List<PlacedMarkerGateGeometry.Marker> markers = new java.util.ArrayList<>();
         for (int y = minY; y <= maxY; y++) {
             for (int x = minX; x <= maxX; x++) {
                 for (int z = minZ; z <= maxZ; z++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState state = level().getBlockState(pos);
                     Block block = state.getBlock();
-                    if (block != OWRBlocks.START_FINISH.get() && block != OWRBlocks.CHECKPOINT.get()) {
+                    PlacedMarkerGateGeometry.MarkerType type;
+                    if (block == OWRBlocks.START_FINISH.get()) {
+                        type = PlacedMarkerGateGeometry.MarkerType.START_FINISH;
+                    } else if (block == OWRBlocks.CHECKPOINT.get()) {
+                        type = PlacedMarkerGateGeometry.MarkerType.CHECKPOINT;
+                    } else {
                         continue;
                     }
                     Direction facing = state.getValue(net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING);
-                    Optional<TrackGeometry.LineCrossing> crossing = TrackGeometry.crossing(beforeMove, current, virtualMarkerLeftPoint(pos, facing), virtualMarkerRightPoint(pos, facing));
-                    if (crossing.isPresent() && (best == null || crossing.get().movementT() < best.crossing().movementT())) {
-                        best = new VirtualMarkerCrossing(pos, facing, block == OWRBlocks.START_FINISH.get(), crossing.get());
-                    }
+                    markers.add(PlacedMarkerGateGeometry.Marker.from(type, facing, x, y, z));
                 }
+            }
+        }
+        if (markers.isEmpty()) {
+            return;
+        }
+        AABB currentBox = getBoundingBox();
+        Vec3 offset = beforeMove.subtract(current);
+        AABB previousBox = new AABB(
+            currentBox.minX + offset.x,
+            currentBox.minY + offset.y,
+            currentBox.minZ + offset.z,
+            currentBox.maxX + offset.x,
+            currentBox.maxY + offset.y,
+            currentBox.maxZ + offset.z
+        );
+        PlacedMarkerGateGeometry.Crossing best = null;
+        for (PlacedMarkerGateGeometry.Gate gate : PlacedMarkerGateGeometry.merge(markers)) {
+            double expansion = gate.type() == PlacedMarkerGateGeometry.MarkerType.START_FINISH
+                ? markerLateralSupport(gate.axis()) + MARKER_GATE_TOLERANCE
+                : 0.0;
+            Optional<PlacedMarkerGateGeometry.Crossing> crossing = PlacedMarkerGateGeometry.earliestCrossing(
+                beforeMove,
+                current,
+                beforeMove.y,
+                current.y,
+                (previousBox.maxY - previousBox.minY) * 0.5,
+                (currentBox.maxY - currentBox.minY) * 0.5,
+                List.of(gate),
+                expansion
+            );
+            if (crossing.isPresent() && (best == null || crossing.get().crossing().movementT() < best.crossing().movementT())) {
+                best = crossing.get();
             }
         }
         if (best == null) {
             return;
         }
-        if (best.startFinish()) {
-            crossStartFinishLine(best.pos(), best.facing(), best.crossing().movementT());
+        Direction facing = gateFacing(best.gate());
+        BlockPos markerPosition = gateMarkerPosition(best.gate());
+        if (best.gate().type() == PlacedMarkerGateGeometry.MarkerType.START_FINISH) {
+            crossStartFinishLine(markerPosition, facing, best.crossing().movementT(), best.gate().key());
         } else {
-            crossCheckpoint(best.pos(), best.facing());
+            crossCheckpoint(markerPosition, facing);
         }
     }
 
-    private TrackDefinition.Point3 virtualMarkerLeftPoint(BlockPos pos, Direction facing) {
-        double centerX = pos.getX() + 0.5;
-        double centerY = pos.getY() + 0.5;
-        double centerZ = pos.getZ() + 0.5;
-        return switch (facing.getAxis()) {
-            case X -> new TrackDefinition.Point3(centerX, centerY, centerZ - 0.5);
-            case Z -> new TrackDefinition.Point3(centerX - 0.5, centerY, centerZ);
-            default -> new TrackDefinition.Point3(centerX - 0.5, centerY, centerZ);
-        };
+    private double markerLateralSupport(PlacedMarkerGateGeometry.Axis axis) {
+        Vec3 forward = Vec3.directionFromRotation(0.0f, getYRot());
+        Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
+        return axis == PlacedMarkerGateGeometry.Axis.X
+            ? Math.abs(right.z) * COMPONENT_BODY_HALF_WIDTH + Math.abs(forward.z) * COMPONENT_BODY_HALF_LENGTH
+            : Math.abs(right.x) * COMPONENT_BODY_HALF_WIDTH + Math.abs(forward.x) * COMPONENT_BODY_HALF_LENGTH;
     }
 
-    private TrackDefinition.Point3 virtualMarkerRightPoint(BlockPos pos, Direction facing) {
-        double centerX = pos.getX() + 0.5;
-        double centerY = pos.getY() + 0.5;
-        double centerZ = pos.getZ() + 0.5;
-        return switch (facing.getAxis()) {
-            case X -> new TrackDefinition.Point3(centerX, centerY, centerZ + 0.5);
-            case Z -> new TrackDefinition.Point3(centerX + 0.5, centerY, centerZ);
-            default -> new TrackDefinition.Point3(centerX + 0.5, centerY, centerZ);
-        };
+    private void releaseStartFinishGateIfClear(Vec3 current) {
+        if (lockedStartFinishGate.isBlank() || Double.isNaN(lockedStartFinishPlane)) {
+            return;
+        }
+        double distance = lockedStartFinishAxisX
+            ? Math.abs(current.x - lockedStartFinishPlane)
+            : Math.abs(current.z - lockedStartFinishPlane);
+        if (distance > COMPONENT_BODY_HALF_LENGTH + MARKER_GATE_REARM_DISTANCE) {
+            lockedStartFinishGate = "";
+            lockedStartFinishPlane = Double.NaN;
+        }
     }
 
-    private record VirtualMarkerCrossing(BlockPos pos, Direction facing, boolean startFinish, TrackGeometry.LineCrossing crossing) {
+    private Direction gateFacing(PlacedMarkerGateGeometry.Gate gate) {
+        if (gate.axis() == PlacedMarkerGateGeometry.Axis.X) {
+            return gate.facingSign() < 0 ? Direction.WEST : Direction.EAST;
+        }
+        return gate.facingSign() < 0 ? Direction.NORTH : Direction.SOUTH;
     }
+
+    private BlockPos gateMarkerPosition(PlacedMarkerGateGeometry.Gate gate) {
+        int x = gate.axis() == PlacedMarkerGateGeometry.Axis.X ? gate.planeCoordinate() : gate.lateralStart();
+        int z = gate.axis() == PlacedMarkerGateGeometry.Axis.X ? gate.lateralStart() : gate.planeCoordinate();
+        return new BlockPos(x, gate.y(), z);
+    }
+
 
     private void scanStewardTimingLines(Vec3 beforeMove, Vec3 actualMovement) {
         if (!participatesInRaceTiming() || !(level() instanceof ServerLevel serverLevel) || lapStartedAt < 0.0 || actualMovement.horizontalDistanceSqr() <= 1.0E-8 || !(getControllingPassenger() instanceof ServerPlayer player)) {
@@ -2347,11 +2580,18 @@ public class OpenwheelCarEntity extends Entity {
         double steering = inputSteering;
         double brake = inputBrake;
         if (getControllingPassenger() == null) {
+            if (autonomousControlEnabled && basicAiIdentity != null) {
+                tickMovement(autonomousThrottle, autonomousBrake, autonomousSteering, false, debugMovement);
+                return;
+            }
             ersLiftConfirmTicks = 0;
             ersLiftAndCoastPowerWatts = 0.0;
             ersLiftAndCoastArmed = false;
             tickPassiveMovement(debugMovement);
             return;
+        }
+        if (autonomousControlEnabled) {
+            setAutonomousControlEnabled(false);
         }
         tickMovement(throttle, brake, steering, inputUsesKeyboardSteeringTuning, debugMovement);
     }
@@ -2646,10 +2886,10 @@ public class OpenwheelCarEntity extends Entity {
             double frTyreWearGrip = Math.max(0.45, frTyreWearFactor);
             double rlTyreWearGrip = Math.max(0.45, rlTyreWearFactor);
             double rrTyreWearGrip = Math.max(0.45, rrTyreWearFactor);
-            double flTyreMuCoefficient = tyreMuCoefficient * tyreTemperatureMuMultiplier(getTyreCompound(), tyreTemperatureFlC);
-            double frTyreMuCoefficient = tyreMuCoefficient * tyreTemperatureMuMultiplier(getTyreCompound(), tyreTemperatureFrC);
-            double rlTyreMuCoefficient = tyreMuCoefficient * tyreTemperatureMuMultiplier(getTyreCompound(), tyreTemperatureRlC);
-            double rrTyreMuCoefficient = tyreMuCoefficient * tyreTemperatureMuMultiplier(getTyreCompound(), tyreTemperatureRrC);
+            double flTyreMuCoefficient = blendedTyreMuCoefficient(getTyreCompound(), tyreTemperatureFlC, tyreCarcassTemperatureFlC);
+            double frTyreMuCoefficient = blendedTyreMuCoefficient(getTyreCompound(), tyreTemperatureFrC, tyreCarcassTemperatureFrC);
+            double rlTyreMuCoefficient = blendedTyreMuCoefficient(getTyreCompound(), tyreTemperatureRlC, tyreCarcassTemperatureRlC);
+            double rrTyreMuCoefficient = blendedTyreMuCoefficient(getTyreCompound(), tyreTemperatureRrC, tyreCarcassTemperatureRrC);
             double flSurfaceMuLat = asphaltMuLateral * flSurfaceGrip * flTyreMuCoefficient;
             double frSurfaceMuLat = asphaltMuLateral * frSurfaceGrip * frTyreMuCoefficient;
             double rlSurfaceMuLat = asphaltMuLateral * rlSurfaceGrip * rlTyreMuCoefficient;
@@ -3980,6 +4220,7 @@ public class OpenwheelCarEntity extends Entity {
     private record TyreForces(double longitudinal, double lateral, double demand) {}
     private record WheelForces(double bodyLongitudinalForce, double bodyLateralForce, double demand, double slipAngle, double relaxedLateralForce, double yawMoment) {}
     private record WheelWearSample(double demand, double slipAngle, double longitudinalForce, double lateralForce, double normalLoad) {}
+    private record WheelThermalUpdate(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure) {}
 
     private static double tyreRelaxationGain(double speedMetersPerSecond, double relaxationLength, double dt) {
         double timeConstant = relaxationLength / Math.max(1.0, speedMetersPerSecond);
@@ -4324,10 +4565,22 @@ public class OpenwheelCarEntity extends Entity {
         double rearBrakeHeatPower = brakeInput * TYRE_BRAKE_HEAT_POWER_PER_INPUT * (1.0 - brakeFrontBias);
         double workingMin = tyreWorkingTemperatureMin(getTyreCompound());
         double workingMax = tyreWorkingTemperatureMax(getTyreCompound());
-        tyreTemperatureFlC = nextWheelTyreTemperature(tyreTemperatureFlC, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPower, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fl);
-        tyreTemperatureFrC = nextWheelTyreTemperature(tyreTemperatureFrC, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPower, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fr);
-        tyreTemperatureRlC = nextWheelTyreTemperature(tyreTemperatureRlC, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPower, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rl);
-        tyreTemperatureRrC = nextWheelTyreTemperature(tyreTemperatureRrC, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPower, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rr);
+        WheelThermalUpdate flThermal = nextWheelTyreThermalState(tyreTemperatureFlC, tyreCarcassTemperatureFlC, tyreSlipExposureFl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPower, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fl);
+        WheelThermalUpdate frThermal = nextWheelTyreThermalState(tyreTemperatureFrC, tyreCarcassTemperatureFrC, tyreSlipExposureFr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPower, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fr);
+        WheelThermalUpdate rlThermal = nextWheelTyreThermalState(tyreTemperatureRlC, tyreCarcassTemperatureRlC, tyreSlipExposureRl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPower, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rl);
+        WheelThermalUpdate rrThermal = nextWheelTyreThermalState(tyreTemperatureRrC, tyreCarcassTemperatureRrC, tyreSlipExposureRr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPower, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rr);
+        tyreTemperatureFlC = flThermal.surfaceTemperatureC();
+        tyreTemperatureFrC = frThermal.surfaceTemperatureC();
+        tyreTemperatureRlC = rlThermal.surfaceTemperatureC();
+        tyreTemperatureRrC = rrThermal.surfaceTemperatureC();
+        tyreCarcassTemperatureFlC = flThermal.carcassTemperatureC();
+        tyreCarcassTemperatureFrC = frThermal.carcassTemperatureC();
+        tyreCarcassTemperatureRlC = rlThermal.carcassTemperatureC();
+        tyreCarcassTemperatureRrC = rrThermal.carcassTemperatureC();
+        tyreSlipExposureFl = flThermal.slipExposure();
+        tyreSlipExposureFr = frThermal.slipExposure();
+        tyreSlipExposureRl = rlThermal.slipExposure();
+        tyreSlipExposureRr = rrThermal.slipExposure();
         double frontTyreTemperatureC = frontTyreTemperatureC();
         double rearTyreTemperatureC = rearTyreTemperatureC();
 
@@ -4350,10 +4603,10 @@ public class OpenwheelCarEntity extends Entity {
                 * (1.0 + tyreGraining * 0.95 + tyrePatching * 0.45)
                 * raceControlTyreWearModifier();
             addWheelTyreWear(
-                wheelTyreWear(fl, steeringWear * 0.10, frontTyreTemperatureC, getTyreCompound()) * wearScale,
-                wheelTyreWear(fr, steeringWear * 0.10, frontTyreTemperatureC, getTyreCompound()) * wearScale,
-                wheelTyreWear(rl, 0.0, rearTyreTemperatureC, getTyreCompound()) * wearScale,
-                wheelTyreWear(rr, 0.0, rearTyreTemperatureC, getTyreCompound()) * wearScale
+                wheelTyreWear(fl, steeringWear * 0.10, tyreCarcassTemperatureFlC, getTyreCompound()) * wearScale,
+                wheelTyreWear(fr, steeringWear * 0.10, tyreCarcassTemperatureFrC, getTyreCompound()) * wearScale,
+                wheelTyreWear(rl, 0.0, tyreCarcassTemperatureRlC, getTyreCompound()) * wearScale,
+                wheelTyreWear(rr, 0.0, tyreCarcassTemperatureRrC, getTyreCompound()) * wearScale
             );
         }
         syncTyreTemperature();
@@ -4369,13 +4622,24 @@ public class OpenwheelCarEntity extends Entity {
         return load * clamp(speedMetersPerSecond / 45.0, 0.0, 1.25);
     }
 
-    private double nextWheelTyreTemperature(double temperatureC, double speedMetersPerSecond, double compoundRollingHeatGain, double compoundNearSaturationHeatGain, double brakeHeatPower, double surfaceCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier, WheelWearSample sample) {
-        if (speedMetersPerSecond <= 0.05 || !onGround()) {
-            return clamp(temperatureC - wheelCoolingDelta(temperatureC, speedMetersPerSecond, surfaceCoolingMultiplier, stationaryCoolingMultiplier, windCoolingMultiplier), TYRE_AMBIENT_TEMPERATURE_C, 145.0);
-        }
-        double heat = wheelHeatDelta(sample, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, brakeHeatPower);
-        double cooling = wheelCoolingDelta(temperatureC, speedMetersPerSecond, surfaceCoolingMultiplier, stationaryCoolingMultiplier, windCoolingMultiplier);
-        return clamp(temperatureC + heat - cooling, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+    private WheelThermalUpdate nextWheelTyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure, double speedMetersPerSecond, double compoundRollingHeatGain, double compoundNearSaturationHeatGain, double brakeHeatPower, double surfaceCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier, WheelWearSample sample) {
+        double heatPower = wheelHeatPower(sample, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, brakeHeatPower);
+        VehiclePhysics.TyreThermalState state = VehiclePhysics.nextTyreThermalState(
+            surfaceTemperatureC,
+            carcassTemperatureC,
+            slipExposure,
+            heatPower,
+            1.0,
+            speedMetersPerSecond,
+            surfaceCoolingMultiplier,
+            stationaryCoolingMultiplier,
+            windCoolingMultiplier,
+            sample.demand,
+            sample.slipAngle,
+            PHYSICS_DT,
+            onGround()
+        );
+        return new WheelThermalUpdate(state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure());
     }
 
     private static double wheelHeatDelta(WheelWearSample sample, double speedMetersPerSecond, double compoundRollingHeatGain, double compoundNearSaturationHeatGain, double brakeHeatPower) {
@@ -4391,9 +4655,12 @@ public class OpenwheelCarEntity extends Entity {
         return VehiclePhysics.tyreLateralNearSaturation(sample.lateralForce, sample.normalLoad);
     }
 
-    private static double wheelHeatPower(WheelWearSample sample, double speedMetersPerSecond) {
-        return VehiclePhysics.tyreRollingHeatPowerWatts(sample.normalLoad, speedMetersPerSecond, ROLLING_RESISTANCE)
-            + VehiclePhysics.tyreSlipHeatPowerWatts(sample.longitudinalForce, sample.lateralForce, sample.normalLoad, speedMetersPerSecond, sample.demand, sample.slipAngle);
+    private static double wheelHeatPower(WheelWearSample sample, double speedMetersPerSecond, double compoundRollingHeatGain, double compoundNearSaturationHeatGain, double brakeHeatPower) {
+        double rollingHeat = VehiclePhysics.tyreRollingHeatPowerWatts(sample.normalLoad, speedMetersPerSecond, ROLLING_RESISTANCE) * compoundRollingHeatGain;
+        double lateralNearSaturation = wheelLateralNearSaturation(sample);
+        double nearSaturationHeat = Math.abs(sample.lateralForce) * lateralNearSaturation * lateralNearSaturation * speedMetersPerSecond * 0.55 * compoundNearSaturationHeatGain * VehiclePhysics.TYRE_SLIP_HEAT_FRACTION;
+        double slipHeat = VehiclePhysics.tyreSlipHeatPowerWatts(sample.longitudinalForce, sample.lateralForce, sample.normalLoad, speedMetersPerSecond, sample.demand, sample.slipAngle);
+        return rollingHeat + nearSaturationHeat + slipHeat + brakeHeatPower;
     }
 
     private static double wheelCoolingDelta(double temperatureC, double speedMetersPerSecond, double surfaceCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier) {
@@ -4419,6 +4686,14 @@ public class OpenwheelCarEntity extends Entity {
         tyreTemperatureFrC = TYRE_INITIAL_TEMPERATURE_C;
         tyreTemperatureRlC = TYRE_INITIAL_TEMPERATURE_C;
         tyreTemperatureRrC = TYRE_INITIAL_TEMPERATURE_C;
+        tyreCarcassTemperatureFlC = TYRE_INITIAL_TEMPERATURE_C;
+        tyreCarcassTemperatureFrC = TYRE_INITIAL_TEMPERATURE_C;
+        tyreCarcassTemperatureRlC = TYRE_INITIAL_TEMPERATURE_C;
+        tyreCarcassTemperatureRrC = TYRE_INITIAL_TEMPERATURE_C;
+        tyreSlipExposureFl = 0.0;
+        tyreSlipExposureFr = 0.0;
+        tyreSlipExposureRl = 0.0;
+        tyreSlipExposureRr = 0.0;
         resetSyncedTyreTemperatureCache();
         tyreGraining = 0.0;
         tyrePatching = 0.0;
@@ -4503,6 +4778,11 @@ public class OpenwheelCarEntity extends Entity {
         double warmup = 1.0 - coldSeverity * coldSeverity * 0.34;
         double overheating = 1.0 - hotSeverity * hotSeverity * 0.26;
         return clamp(warmup * overheating, 0.62, 1.03);
+    }
+
+    private static double blendedTyreMuCoefficient(int compound, double surfaceTemperatureC, double carcassTemperatureC) {
+        return 0.82 * tyreTemperatureMuMultiplier(compound, surfaceTemperatureC)
+            + 0.18 * tyreTemperatureMuMultiplier(compound, carcassTemperatureC);
     }
 
     public static double tyreTemperatureWearMultiplier(int compound, double temperatureC) {

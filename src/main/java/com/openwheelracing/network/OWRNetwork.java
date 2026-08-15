@@ -15,6 +15,14 @@ import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.content.race.RaceFlagMode;
 import com.openwheelracing.content.race.TeamCarRow;
+import com.openwheelracing.content.race.timing.LiveRaceTimingService;
+import com.openwheelracing.content.race.timing.LiveRaceTimingSnapshot;
+import com.openwheelracing.content.race.timing.RaceGap;
+import com.openwheelracing.content.race.timing.RaceParticipantKey;
+import com.openwheelracing.content.race.timing.RaceParticipantKind;
+import com.openwheelracing.content.race.timing.RacePositionChange;
+import com.openwheelracing.content.race.timing.RaceProgressConfidence;
+import com.openwheelracing.content.race.timing.RaceTimingRow;
 import com.openwheelracing.content.track.TrackEditorMaterial;
 import com.openwheelracing.content.track.TrackEditorMode;
 import com.openwheelracing.content.track.TrackEditorOperation;
@@ -49,7 +57,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "13";
+    private static final String PROTOCOL = "14";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -105,6 +113,7 @@ public final class OWRNetwork {
         registrar.playToClient(TimingDeltaHudMessage.TYPE, codec(TimingDeltaHudMessage::encode, TimingDeltaHudMessage::decode), TimingDeltaHudMessage::handle);
         registrar.playToClient(LiveLapDeltaHudMessage.TYPE, codec(LiveLapDeltaHudMessage::encode, LiveLapDeltaHudMessage::decode), LiveLapDeltaHudMessage::handle);
         registrar.playToClient(MonitorTelemetryMessage.TYPE, codec(MonitorTelemetryMessage::encode, MonitorTelemetryMessage::decode), MonitorTelemetryMessage::handle);
+        registrar.playToClient(LiveRaceTimingSnapshotMessage.TYPE, codec(LiveRaceTimingSnapshotMessage::encode, LiveRaceTimingSnapshotMessage::decode), LiveRaceTimingSnapshotMessage::handle);
     }
 
     public static void sendDriveInputAck(ServerPlayer player, OpenwheelCarEntity car) {
@@ -884,6 +893,19 @@ public final class OWRNetwork {
         }
     }
 
+    public static void sendLiveRaceTiming(ServerPlayer player, LiveRaceTimingSnapshot snapshot) {
+        PacketDistributor.sendToPlayer(player, new LiveRaceTimingSnapshotMessage(snapshot));
+    }
+
+    public static void broadcastLiveRaceTiming(ServerLevel level, LiveRaceTimingSnapshot snapshot) {
+        LiveRaceTimingSnapshotMessage message = new LiveRaceTimingSnapshotMessage(snapshot);
+        for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
+            if (player.level().dimension().equals(level.dimension())) {
+                PacketDistributor.sendToPlayer(player, message);
+            }
+        }
+    }
+
     public static void sendRaceDirectorSnapshot(ServerPlayer player, RaceDirectorSnapshot snapshot) {
         PacketDistributor.sendToPlayer(player, new RaceDirectorSnapshotMessage(snapshot));
     }
@@ -950,6 +972,144 @@ public final class OWRNetwork {
                 PacketDistributor.sendToPlayer(p, msg);
             }
         }
+    }
+
+    public record LiveRaceTimingSnapshotMessage(LiveRaceTimingSnapshot snapshot) implements CustomPacketPayload {
+        private static final int MAX_ROWS = 32;
+        private static final int MAX_CHANGES = 32;
+        public static final CustomPacketPayload.Type<LiveRaceTimingSnapshotMessage> TYPE = payloadType("live_race_timing_snapshot_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(LiveRaceTimingSnapshotMessage message, FriendlyByteBuf buffer) {
+            LiveRaceTimingSnapshot snapshot = message.snapshot();
+            buffer.writeBoolean(snapshot.active());
+            buffer.writeUtf(snapshot.suspensionReason(), 80);
+            buffer.writeLong(snapshot.sessionId());
+            buffer.writeUtf(snapshot.sessionName(), 80);
+            buffer.writeUUID(snapshot.trackId());
+            buffer.writeUUID(snapshot.routeId());
+            buffer.writeLong(snapshot.revision());
+            buffer.writeLong(snapshot.serverTick());
+            buffer.writeDouble(snapshot.routeLengthMeters());
+            List<RaceTimingRow> rows = snapshot.rows().stream().limit(MAX_ROWS).toList();
+            buffer.writeVarInt(rows.size());
+            for (RaceTimingRow row : rows) {
+                encodeTimingRow(buffer, row);
+            }
+            List<RacePositionChange> changes = snapshot.recentPositionChanges().stream().skip(Math.max(0, snapshot.recentPositionChanges().size() - MAX_CHANGES)).toList();
+            buffer.writeVarInt(changes.size());
+            for (RacePositionChange change : changes) {
+                encodePositionChange(buffer, change);
+            }
+        }
+
+        private static LiveRaceTimingSnapshotMessage decode(FriendlyByteBuf buffer) {
+            boolean active = buffer.readBoolean();
+            String reason = buffer.readUtf(80);
+            long sessionId = buffer.readLong();
+            String sessionName = buffer.readUtf(80);
+            UUID trackId = buffer.readUUID();
+            UUID routeId = buffer.readUUID();
+            long revision = buffer.readLong();
+            long serverTick = buffer.readLong();
+            double routeLength = buffer.readDouble();
+            int rowCount = boundedCount(buffer.readVarInt(), MAX_ROWS, "live timing rows");
+            List<RaceTimingRow> rows = new java.util.ArrayList<>(rowCount);
+            for (int index = 0; index < rowCount; index++) {
+                rows.add(decodeTimingRow(buffer));
+            }
+            int changeCount = boundedCount(buffer.readVarInt(), MAX_CHANGES, "live timing position changes");
+            List<RacePositionChange> changes = new java.util.ArrayList<>(changeCount);
+            for (int index = 0; index < changeCount; index++) {
+                changes.add(decodePositionChange(buffer));
+            }
+            return new LiveRaceTimingSnapshotMessage(new LiveRaceTimingSnapshot(active, reason, sessionId, sessionName, trackId, routeId,
+                revision, serverTick, routeLength, rows, changes));
+        }
+
+        private static void handle(LiveRaceTimingSnapshotMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> applyLiveRaceTimingSnapshot(message.snapshot()));
+        }
+    }
+
+    private static int boundedCount(int count, int maximum, String label) {
+        if (count < 0 || count > maximum) {
+            throw new IllegalArgumentException(label + " count " + count + " exceeds " + maximum);
+        }
+        return count;
+    }
+
+    private static void encodeTimingRow(FriendlyByteBuf buffer, RaceTimingRow row) {
+        buffer.writeVarInt(row.position());
+        encodeParticipantKey(buffer, row.participant());
+        buffer.writeUtf(row.displayName(), 40);
+        buffer.writeVarInt(row.entityId());
+        buffer.writeVarInt(row.completedLaps());
+        buffer.writeDouble(row.routeDistanceMeters());
+        buffer.writeDouble(row.absoluteProgressMeters());
+        buffer.writeByte(row.confidence().ordinal());
+        encodeGap(buffer, row.gapToLeader());
+        encodeGap(buffer, row.intervalAhead());
+        buffer.writeInt(row.positionChange());
+    }
+
+    private static RaceTimingRow decodeTimingRow(FriendlyByteBuf buffer) {
+        int position = buffer.readVarInt();
+        RaceParticipantKey participant = decodeParticipantKey(buffer);
+        String name = buffer.readUtf(40);
+        int entityId = buffer.readVarInt();
+        int laps = buffer.readVarInt();
+        double routeDistance = buffer.readDouble();
+        double absoluteProgress = buffer.readDouble();
+        RaceProgressConfidence confidence = enumValue(RaceProgressConfidence.values(), buffer.readUnsignedByte(), RaceProgressConfidence.STALE);
+        RaceGap gap = decodeGap(buffer);
+        RaceGap interval = decodeGap(buffer);
+        return new RaceTimingRow(position, participant, name, entityId, laps, routeDistance, absoluteProgress, confidence, gap, interval, buffer.readInt());
+    }
+
+    private static void encodePositionChange(FriendlyByteBuf buffer, RacePositionChange change) {
+        encodeParticipantKey(buffer, change.participant());
+        buffer.writeUtf(change.displayName(), 40);
+        buffer.writeVarInt(change.oldPosition());
+        buffer.writeVarInt(change.newPosition());
+        buffer.writeVarInt(change.completedLaps());
+        buffer.writeDouble(change.routeDistanceMeters());
+        buffer.writeLong(change.serverTick());
+    }
+
+    private static RacePositionChange decodePositionChange(FriendlyByteBuf buffer) {
+        return new RacePositionChange(decodeParticipantKey(buffer), buffer.readUtf(40), buffer.readVarInt(), buffer.readVarInt(),
+            buffer.readVarInt(), buffer.readDouble(), buffer.readLong());
+    }
+
+    private static void encodeParticipantKey(FriendlyByteBuf buffer, RaceParticipantKey key) {
+        buffer.writeUUID(key.id());
+        buffer.writeByte(key.kind().ordinal());
+    }
+
+    private static RaceParticipantKey decodeParticipantKey(FriendlyByteBuf buffer) {
+        UUID id = buffer.readUUID();
+        RaceParticipantKind kind = enumValue(RaceParticipantKind.values(), buffer.readUnsignedByte(), RaceParticipantKind.PLAYER);
+        return new RaceParticipantKey(id, kind);
+    }
+
+    private static void encodeGap(FriendlyByteBuf buffer, RaceGap gap) {
+        buffer.writeByte(gap.type().ordinal());
+        buffer.writeLong(gap.millis());
+        buffer.writeVarInt(gap.laps());
+    }
+
+    private static RaceGap decodeGap(FriendlyByteBuf buffer) {
+        RaceGap.Type type = enumValue(RaceGap.Type.values(), buffer.readUnsignedByte(), RaceGap.Type.UNAVAILABLE);
+        return new RaceGap(type, buffer.readLong(), buffer.readVarInt());
+    }
+
+    private static <T> T enumValue(T[] values, int ordinal, T fallback) {
+        return ordinal >= 0 && ordinal < values.length ? values[ordinal] : fallback;
     }
 
     public record RaceDirectorSnapshotMessage(RaceDirectorSnapshot snapshot) implements CustomPacketPayload {
@@ -1321,7 +1481,11 @@ public final class OWRNetwork {
                 }
                 menu.setArchiveMode(false);
                 menu.setPage(0);
-                OWRLapRecords.get(player.level()).startNewSession(message.sessionName);
+                OWRLapRecords records = OWRLapRecords.get(player.level());
+                records.startNewSession(message.sessionName);
+                if (player.level() instanceof ServerLevel serverLevel) {
+                    LiveRaceTimingService.start(serverLevel, records.getActiveSessionId(), records.getActiveSessionName());
+                }
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
                 if (player.level() instanceof ServerLevel serverLevel) {
                     broadcastRankingBoard(serverLevel.getServer(), serverLevel);
@@ -1859,6 +2023,15 @@ public final class OWRNetwork {
                     message.relaxedRrLatForce
                 );
             }
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applyLiveRaceTimingSnapshot(LiveRaceTimingSnapshot snapshot) {
+        try {
+            Class<?> client = Class.forName("com.openwheelracing.client.hud.LiveRaceTimingClient");
+            Method method = client.getMethod("apply", LiveRaceTimingSnapshot.class);
+            method.invoke(null, snapshot);
         } catch (ReflectiveOperationException ignored) {
         }
     }

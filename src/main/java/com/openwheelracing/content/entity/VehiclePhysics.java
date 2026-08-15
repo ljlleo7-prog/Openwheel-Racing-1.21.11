@@ -21,6 +21,12 @@ public final class VehiclePhysics {
     public static final double TYRE_HOT_COOLING_PER_SECOND = 0.00250;
     public static final double TYRE_HOT_COOLING_SCALE_C = 150.0;
     public static final double TYRE_G_FORCE_HEAT_FACTOR = 0.61;
+    public static final double TYRE_SURFACE_HEAT_FRACTION = 0.55;
+    public static final double TYRE_CARCASS_TRANSFER_PER_SECOND = 0.12;
+    public static final double TYRE_CARCASS_COOLING_FRACTION = 0.22;
+    public static final double TYRE_EXPOSURE_ATTACK_PER_SECOND = 1.8;
+    public static final double TYRE_EXPOSURE_RELEASE_PER_SECOND = 2.8;
+    public static final double TYRE_EXPOSURE_TRANSFER_FLOOR = 0.05;
 
     private static final double REVERSE_TOP_SPEED_KMH = 60.0;
     private static final double[] GEAR_TOP_SPEEDS_KMH = {0.0, 100.0, 135.0, 170.0, 205.0, 245.0, 280.0, 320.0, 360.0};
@@ -134,6 +140,43 @@ public final class VehiclePhysics {
     public static double nextTyreTemperatureC(double temperatureC, double heatPowerWatts, double compoundHeatGain, double longitudinalG, double lateralG, double speedMetersPerSecond, double dtSeconds) {
         double next = temperatureC + tyreHeatDeltaC(heatPowerWatts, compoundHeatGain, longitudinalG, lateralG, dtSeconds) - tyreCoolingDeltaC(temperatureC, speedMetersPerSecond, dtSeconds);
         return Math.max(TYRE_AMBIENT_TEMPERATURE_C, next);
+    }
+
+    public static TyreThermalState nextTyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure,
+            double heatPowerWatts, double compoundHeatGain, double speedMetersPerSecond, double surfaceCoolingMultiplier,
+            double stationaryCoolingMultiplier, double windCoolingMultiplier, double exposureDemand, double slipAngleRadians,
+            double dtSeconds, boolean groundContact) {
+        double dt = Math.max(0.0, dtSeconds);
+        double abuseTarget = clamp(Math.max(0.0, exposureDemand - 0.82) * 3.0 + Math.abs(slipAngleRadians) / 0.16, 0.0, 1.0);
+        double exposureRate = abuseTarget > slipExposure ? TYRE_EXPOSURE_ATTACK_PER_SECOND : TYRE_EXPOSURE_RELEASE_PER_SECOND;
+        double nextExposure = moveToward(slipExposure, abuseTarget, exposureRate * dt);
+        if (!groundContact) {
+            nextExposure = moveToward(nextExposure, 0.0, TYRE_EXPOSURE_RELEASE_PER_SECOND * dt);
+        }
+
+        double generatedHeat = groundContact ? Math.max(0.0, heatPowerWatts) * Math.max(0.0, compoundHeatGain) * dt / TYRE_HEAT_CAPACITY_J_PER_C : 0.0;
+        double surfaceHeat = generatedHeat * TYRE_SURFACE_HEAT_FRACTION;
+        double surfaceCooling = tyreCoolingDeltaC(surfaceTemperatureC, speedMetersPerSecond, dt)
+            * Math.max(0.0, surfaceCoolingMultiplier)
+            * Math.max(0.0, stationaryCoolingMultiplier)
+            * Math.max(0.0, windCoolingMultiplier);
+        double surface = clamp(surfaceTemperatureC + surfaceHeat - surfaceCooling, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+        double transfer = (surface - carcassTemperatureC) * TYRE_CARCASS_TRANSFER_PER_SECOND * dt * (TYRE_EXPOSURE_TRANSFER_FLOOR + (1.0 - TYRE_EXPOSURE_TRANSFER_FLOOR) * nextExposure);
+        double carcassCooling = tyreCoolingDeltaC(carcassTemperatureC, speedMetersPerSecond, dt) * TYRE_CARCASS_COOLING_FRACTION;
+        double carcass = clamp(carcassTemperatureC + transfer - carcassCooling, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+        return new TyreThermalState(surface, carcass, nextExposure);
+    }
+
+    private static double moveToward(double value, double target, double amount) {
+        if (value < target) return Math.min(target, value + amount);
+        return Math.max(target, value - amount);
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    public record TyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure) {
     }
 
     public static double simulateTyreEquilibriumC(double initialTemperatureC, double heatPowerWatts, double compoundHeatGain, double longitudinalG, double lateralG, double speedMetersPerSecond, int ticks) {

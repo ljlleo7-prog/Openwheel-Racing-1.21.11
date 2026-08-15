@@ -1,8 +1,11 @@
 package com.openwheelracing;
 
 import com.mojang.logging.LogUtils;
+import com.openwheelracing.content.ai.BasicAiFleetChunkTickets;
+import com.openwheelracing.content.ai.BasicAiFleetManager;
 import com.openwheelracing.content.command.OWRCommands;
 import com.openwheelracing.content.race.OWRLegacyDimensionDataImporter;
+import com.openwheelracing.content.race.timing.LiveRaceTimingService;
 import com.openwheelracing.content.track.TrackMapAutoDetector;
 import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
 import com.openwheelracing.network.OWRNetwork;
@@ -20,6 +23,7 @@ import com.openwheelracing.registry.OWRSoundEvents;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.furnace.FurnaceFuelBurnTimeEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
@@ -35,6 +39,7 @@ public final class OpenwheelRacing {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     public OpenwheelRacing(IEventBus modBus) {
+        modBus.addListener(BasicAiFleetChunkTickets::register);
         modBus.addListener(this::commonSetup);
         modBus.addListener(OWRNetwork::register);
         OWRDataComponents.register(modBus);
@@ -50,12 +55,19 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(OWRFuelHandler::onFuelBurnTime);
         NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> OWRCommands.register(event));
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
+        NeoForge.EVENT_BUS.addListener((EntityLeaveLevelEvent event) -> {
+            if (event.getEntity() instanceof com.openwheelracing.content.entity.OpenwheelCarEntity car) {
+                BasicAiFleetChunkTickets.release(car);
+            }
+        });
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedOut);
         NeoForge.EVENT_BUS.addListener(this::onPlayerChangedDimension);
         NeoForge.EVENT_BUS.addListener(this::onPlayerRespawn);
         NeoForge.EVENT_BUS.addListener(this::onServerStarted);
         NeoForge.EVENT_BUS.addListener(this::onServerStopped);
         NeoForge.EVENT_BUS.addListener(TrackMapAutoDetector::onServerTick);
+        NeoForge.EVENT_BUS.addListener(BasicAiFleetManager::onServerTick);
+        NeoForge.EVENT_BUS.addListener(LiveRaceTimingService::onServerTick);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -86,6 +98,9 @@ public final class OpenwheelRacing {
     }
 
     private void onServerStopped(ServerStoppedEvent event) {
+        BasicAiFleetManager.clearAll();
+        LiveRaceTimingService.clearAll();
+        BasicAiFleetChunkTickets.releaseAll();
         TrackMapAutoDetector.clearJobs();
         SurveyRouteRuntime.clearAll();
     }
@@ -96,6 +111,7 @@ public final class OpenwheelRacing {
         }
         OWRNetwork.sendRankingBoard(serverPlayer, level);
         OWRNetwork.sendRaceFlag(serverPlayer, level, false);
+        LiveRaceTimingService.sendCurrent(serverPlayer);
         OWRNetwork.sendSurveyRouteOverlay(serverPlayer, false, "", new java.util.UUID(0L, 0L), "", false, null);
         OWRNetwork.syncVisibleLiveries(serverPlayer);
     }

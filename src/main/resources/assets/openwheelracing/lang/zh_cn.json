@@ -349,5 +349,11 @@
   "screen.openwheelracing.damage.fl_wheel": "左前轮",
   "screen.openwheelracing.damage.fr_wheel": "右前轮",
   "screen.openwheelracing.damage.rl_wheel": "左后轮",
-  "screen.openwheelracing.damage.rr_wheel": "右后轮"
+  "screen.openwheelracing.damage.rr_wheel": "右后轮",
+  "hud.openwheelracing.race": "比赛",
+  "hud.openwheelracing.race.no_cars": "暂无赛车",
+  "hud.openwheelracing.race.leader": "领跑",
+  "hud.openwheelracing.race.lap": "圈",
+  "hud.openwheelracing.race.laps": "圈",
+  "hud.openwheelracing.best": "最佳"
 }

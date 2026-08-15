@@ -349,5 +349,11 @@
   "screen.openwheelracing.damage.fl_wheel": "FL Wheel",
   "screen.openwheelracing.damage.fr_wheel": "FR Wheel",
   "screen.openwheelracing.damage.rl_wheel": "RL Wheel",
-  "screen.openwheelracing.damage.rr_wheel": "RR Wheel"
+  "screen.openwheelracing.damage.rr_wheel": "RR Wheel",
+  "hud.openwheelracing.race": "RACE",
+  "hud.openwheelracing.race.no_cars": "No cars",
+  "hud.openwheelracing.race.leader": "LEADER",
+  "hud.openwheelracing.race.lap": "LAP",
+  "hud.openwheelracing.race.laps": "LAPS",
+  "hud.openwheelracing.best": "BEST"
 }

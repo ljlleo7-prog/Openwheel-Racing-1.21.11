@@ -241,6 +241,88 @@ class TyreThermalModelTest {
         assertEquals(expected, VehiclePhysics.tyreCoolingDeltaC(115.0, SPEED, 0.05), 1.0E-12);
     }
 
+    @Test
+    void surfaceSpikeDoesNotInstantlyHeatCarcass() {
+        VehiclePhysics.TyreThermalState state = new VehiclePhysics.TyreThermalState(75.0, 75.0, 0.0);
+        for (int tick = 0; tick < 8; tick++) {
+            state = VehiclePhysics.nextTyreThermalState(
+                state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
+                95_000.0, 1.0, 38.0, 1.0, 1.0, 1.0, 1.22, Math.toRadians(9.0), 0.05, true
+            );
+        }
+
+        assertTrue(state.surfaceTemperatureC() > state.carcassTemperatureC() + 0.25, "surface should respond faster than carcass: surface=" + state.surfaceTemperatureC() + " carcass=" + state.carcassTemperatureC());
+        assertTrue(state.carcassTemperatureC() < 90.0, "one short slide should not make the carcass overheat");
+    }
+
+    @Test
+    void sustainedSlipEventuallyTransfersHeatIntoCarcass() {
+        VehiclePhysics.TyreThermalState state = new VehiclePhysics.TyreThermalState(75.0, 75.0, 0.0);
+        for (int tick = 0; tick < 20 * 45; tick++) {
+            state = VehiclePhysics.nextTyreThermalState(
+                state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
+                95_000.0, 1.0, 38.0, 1.0, 1.0, 1.0, 1.22, Math.toRadians(9.0), 0.05, true
+            );
+        }
+
+        assertTrue(state.carcassTemperatureC() > 95.0, "sustained abuse should heat the carcass");
+        assertTrue(state.slipExposure() > 0.8, "sustained abuse should maintain high exposure");
+    }
+
+    @Test
+    void isolatedWheelExposureDoesNotHeatAnotherWheel() {
+        VehiclePhysics.TyreThermalState rear = new VehiclePhysics.TyreThermalState(75.0, 75.0, 0.0);
+        VehiclePhysics.TyreThermalState front = new VehiclePhysics.TyreThermalState(75.0, 75.0, 0.0);
+        for (int tick = 0; tick < 20; tick++) {
+            rear = VehiclePhysics.nextTyreThermalState(
+                rear.surfaceTemperatureC(), rear.carcassTemperatureC(), rear.slipExposure(),
+                85_000.0, 1.0, 36.0, 1.0, 1.0, 1.0, 1.25, Math.toRadians(8.0), 0.05, true
+            );
+            front = VehiclePhysics.nextTyreThermalState(
+                front.surfaceTemperatureC(), front.carcassTemperatureC(), front.slipExposure(),
+                0.0, 1.0, 36.0, 1.0, 1.0, 1.0, 0.45, Math.toRadians(0.2), 0.05, true
+            );
+        }
+
+        assertTrue(rear.carcassTemperatureC() > front.carcassTemperatureC() + 0.03, "rear abuse must remain wheel-local: rear=" + rear.carcassTemperatureC() + " front=" + front.carcassTemperatureC());
+        assertTrue(front.slipExposure() < 0.2, "clean front wheel must release exposure");
+    }
+
+    @Test
+    void noGroundContactGeneratesNoHeat() {
+        VehiclePhysics.TyreThermalState state = new VehiclePhysics.TyreThermalState(95.0, 90.0, 0.8);
+        for (int tick = 0; tick < 20 * 30; tick++) {
+            state = VehiclePhysics.nextTyreThermalState(
+                state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
+                200_000.0, 1.4, 50.0, 1.0, 1.0, 1.0, 1.4, Math.toRadians(12.0), 0.05, false
+            );
+        }
+
+        assertTrue(state.surfaceTemperatureC() < 95.0, "airborne tyre surface should cool");
+        assertTrue(state.carcassTemperatureC() < 90.0, "airborne tyre carcass should cool");
+        assertTrue(state.slipExposure() < 0.1, "airborne tyre should release slip exposure");
+    }
+
+    @Test
+    void softerCompoundsHeatFasterButDoNotChangeThermalLayerInertia() {
+        double[] finalSurface = new double[5];
+        for (int compound = 0; compound < finalSurface.length; compound++) {
+            VehiclePhysics.TyreThermalState state = new VehiclePhysics.TyreThermalState(75.0, 75.0, 0.0);
+            double compoundGain = 0.78 + compound * 0.145;
+            for (int tick = 0; tick < 20 * 30; tick++) {
+                state = VehiclePhysics.nextTyreThermalState(
+                    state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
+                    22_000.0, compoundGain, 42.0, 1.0, 1.0, 1.0, 0.72, Math.toRadians(2.0), 0.05, true
+                );
+            }
+            finalSurface[compound] = state.surfaceTemperatureC();
+        }
+
+        for (int compound = 1; compound < finalSurface.length; compound++) {
+            assertTrue(finalSurface[compound] > finalSurface[compound - 1], "softer compounds should warm faster in the same trace");
+        }
+    }
+
     private static double compoundWheelHeatPower(int compound, double longitudinalG, double lateralG, double demand, double slipAngle) {
         return compoundWheelHeatPower(compound, longitudinalG, lateralG, demand, slipAngle, NORMAL_LOAD_PER_WHEEL);
     }

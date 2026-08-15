@@ -6,7 +6,14 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.openwheelracing.content.ai.BasicAiDriverIdentity;
+import com.openwheelracing.content.ai.BasicAiFleetChunkTickets;
+import com.openwheelracing.content.ai.BasicAiFleetManager;
+import com.openwheelracing.content.ai.BasicAiStatus;
+import com.openwheelracing.content.car.CarLivery;
+import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.race.OWRRaceControlState;
+import com.openwheelracing.content.race.timing.LiveRaceTimingService;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
@@ -16,6 +23,7 @@ import com.openwheelracing.content.track.survey.SurveyRoute;
 import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
 import com.openwheelracing.content.track.survey.TrackSurveyData;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
+import com.openwheelracing.registry.OWREntities;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -27,6 +35,8 @@ import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,6 +60,20 @@ public final class OWRCommands {
                         .executes(context -> setWheelInputAllowed(context, false)))
                     .then(Commands.literal("status")
                         .executes(OWRCommands::showWheelInputStatus))))
+            .then(Commands.literal("race")
+                .then(Commands.literal("timing")
+                    .then(Commands.literal("resume").executes(OWRCommands::resumeRaceTiming))
+                    .then(Commands.literal("stop").executes(OWRCommands::stopRaceTiming))
+                    .then(Commands.literal("status").executes(OWRCommands::showRaceTimingStatus))))
+            .then(Commands.literal("ai")
+                .then(Commands.literal("fleet")
+                    .then(Commands.literal("spawn")
+                        .then(Commands.argument("count", IntegerArgumentType.integer(1, 24))
+                            .executes(OWRCommands::spawnAiFleet)))
+                    .then(Commands.literal("start").executes(OWRCommands::startAiFleet))
+                    .then(Commands.literal("stop").executes(OWRCommands::stopAiFleet))
+                    .then(Commands.literal("despawn").executes(OWRCommands::despawnAiFleet))
+                    .then(Commands.literal("status").executes(OWRCommands::showAiFleetStatus))))
             .then(Commands.literal("steward")
                 .then(Commands.literal("list")
                     .executes(OWRCommands::listTracks))
@@ -139,6 +163,146 @@ public final class OWRCommands {
                 .then(Commands.literal("ai")
                     .then(Commands.literal("generate")
                         .executes(OWRCommands::generateAiLine)))));
+    }
+
+    private static int resumeRaceTiming(CommandContext<CommandSourceStack> context) {
+        boolean resumed = LiveRaceTimingService.resume(context.getSource().getLevel());
+        send(context, resumed ? "Live race timing resumed." : "No suspended live timing session to resume.");
+        return resumed ? 1 : 0;
+    }
+
+    private static int stopRaceTiming(CommandContext<CommandSourceStack> context) {
+        boolean stopped = LiveRaceTimingService.stop(context.getSource().getLevel(), "DIRECTOR");
+        send(context, stopped ? "Live race timing suspended." : "No live timing session is configured.");
+        return stopped ? 1 : 0;
+    }
+
+    private static int showRaceTimingStatus(CommandContext<CommandSourceStack> context) {
+        var snapshot = LiveRaceTimingService.latestSnapshot(context.getSource().getLevel());
+        if (snapshot.isEmpty()) {
+            send(context, "Live race timing is not configured.");
+            return 0;
+        }
+        var timing = snapshot.get();
+        send(context, "Live race timing: " + (timing.active() ? "active" : "suspended (" + timing.suspensionReason() + ")")
+            + ", session=" + timing.sessionName() + ", cars=" + timing.rows().size() + ", revision=" + timing.revision() + ".");
+        return timing.rows().size();
+    }
+
+    private static int spawnAiFleet(CommandContext<CommandSourceStack> context) {
+        ServerLevel level = context.getSource().getLevel();
+        Optional<TrackDefinition> activeTrack = activeTrack(context);
+        if (activeTrack.isEmpty()) {
+            send(context, "AI fleet spawn refused: no active track in this dimension.");
+            return 0;
+        }
+        TrackDefinition track = activeTrack.get();
+        Optional<SurveyRoute> survey = TrackSurveyData.get(level).get(track.trackId());
+        if (survey.isEmpty() || survey.get().nodes().size() < 2 || !(survey.get().length() > 0.0)) {
+            send(context, "AI fleet spawn refused: no usable consolidated survey for " + track.name() + ".");
+            return 0;
+        }
+        int count = IntegerArgumentType.getInteger(context, "count");
+        if (!BasicAiFleetManager.ownedCars(level, track.trackId()).isEmpty()) {
+            send(context, "AI fleet spawn refused: despawn the existing AI fleet for " + track.name() + " first.");
+            return 0;
+        }
+        List<TrackDefinition.GridSlot> slots = track.gridSlots().stream().sorted(Comparator.comparingInt(TrackDefinition.GridSlot::index)).toList();
+        HashSet<Integer> indices = new HashSet<>();
+        for (TrackDefinition.GridSlot slot : slots) {
+            if (!indices.add(slot.index())) {
+                send(context, "AI fleet spawn refused: duplicate grid index " + slot.index() + ".");
+                return 0;
+            }
+        }
+        if (slots.size() < count) {
+            send(context, "AI fleet spawn refused: requested " + count + " cars but only " + slots.size() + " grid slots are authored.");
+            return 0;
+        }
+
+        UUID fleetId = UUID.randomUUID();
+        List<OpenwheelCarEntity> spawned = new ArrayList<>();
+        for (int ordinal = 0; ordinal < count; ordinal++) {
+            TrackDefinition.GridSlot slot = slots.get(ordinal);
+            OpenwheelCarEntity car = new OpenwheelCarEntity(OWREntities.PROTOTYPE_CAR.get(), level);
+            TrackDefinition.Point3 position = slot.position();
+            car.setPos(position.x(), position.y() + 0.02, position.z());
+            car.setYRot((float) Math.toDegrees(slot.headingRadians()) - 90.0f);
+            car.setDeltaMovement(Vec3.ZERO);
+            car.setBasicAiIdentity(BasicAiDriverIdentity.create(fleetId, track.trackId(), slot.index(), ordinal + 1));
+            int liveryIndex = Math.floorMod(fleetId.hashCode() * 31 + slot.index(), CarLivery.count());
+            CarLivery livery = CarLivery.fromIndex(liveryIndex);
+            car.setLivery(liveryIndex);
+            car.setLiveryColors(CarLiveryColors.fromPreset(livery));
+            BasicAiFleetManager.prepareAiCarDefaults(car);
+            if (!level.addFreshEntity(car)) {
+                spawned.forEach(OpenwheelCarEntity::discard);
+                send(context, "AI fleet spawn failed at grid slot " + slot.index() + "; rolled back " + spawned.size() + " cars.");
+                return 0;
+            }
+            spawned.add(car);
+        }
+        send(context, "Spawned stopped AI fleet " + fleetId + " with " + spawned.size() + " cars for " + track.name() + ".");
+        return spawned.size();
+    }
+
+    private static int startAiFleet(CommandContext<CommandSourceStack> context) {
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (track.isEmpty()) {
+            send(context, "AI fleet start refused: no active track in this dimension.");
+            return 0;
+        }
+        int count = BasicAiFleetManager.start(context.getSource().getLevel(), track.get().trackId());
+        send(context, count == 0 ? "No stopped AI cars found for " + track.get().name() + "." : "Started " + count + " AI cars for " + track.get().name() + ".");
+        return count;
+    }
+
+    private static int stopAiFleet(CommandContext<CommandSourceStack> context) {
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (track.isEmpty()) {
+            send(context, "AI fleet stop refused: no active track in this dimension.");
+            return 0;
+        }
+        int count = BasicAiFleetManager.stop(context.getSource().getLevel(), track.get().trackId());
+        send(context, count == 0 ? "No running AI cars found for " + track.get().name() + "." : "Stopping " + count + " AI cars for " + track.get().name() + ".");
+        return count;
+    }
+
+    private static int despawnAiFleet(CommandContext<CommandSourceStack> context) {
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (track.isEmpty()) {
+            send(context, "AI fleet despawn refused: no active track in this dimension.");
+            return 0;
+        }
+        int count = BasicAiFleetManager.despawn(context.getSource().getLevel(), track.get().trackId());
+        send(context, count == 0 ? "No AI-owned cars found for " + track.get().name() + "." : "Despawned " + count + " AI-owned cars for " + track.get().name() + ".");
+        return count;
+    }
+
+    private static int showAiFleetStatus(CommandContext<CommandSourceStack> context) {
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (track.isEmpty()) {
+            send(context, "AI fleet status unavailable: no active track in this dimension.");
+            return 0;
+        }
+        List<BasicAiStatus> statuses = BasicAiFleetManager.statuses(context.getSource().getLevel(), track.get().trackId());
+        if (statuses.isEmpty()) {
+            send(context, "No AI-owned cars found for " + track.get().name() + ".");
+            return 0;
+        }
+        UUID fleetId = statuses.getFirst().fleetId();
+        send(context, "AI fleet " + fleetId + " cars=" + statuses.size() + " track=" + track.get().name() + " forcedChunks=" + BasicAiFleetChunkTickets.totalTicketCount() + "/" + BasicAiFleetChunkTickets.MAX_TOTAL_CHUNKS + ".");
+        for (BasicAiStatus status : statuses) {
+            String gap = Double.isFinite(status.nearestAheadGap()) ? String.format(java.util.Locale.ROOT, "%.1fm", status.nearestAheadGap()) : "none";
+            send(context, "%s entity=%d grid=%d %s loc=%s conf=%.2f route=%.1fm laps=%d speed=%.1fkm/h gap=%s reason=%s".formatted(
+                status.displayName(), status.entityId(), status.gridIndex(), status.running() ? "running" : "stopped", status.localizationStatus(),
+                status.confidence(), status.routeDistance(), status.routeLaps(), status.speedKmh(), gap, status.reason()));
+        }
+        return statuses.size();
+    }
+
+    private static Optional<TrackDefinition> activeTrack(CommandContext<CommandSourceStack> context) {
+        return trackData(context).activeTrack(dimensionId(context));
     }
 
     private static int startSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
