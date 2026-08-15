@@ -281,10 +281,10 @@ public final class CarHudOverlay {
         int tyreY = y + 88;
         float min = car.getTyreWorkingTemperatureMinCelsius();
         float max = car.getTyreWorkingTemperatureMaxCelsius();
-        drawTyreStatus(graphics, font, x + 22, tyreY + 18, car.getTyreTemperatureFlCelsius(), min, max, car.getTyreWearFlPercent());
-        drawTyreStatus(graphics, font, x + 76, tyreY + 18, car.getTyreTemperatureFrCelsius(), min, max, car.getTyreWearFrPercent());
-        drawTyreStatus(graphics, font, x + 22, tyreY + 51, car.getTyreTemperatureRlCelsius(), min, max, car.getTyreWearRlPercent());
-        drawTyreStatus(graphics, font, x + 76, tyreY + 51, car.getTyreTemperatureRrCelsius(), min, max, car.getTyreWearRrPercent());
+        drawTyreStatus(graphics, font, x + 22, tyreY + 18, car.getTyreTemperatureFlCelsius(), car.getTyreCarcassTemperatureFlCelsius(), min, max, car.getTyreWearFlPercent());
+        drawTyreStatus(graphics, font, x + 76, tyreY + 18, car.getTyreTemperatureFrCelsius(), car.getTyreCarcassTemperatureFrCelsius(), min, max, car.getTyreWearFrPercent());
+        drawTyreStatus(graphics, font, x + 22, tyreY + 51, car.getTyreTemperatureRlCelsius(), car.getTyreCarcassTemperatureRlCelsius(), min, max, car.getTyreWearRlPercent());
+        drawTyreStatus(graphics, font, x + 76, tyreY + 51, car.getTyreTemperatureRrCelsius(), car.getTyreCarcassTemperatureRrCelsius(), min, max, car.getTyreWearRrPercent());
 
         int damageColor = damageColor(car.getDamagePercent());
         drawVerticalMeter(graphics, x + 121, tyreY + 18, 10, 50, car.getDamagePercent() / 100.0f, damageColor, 0xFF251B1B);
@@ -332,14 +332,15 @@ public final class CarHudOverlay {
         graphics.fill(x + 2, y + 2, x + 10, y + 17, color);
     }
 
-    private static void drawTyreStatus(GuiGraphics graphics, Font font, int x, int y, float temperature, float min, float max, float wearPercent) {
-        int tempColor = tyreTemperatureColor(temperature, min, max);
+    private static void drawTyreStatus(GuiGraphics graphics, Font font, int x, int y, float surfaceTemperature, float carcassTemperature, float min, float max, float wearPercent) {
+        int surfaceColor = tyreTemperatureColor(surfaceTemperature, min, max);
+        int carcassColor = tyreTemperatureColor(carcassTemperature, min, max);
         int wearColor = tyreWearColor(wearPercent);
         String wear = Math.round(clamp(wearPercent, 0.0f, 100.0f)) + "%";
         graphics.fill(x, y, x + 24, y + 10, 0xFF050608);
         graphics.drawString(font, wear, x + (24 - font.width(wear)) / 2, y + 1, wearColor, false);
-        graphics.fill(x + 4, y - 4, x + 20, y - 2, tempColor);
-        graphics.fill(x + 4, y + 12, x + 20, y + 14, tempColor);
+        graphics.fill(x + 4, y - 4, x + 20, y - 2, surfaceColor);
+        graphics.fill(x + 4, y + 12, x + 20, y + 14, carcassColor);
     }
 
     private static void drawStatusChip(GuiGraphics graphics, Font font, String label, int x, int y, int color) {

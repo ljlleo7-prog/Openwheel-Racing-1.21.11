@@ -229,7 +229,7 @@ public final class BasicAiFleetManager {
             double nearestGap = nearestAheadGap(snapshot, snapshots, route.length());
             BasicAiCarController controller = snapshot.controller();
             BasicAiDriveCommand command = controller.tick(new BasicAiCarController.Input(snapshot.identity(), car.getId(), route, point(car), heading(car),
-                car.getSpeedKmh() / 3.6, nearestGap, snapshot.localization(), car.isAiObstacleAhead()));
+                car.getSpeedKmh() / 3.6, nearestGap, snapshot.localization()));
             PREPARED_COMMANDS.put(car.getUUID(), command);
         }
     }
@@ -255,7 +255,8 @@ public final class BasicAiFleetManager {
         double subjectDistance = subject.localization().best().orElseThrow().distanceAlongRoute();
         double nearest = Double.POSITIVE_INFINITY;
         for (CarSnapshot candidate : snapshots) {
-            if (candidate == subject || !candidate.identity().fleetId().equals(subject.identity().fleetId()) || !usableForSpacing(candidate.localization())) {
+            if (candidate == subject || !candidate.identity().fleetId().equals(subject.identity().fleetId())
+                || !healthyMovingAi(candidate.car()) || !usableForSpacing(candidate.localization())) {
                 continue;
             }
             double gap = SurveyRouteSampler.forwardDelta(subjectDistance, candidate.localization().best().orElseThrow().distanceAlongRoute(), routeLength);
@@ -264,6 +265,11 @@ public final class BasicAiFleetManager {
             }
         }
         return nearest;
+    }
+
+    static boolean healthyMovingAi(OpenwheelCarEntity car) {
+        return BasicAiTrafficPolicy.healthyMovingAi(car.isBasicAiOwned(), car.isAutonomousControlEnabled(), car.getControllingPassenger() != null,
+            car.getSpeedKmh(), car.getDebugVelocityLong(), car.getDebugVelocityLat());
     }
 
     private static boolean usableForSpacing(SurveyRouteLocalizer.Result localization) {

@@ -8,6 +8,7 @@ import com.openwheelracing.content.ai.BasicAiDriveCommand;
 import com.openwheelracing.content.ai.BasicAiDriverIdentity;
 import com.openwheelracing.content.ai.AiGearboxPolicy;
 import com.openwheelracing.content.ai.BasicAiFleetManager;
+import com.openwheelracing.content.ai.BasicAiTrafficPolicy;
 import com.openwheelracing.content.car.CarComponentDamage;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
@@ -97,6 +98,10 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Float> TYRE_TEMPERATURE_FR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_TEMPERATURE_RL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_TEMPERATURE_RR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_CARCASS_TEMPERATURE_FL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_CARCASS_TEMPERATURE_FR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_CARCASS_TEMPERATURE_RL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_CARCASS_TEMPERATURE_RR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Integer> CURRENT_LAP_TICKS = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> BEST_LAP_TICKS = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> COMPLETED_LAP_TICKS = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
@@ -540,23 +545,6 @@ public class OpenwheelCarEntity extends Entity {
         aiShiftCooldownTicks = 0;
     }
 
-    public boolean isAiObstacleAhead() {
-        if (!isBasicAiOwned() || !autonomousControlEnabled || level().isClientSide()) {
-            return false;
-        }
-        Vec3 forward = Vec3.directionFromRotation(0.0f, getYRot());
-        double probeDistance = Math.max(2.0, Math.min(8.0, getDeltaMovement().horizontalDistance() * 20.0 + 2.0));
-        Vec3 requested = new Vec3(forward.x * probeDistance, 0.0, forward.z * probeDistance);
-        Vec3 before = position();
-        if (emptyShapeBlockIntersectsMovement(before, requested)) {
-            return true;
-        }
-        if (!onGround()) {
-            return false;
-        }
-        Vec3 terrainMovement = terrainFollowingMovement(before, requested);
-        return terrainMovement == null;
-    }
     public void tickAiDrivetrain() {
         if (!isBasicAiOwned() || !autonomousControlEnabled || getControllingPassenger() != null) {
             return;
@@ -694,6 +682,10 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(TYRE_TEMPERATURE_FR, (float) TYRE_INITIAL_TEMPERATURE_C);
         builder.define(TYRE_TEMPERATURE_RL, (float) TYRE_INITIAL_TEMPERATURE_C);
         builder.define(TYRE_TEMPERATURE_RR, (float) TYRE_INITIAL_TEMPERATURE_C);
+        builder.define(TYRE_CARCASS_TEMPERATURE_FL, (float) TYRE_INITIAL_TEMPERATURE_C);
+        builder.define(TYRE_CARCASS_TEMPERATURE_FR, (float) TYRE_INITIAL_TEMPERATURE_C);
+        builder.define(TYRE_CARCASS_TEMPERATURE_RL, (float) TYRE_INITIAL_TEMPERATURE_C);
+        builder.define(TYRE_CARCASS_TEMPERATURE_RR, (float) TYRE_INITIAL_TEMPERATURE_C);
         builder.define(CURRENT_LAP_TICKS, 0);
         builder.define(BEST_LAP_TICKS, 0);
         builder.define(COMPLETED_LAP_TICKS, 0);
@@ -1008,6 +1000,22 @@ public class OpenwheelCarEntity extends Entity {
 
     public float getTyreTemperatureRrCelsius() {
         return entityData.get(TYRE_TEMPERATURE_RR);
+    }
+
+    public float getTyreCarcassTemperatureFlCelsius() {
+        return (float) tyreCarcassTemperatureFlC;
+    }
+
+    public float getTyreCarcassTemperatureFrCelsius() {
+        return (float) tyreCarcassTemperatureFrC;
+    }
+
+    public float getTyreCarcassTemperatureRlCelsius() {
+        return (float) tyreCarcassTemperatureRlC;
+    }
+
+    public float getTyreCarcassTemperatureRrCelsius() {
+        return (float) tyreCarcassTemperatureRrC;
     }
 
     public float getTyreWorkingTemperatureMinCelsius() {
@@ -3560,6 +3568,17 @@ public class OpenwheelCarEntity extends Entity {
 
             lastEntityImpactById.put(target.getId(), time);
             boolean carTarget = target instanceof OpenwheelCarEntity;
+            if (carTarget) {
+                OpenwheelCarEntity otherCar = (OpenwheelCarEntity) target;
+                boolean initiatorHealthy = BasicAiTrafficPolicy.healthyMovingAi(isBasicAiOwned(), autonomousControlEnabled,
+                    getControllingPassenger() != null, getSpeedKmh(), debugVelocityLong, debugVelocityLat);
+                boolean targetHealthy = BasicAiTrafficPolicy.healthyMovingAi(otherCar.isBasicAiOwned(), otherCar.autonomousControlEnabled,
+                    otherCar.getControllingPassenger() != null, otherCar.getSpeedKmh(), otherCar.debugVelocityLong, otherCar.debugVelocityLat);
+                if (BasicAiTrafficPolicy.shouldEscapeAiObstacle(initiatorHealthy, otherCar.isBasicAiOwned(),
+                    otherCar.getControllingPassenger() != null, targetHealthy)) {
+                    continue;
+                }
+            }
             playCollisionSound((float) Math.max(0.6, resolvedSpeed * (carTarget ? 18.0 : 12.0)), carTarget);
             float carSeverity = (float) Math.max(0.0, (resolvedSpeed - ENTITY_IMPACT_SOFT_SPEED) * (carTarget ? ENTITY_IMPACT_OTHER_CAR_DAMAGE : ENTITY_IMPACT_CAR_DAMAGE));
             if (carSeverity > 0.0f) {
@@ -4724,6 +4743,14 @@ public class OpenwheelCarEntity extends Entity {
         float fr = (float) clamp(tyreTemperatureFrC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
         float rl = (float) clamp(tyreTemperatureRlC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
         float rr = (float) clamp(tyreTemperatureRrC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+        float carcassFl = (float) clamp(tyreCarcassTemperatureFlC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+        float carcassFr = (float) clamp(tyreCarcassTemperatureFrC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+        float carcassRl = (float) clamp(tyreCarcassTemperatureRlC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+        float carcassRr = (float) clamp(tyreCarcassTemperatureRrC, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+        entityData.set(TYRE_CARCASS_TEMPERATURE_FL, carcassFl);
+        entityData.set(TYRE_CARCASS_TEMPERATURE_FR, carcassFr);
+        entityData.set(TYRE_CARCASS_TEMPERATURE_RL, carcassRl);
+        entityData.set(TYRE_CARCASS_TEMPERATURE_RR, carcassRr);
         boolean changed = false;
         if (Math.abs(fl - lastSyncedTyreTemperatureFlC) >= TYRE_SYNC_EPSILON_C) {
             lastSyncedTyreTemperatureFlC = fl;

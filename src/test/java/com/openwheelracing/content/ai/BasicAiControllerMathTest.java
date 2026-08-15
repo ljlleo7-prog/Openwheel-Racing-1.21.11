@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BasicAiControllerMathTest {
     @Test
-    void straightRouteUsesRaisedSpeedCeilingAndFullThrottle() {
+    void straightRouteUsesHighSpeedTargetAndFullThrottle() {
         assertEquals(BasicAiCarController.MAX_TARGET_SPEED_MPS, BasicAiCarController.targetSpeedMetersPerSecond(straightRoute(), 0.0), 1.0E-6);
         BasicAiDriveCommand command = BasicAiCarController.speedCommand(10.0, BasicAiCarController.MAX_TARGET_SPEED_MPS, 0.0f, Double.POSITIVE_INFINITY);
         assertEquals(1.0f, command.throttle());
@@ -19,13 +19,15 @@ class BasicAiControllerMathTest {
     }
 
     @Test
-    void lateralToleranceAvoidsSmallCorrectionsAndLimitsRecovery() {
+    void originalLateralLogicCorrectsEveryOffsetAndLimitsSteeringRate() {
         SurveyRouteModel route = straightRoute();
-        assertEquals(0.0f, BasicAiCarController.steeringCommand(route, 5.0, new SurveyRouteModel.Point(5, 64, 1), 0.0, 1.0, 10.0, 0.0f), 1.0E-4f);
-        assertEquals(0.0f, BasicAiCarController.steeringCommand(route, 5.0, new SurveyRouteModel.Point(5, 64, -1), 0.0, -1.0, 10.0, 0.0f), 1.0E-4f);
+        float smallLeftCorrection = BasicAiCarController.steeringCommand(route, 5.0, new SurveyRouteModel.Point(5, 64, 1), 0.0, 1.0, 10.0, 0.0f);
+        float smallRightCorrection = BasicAiCarController.steeringCommand(route, 5.0, new SurveyRouteModel.Point(5, 64, -1), 0.0, -1.0, 10.0, 0.0f);
+        assertTrue(smallLeftCorrection < 0.0f);
+        assertTrue(smallRightCorrection > 0.0f);
         float recovery = BasicAiCarController.steeringCommand(route, 5.0, new SurveyRouteModel.Point(5, 64, 3), 0.0, 3.0, 10.0, 0.0f);
         assertTrue(recovery < 0.0f);
-        assertTrue(Math.abs(recovery) <= 0.0451f);
+        assertTrue(Math.abs(recovery) <= 0.0801f);
     }
     @Test
     void centeredStraightRouteNeedsNoSteering() {

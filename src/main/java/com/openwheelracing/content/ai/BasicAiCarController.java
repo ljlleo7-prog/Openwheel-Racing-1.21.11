@@ -7,16 +7,14 @@ import com.openwheelracing.content.track.survey.SurveyRouteModel;
 
 public final class BasicAiCarController {
     public static final double MIN_TARGET_SPEED_MPS = 5.0;
-    public static final double MAX_TARGET_SPEED_MPS = 55.0;
-    public static final double MAX_LATERAL_ACCELERATION = 12.0;
+    public static final double MAX_TARGET_SPEED_MPS = 95.0;
+    public static final double MAX_LATERAL_ACCELERATION = 5.0;
     public static final double COMFORTABLE_DECELERATION = 7.0;
     public static final double MAX_SPACING_RANGE = 45.0;
     private static final double WHEELBASE = 3.60;
-    private static final double[] CURVATURE_DISTANCES = {12.0, 24.0, 40.0, 65.0, 95.0, 135.0, 180.0, 240.0};
-    private static final double CURVATURE_WINDOW = 8.0;
-    private static final double STEERING_RATE_PER_TICK = 0.045;
-    private static final double LATERAL_DEADBAND = 1.5;
-    private static final double LATERAL_RECOVERY_GAIN = 0.018;
+    private static final double[] CURVATURE_DISTANCES = {6.0, 12.0, 18.0, 26.0, 36.0, 48.0};
+    private static final double CURVATURE_WINDOW = 6.0;
+    private static final double STEERING_RATE_PER_TICK = 0.08;
     private static final int AMBIGUOUS_STOP_TICKS = 40;
     private static final int MIN_LAP_TICKS = 100;
 
@@ -76,23 +74,13 @@ public final class BasicAiCarController {
                 updateLapProgress(routeDistance, input.route().length());
             }
             double confidenceFactor = localization.status() == SurveyRouteLocalizer.Status.TRACKED ? 1.0 : 0.55;
-            double lookahead = clamp(10.0 + input.speedMetersPerSecond() * 0.80, 10.0, 42.0);
+            double lookahead = clamp(7.0 + input.speedMetersPerSecond() * 0.65, 7.0, 32.0);
             if (localization.status() != SurveyRouteLocalizer.Status.TRACKED) {
                 lookahead = Math.max(14.0, lookahead);
             }
             previousSteering = steeringCommand(input.route(), routeDistance, input.position(), input.headingRadians(), candidate.signedLateralDistance(), lookahead, previousSteering);
             targetSpeed = targetSpeedMetersPerSecond(input.route(), routeDistance) * confidenceFactor;
             targetSpeed = applySpacing(targetSpeed, input.speedMetersPerSecond(), input.nearestAheadGap());
-            BasicAiRouteSafety.Assessment safety = BasicAiRouteSafety.assess(candidate.signedLateralDistance(), 4.0, 4.0, candidate.signedLateralDistance(), 4.0, 4.0);
-            if (input.obstacleAhead()) {
-                targetSpeed = Math.min(targetSpeed, 5.0);
-                previousSteering = approach(previousSteering, safety.recoveryDirection() * 0.35f, STEERING_RATE_PER_TICK);
-            } else if (safety.state() == BasicAiRouteSafety.State.UNSAFE) {
-                targetSpeed = Math.min(targetSpeed, 5.0);
-                previousSteering = approach(previousSteering, safety.recoveryDirection() * 0.35f, STEERING_RATE_PER_TICK);
-            } else if (safety.state() == BasicAiRouteSafety.State.RECOVERING) {
-                targetSpeed = Math.min(targetSpeed, 12.0);
-            }
             command = speedCommand(input.speedMetersPerSecond(), targetSpeed, previousSteering, input.nearestAheadGap());
         }
 
@@ -116,20 +104,12 @@ public final class BasicAiCarController {
 
     public static float steeringCommand(SurveyRouteModel route, double routeDistance, SurveyRouteModel.Point position, double headingRadians,
                                         double signedLateralDistance, double lookahead, float previousSteering) {
-        SurveyRouteSampler.Sample preview = SurveyRouteSampler.sample(route, routeDistance + lookahead);
-        double toleratedOffset = clamp(signedLateralDistance, -LATERAL_DEADBAND, LATERAL_DEADBAND);
-        double normalX = -Math.sin(preview.headingRadians());
-        double normalZ = Math.cos(preview.headingRadians());
-        SurveyRouteModel.Point target = new SurveyRouteModel.Point(
-            preview.position().x() + normalX * toleratedOffset,
-            preview.position().y(),
-            preview.position().z() + normalZ * toleratedOffset
-        );
+        SurveyRouteModel.Point target = SurveyRouteSampler.sample(route, routeDistance + lookahead).position();
         double targetBearing = Math.atan2(target.z() - position.z(), target.x() - position.x());
         double headingError = TrackGeometry.wrapRadians(targetBearing - headingRadians);
         double curvature = 2.0 * Math.sin(headingError) / Math.max(1.0, lookahead);
         double steer = Math.atan(WHEELBASE * curvature) / Math.toRadians(34.0);
-        steer -= (signedLateralDistance - toleratedOffset) * LATERAL_RECOVERY_GAIN;
+        steer -= signedLateralDistance * 0.045;
         float desired = (float) clamp(steer, -1.0, 1.0);
         return approach(previousSteering, desired, STEERING_RATE_PER_TICK);
     }
@@ -213,7 +193,7 @@ public final class BasicAiCarController {
 
     public record Input(BasicAiDriverIdentity identity, int entityId, SurveyRouteModel route, SurveyRouteModel.Point position,
                         double headingRadians, double speedMetersPerSecond, double nearestAheadGap,
-                        SurveyRouteLocalizer.Result localization, boolean obstacleAhead) {
+                        SurveyRouteLocalizer.Result localization) {
     }
 
     private record UUIDPair(java.util.UUID routeId, java.util.UUID trackId) {
