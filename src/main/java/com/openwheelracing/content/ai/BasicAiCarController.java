@@ -8,12 +8,8 @@ import com.openwheelracing.content.track.survey.SurveyRouteModel;
 public final class BasicAiCarController {
     public static final double MIN_TARGET_SPEED_MPS = 5.0;
     public static final double MAX_TARGET_SPEED_MPS = 95.0;
-    public static final double MAX_LATERAL_ACCELERATION = 5.0;
-    public static final double COMFORTABLE_DECELERATION = 7.0;
     public static final double MAX_SPACING_RANGE = 45.0;
     private static final double WHEELBASE = 3.60;
-    private static final double[] CURVATURE_DISTANCES = {6.0, 12.0, 18.0, 26.0, 36.0, 48.0};
-    private static final double CURVATURE_WINDOW = 6.0;
     private static final double STEERING_RATE_PER_TICK = 0.08;
     private static final int AMBIGUOUS_STOP_TICKS = 40;
     private static final int MIN_LAP_TICKS = 100;
@@ -28,6 +24,8 @@ public final class BasicAiCarController {
     private long ticksSinceLap;
     private int ambiguousTicks;
     private float previousSteering;
+    private double cachedTargetSpeed;
+    private BasicAiTrafficMode cachedMode;
 
     public BasicAiStatus status() {
         return status;
@@ -73,21 +71,31 @@ public final class BasicAiCarController {
                 ambiguousTicks = 0;
                 updateLapProgress(routeDistance, input.route().length());
             }
-            double confidenceFactor = localization.status() == SurveyRouteLocalizer.Status.TRACKED ? 1.0 : 0.55;
             double lookahead = clamp(7.0 + input.speedMetersPerSecond() * 0.65, 7.0, 32.0);
             if (localization.status() != SurveyRouteLocalizer.Status.TRACKED) {
                 lookahead = Math.max(14.0, lookahead);
             }
-            previousSteering = steeringCommand(input.route(), routeDistance, input.position(), input.headingRadians(), candidate.signedLateralDistance(), lookahead, previousSteering);
-            targetSpeed = targetSpeedMetersPerSecond(input.route(), routeDistance) * confidenceFactor;
-            targetSpeed = applySpacing(targetSpeed, input.speedMetersPerSecond(), input.nearestAheadGap());
-            command = speedCommand(input.speedMetersPerSecond(), targetSpeed, previousSteering, input.nearestAheadGap());
+            float routeSteering = desiredSteering(input.route(), routeDistance, input.position(), input.headingRadians(),
+                candidate.signedLateralDistance(), lookahead);
+            float desiredSteering = input.avoidance().threat()
+                ? (float) clamp(routeSteering + input.avoidance().steeringBias(), -1.0, 1.0)
+                : routeSteering;
+            previousSteering = approach(previousSteering, desiredSteering, STEERING_RATE_PER_TICK);
+            if (cachedMode != input.mode() || (runningTicks + input.entityId()) % 3L == 0L || !(cachedTargetSpeed > 0.0)) {
+                cachedTargetSpeed = BasicAiSpeedPlanner.targetSpeed(input.route(), routeDistance, input.grip(), input.mode());
+                cachedMode = input.mode();
+            }
+            targetSpeed = cachedTargetSpeed;
+            targetSpeed = applyQueueing(targetSpeed, input.speedMetersPerSecond(), input.queueGap(), input.mode());
+            command = speedCommand(input.speedMetersPerSecond(), targetSpeed, previousSteering, input.avoidance());
         }
 
         BasicAiDriverIdentity identity = input.identity();
         status = new BasicAiStatus(identity.driverId(), identity.fleetId(), identity.trackId(), identity.gridIndex(), identity.displayName(), input.entityId(), true,
             localization.status(), localization.confidence(), routeDistance, routeLaps, runningTicks, input.speedMetersPerSecond() * 3.6,
-            input.nearestAheadGap(), reason + (targetSpeed > 0.0 ? " target=" + Math.round(targetSpeed * 3.6) + "km/h" : ""));
+            input.queueGap(), reason + " mode=" + input.mode().name().toLowerCase(java.util.Locale.ROOT)
+                + (input.avoidance().threat() ? " avoidance" : "")
+                + (targetSpeed > 0.0 ? " target=" + Math.round(targetSpeed * 3.6) + "km/h" : ""));
         previousRouteDistance = routeDistance;
         return command;
     }
@@ -104,45 +112,36 @@ public final class BasicAiCarController {
 
     public static float steeringCommand(SurveyRouteModel route, double routeDistance, SurveyRouteModel.Point position, double headingRadians,
                                         double signedLateralDistance, double lookahead, float previousSteering) {
-        SurveyRouteModel.Point target = SurveyRouteSampler.sample(route, routeDistance + lookahead).position();
-        double targetBearing = Math.atan2(target.z() - position.z(), target.x() - position.x());
-        double headingError = TrackGeometry.wrapRadians(targetBearing - headingRadians);
-        double curvature = 2.0 * Math.sin(headingError) / Math.max(1.0, lookahead);
-        double steer = Math.atan(WHEELBASE * curvature) / Math.toRadians(34.0);
-        steer -= signedLateralDistance * 0.045;
-        float desired = (float) clamp(steer, -1.0, 1.0);
-        return approach(previousSteering, desired, STEERING_RATE_PER_TICK);
+        return approach(previousSteering, desiredSteering(route, routeDistance, position, headingRadians, signedLateralDistance, lookahead),
+            STEERING_RATE_PER_TICK);
     }
 
-    public static double targetSpeedMetersPerSecond(SurveyRouteModel route, double routeDistance) {
-        double allowedNow = MAX_TARGET_SPEED_MPS;
-        for (double distance : CURVATURE_DISTANCES) {
-            double curvature = SurveyRouteSampler.curvature(route, routeDistance + distance, CURVATURE_WINDOW);
-            if (curvature <= 1.0E-5) {
-                continue;
-            }
-            double cornerSpeed = clamp(Math.sqrt(MAX_LATERAL_ACCELERATION / curvature), MIN_TARGET_SPEED_MPS, MAX_TARGET_SPEED_MPS);
-            double anticipated = Math.sqrt(cornerSpeed * cornerSpeed + 2.0 * COMFORTABLE_DECELERATION * distance);
-            allowedNow = Math.min(allowedNow, anticipated);
-        }
-        return clamp(allowedNow, MIN_TARGET_SPEED_MPS, MAX_TARGET_SPEED_MPS);
+    static float desiredSteering(SurveyRouteModel route, double routeDistance, SurveyRouteModel.Point position, double headingRadians,
+                                 double signedLateralDistance, double lookahead) {
+        SurveyRouteSampler.Sample preview = SurveyRouteSampler.sample(route, routeDistance + lookahead);
+        double headingError = TrackGeometry.wrapRadians(preview.headingRadians() - headingRadians);
+        double headingCurvature = 2.0 * Math.sin(headingError) / Math.max(1.0, lookahead);
+        double lateralCurvature = -Math.atan2(signedLateralDistance, Math.max(8.0, lookahead)) / Math.max(1.0, lookahead);
+        double steer = Math.atan(WHEELBASE * (headingCurvature + lateralCurvature)) / Math.toRadians(34.0);
+        return (float) clamp(steer, -1.0, 1.0);
     }
 
-    public static double applySpacing(double targetSpeed, double currentSpeed, double nearestAheadGap) {
-        if (!Double.isFinite(nearestAheadGap) || nearestAheadGap > MAX_SPACING_RANGE) {
+    public static double applyQueueing(double targetSpeed, double currentSpeed, double gap, BasicAiTrafficMode mode) {
+        if (!mode.queueing() || !Double.isFinite(gap)) {
             return targetSpeed;
         }
-        double desiredGap = 8.0 + currentSpeed * 0.9;
-        if (nearestAheadGap >= desiredGap) {
+        double desiredGap = 8.0 + currentSpeed * 0.8;
+        if (gap >= desiredGap) {
             return targetSpeed;
         }
-        double factor = clamp((nearestAheadGap - 3.0) / Math.max(1.0, desiredGap - 3.0), 0.0, 1.0);
+        double factor = clamp((gap - 3.0) / Math.max(1.0, desiredGap - 3.0), 0.0, 1.0);
         return Math.min(targetSpeed, currentSpeed * factor);
     }
 
-    public static BasicAiDriveCommand speedCommand(double currentSpeed, double targetSpeed, float steering, double nearestAheadGap) {
-        if (Double.isFinite(nearestAheadGap) && nearestAheadGap < 5.0) {
-            return new BasicAiDriveCommand(0.0f, (float) clamp((5.0 - nearestAheadGap) / 2.5 + 0.35, 0.35, 1.0), steering);
+    public static BasicAiDriveCommand speedCommand(double currentSpeed, double targetSpeed, float steering,
+                                                    BasicAiNearbyAvoidance.Decision avoidance) {
+        if (avoidance.threat() && avoidance.brake() > 0.0) {
+            return new BasicAiDriveCommand(0.0f, (float) avoidance.brake(), steering);
         }
         double error = targetSpeed - currentSpeed;
         if (error > 0.8) {
@@ -164,6 +163,8 @@ public final class BasicAiCarController {
         ticksSinceLap = 0L;
         ambiguousTicks = 0;
         previousSteering = 0.0f;
+        cachedTargetSpeed = 0.0;
+        cachedMode = null;
     }
 
     private void updateLapProgress(double routeDistance, double routeLength) {
@@ -192,8 +193,9 @@ public final class BasicAiCarController {
     }
 
     public record Input(BasicAiDriverIdentity identity, int entityId, SurveyRouteModel route, SurveyRouteModel.Point position,
-                        double headingRadians, double speedMetersPerSecond, double nearestAheadGap,
-                        SurveyRouteLocalizer.Result localization) {
+                        double headingRadians, double speedMetersPerSecond, SurveyRouteLocalizer.Result localization,
+                        BasicAiNearbyAvoidance.Decision avoidance, BasicAiTrafficMode mode, BasicAiGripModel.State grip,
+                        double queueGap) {
     }
 
     private record UUIDPair(java.util.UUID routeId, java.util.UUID trackId) {

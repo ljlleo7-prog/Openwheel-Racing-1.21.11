@@ -8,7 +8,6 @@ import com.openwheelracing.content.ai.BasicAiDriveCommand;
 import com.openwheelracing.content.ai.BasicAiDriverIdentity;
 import com.openwheelracing.content.ai.AiGearboxPolicy;
 import com.openwheelracing.content.ai.BasicAiFleetManager;
-import com.openwheelracing.content.ai.BasicAiTrafficPolicy;
 import com.openwheelracing.content.car.CarComponentDamage;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
@@ -956,6 +955,10 @@ public class OpenwheelCarEntity extends Entity {
 
     public float getRearRightSuspensionIntegrityPercent() {
         return 100.0f - getRearRightSuspensionDamagePercent();
+    }
+
+    public double getAiCurrentSurfaceGrip() {
+        return getSurfaceAt(position()).grip;
     }
 
     public float getTyreWearPercent() {
@@ -3568,17 +3571,6 @@ public class OpenwheelCarEntity extends Entity {
 
             lastEntityImpactById.put(target.getId(), time);
             boolean carTarget = target instanceof OpenwheelCarEntity;
-            if (carTarget) {
-                OpenwheelCarEntity otherCar = (OpenwheelCarEntity) target;
-                boolean initiatorHealthy = BasicAiTrafficPolicy.healthyMovingAi(isBasicAiOwned(), autonomousControlEnabled,
-                    getControllingPassenger() != null, getSpeedKmh(), debugVelocityLong, debugVelocityLat);
-                boolean targetHealthy = BasicAiTrafficPolicy.healthyMovingAi(otherCar.isBasicAiOwned(), otherCar.autonomousControlEnabled,
-                    otherCar.getControllingPassenger() != null, otherCar.getSpeedKmh(), otherCar.debugVelocityLong, otherCar.debugVelocityLat);
-                if (BasicAiTrafficPolicy.shouldEscapeAiObstacle(initiatorHealthy, otherCar.isBasicAiOwned(),
-                    otherCar.getControllingPassenger() != null, targetHealthy)) {
-                    continue;
-                }
-            }
             playCollisionSound((float) Math.max(0.6, resolvedSpeed * (carTarget ? 18.0 : 12.0)), carTarget);
             float carSeverity = (float) Math.max(0.0, (resolvedSpeed - ENTITY_IMPACT_SOFT_SPEED) * (carTarget ? ENTITY_IMPACT_OTHER_CAR_DAMAGE : ENTITY_IMPACT_CAR_DAMAGE));
             if (carSeverity > 0.0f) {

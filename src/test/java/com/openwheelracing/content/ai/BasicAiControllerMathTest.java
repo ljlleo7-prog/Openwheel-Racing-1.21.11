@@ -12,8 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BasicAiControllerMathTest {
     @Test
     void straightRouteUsesHighSpeedTargetAndFullThrottle() {
-        assertEquals(BasicAiCarController.MAX_TARGET_SPEED_MPS, BasicAiCarController.targetSpeedMetersPerSecond(straightRoute(), 0.0), 1.0E-6);
-        BasicAiDriveCommand command = BasicAiCarController.speedCommand(10.0, BasicAiCarController.MAX_TARGET_SPEED_MPS, 0.0f, Double.POSITIVE_INFINITY);
+        BasicAiGripModel.State grip = BasicAiGripModel.build(new BasicAiGripModel.Input(95.0, 88.0, 104.0, 0.0, 0.0,
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0));
+        assertEquals(BasicAiCarController.MAX_TARGET_SPEED_MPS,
+            BasicAiSpeedPlanner.targetSpeed(straightRoute(), 0.0, grip, BasicAiTrafficMode.RACE), 1.0E-6);
+        BasicAiDriveCommand command = BasicAiCarController.speedCommand(10.0, BasicAiCarController.MAX_TARGET_SPEED_MPS, 0.0f, BasicAiNearbyAvoidance.Decision.NONE);
         assertEquals(1.0f, command.throttle());
         assertEquals(0.0f, command.brake());
     }
@@ -47,14 +50,16 @@ class BasicAiControllerMathTest {
 
     @Test
     void curvatureReducesTargetSpeed() {
-        double straight = BasicAiCarController.targetSpeedMetersPerSecond(straightRoute(), 0.0);
-        double curved = BasicAiCarController.targetSpeedMetersPerSecond(SurveyRouteSamplerTest.squareRoute(), 0.0);
+        BasicAiGripModel.State grip = BasicAiGripModel.build(new BasicAiGripModel.Input(95.0, 88.0, 104.0, 0.0, 0.0,
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0));
+        double straight = BasicAiSpeedPlanner.targetSpeed(straightRoute(), 0.0, grip, BasicAiTrafficMode.RACE);
+        double curved = BasicAiSpeedPlanner.targetSpeed(SurveyRouteSamplerTest.squareRoute(), 0.0, grip, BasicAiTrafficMode.RACE);
         assertTrue(curved < straight);
     }
 
     @Test
     void brakingStartsAboveCornerAllowance() {
-        BasicAiDriveCommand command = BasicAiCarController.speedCommand(20.0, 10.0, 0.0f, Double.POSITIVE_INFINITY);
+        BasicAiDriveCommand command = BasicAiCarController.speedCommand(20.0, 10.0, 0.0f, BasicAiNearbyAvoidance.Decision.NONE);
         assertEquals(0.0f, command.throttle());
         assertTrue(command.brake() > 0.0f);
     }

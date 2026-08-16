@@ -1,6 +1,9 @@
 package com.openwheelracing.content.ai;
 
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
+import com.openwheelracing.content.car.CarComponentDamage;
+import com.openwheelracing.content.car.PrototypeCarSetup;
+import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRoute;
@@ -27,6 +30,8 @@ public final class BasicAiFleetManager {
     private static final Map<UUID, BasicAiCarController> CONTROLLERS = new HashMap<>();
     private static final Set<UUID> STOPPING = new HashSet<>();
     private static final Map<UUID, BasicAiDriveCommand> PREPARED_COMMANDS = new HashMap<>();
+    private static final Map<UUID, GripCache> GRIP_CACHE = new HashMap<>();
+    private static BasicAiTrafficMode modeOverride = BasicAiTrafficMode.AUTO;
     private static UUID cachedRouteId;
     private static int cachedSurveyRevision = Integer.MIN_VALUE;
     private static SurveyRouteModel cachedRouteModel;
@@ -86,10 +91,25 @@ public final class BasicAiFleetManager {
         CONTROLLERS.clear();
         STOPPING.clear();
         PREPARED_COMMANDS.clear();
+        GRIP_CACHE.clear();
+        modeOverride = BasicAiTrafficMode.AUTO;
         cachedRouteId = null;
         cachedRouteModel = null;
         BasicAiFleetChunkTickets.releaseAll();
         invalidatePreparedTick();
+    }
+
+    public static BasicAiTrafficMode mode(ServerLevel level) {
+        return BasicAiTrafficMode.resolve(modeOverride, OWRRaceControlState.get(level).getGlobalFlag());
+    }
+
+    public static void setModeOverride(BasicAiTrafficMode mode) {
+        modeOverride = mode == null ? BasicAiTrafficMode.AUTO : mode;
+        invalidatePreparedTick();
+    }
+
+    public static BasicAiTrafficMode modeOverride() {
+        return modeOverride;
     }
 
     public static int start(ServerLevel level, UUID trackId) {
@@ -217,6 +237,14 @@ public final class BasicAiFleetManager {
             snapshots.add(new CarSnapshot(car, identity, localization, controller));
         }
 
+        List<BasicAiNearbyAvoidance.Car> traffic = new ArrayList<>();
+        for (Entity entity : level.getAllEntities()) {
+            if (entity instanceof OpenwheelCarEntity car && car.isBasicAiOwned() && car.getControllingPassenger() == null) {
+                traffic.add(new BasicAiNearbyAvoidance.Car(car.getId(), car.getX(), car.getZ(), heading(car), car.getDeltaMovement().x, car.getDeltaMovement().z));
+            }
+        }
+
+        BasicAiTrafficMode trafficMode = mode(level);
         for (CarSnapshot snapshot : snapshots) {
             OpenwheelCarEntity car = snapshot.car();
             if (STOPPING.contains(car.getUUID())) {
@@ -226,10 +254,14 @@ public final class BasicAiFleetManager {
             if (!car.isAutonomousControlEnabled()) {
                 continue;
             }
-            double nearestGap = nearestAheadGap(snapshot, snapshots, route.length());
+            BasicAiNearbyAvoidance.Car subject = new BasicAiNearbyAvoidance.Car(car.getId(), car.getX(), car.getZ(), heading(car),
+                car.getDeltaMovement().x, car.getDeltaMovement().z);
+            BasicAiNearbyAvoidance.Decision avoidance = BasicAiNearbyAvoidance.choose(subject, traffic);
+            BasicAiGripModel.State grip = gripState(car, tick);
+            double queueGap = trafficMode.queueing() ? nearestOrderedGap(snapshot, snapshots, route.length()) : Double.POSITIVE_INFINITY;
             BasicAiCarController controller = snapshot.controller();
             BasicAiDriveCommand command = controller.tick(new BasicAiCarController.Input(snapshot.identity(), car.getId(), route, point(car), heading(car),
-                car.getSpeedKmh() / 3.6, nearestGap, snapshot.localization()));
+                car.getSpeedKmh() / 3.6, snapshot.localization(), avoidance, trafficMode, grip, queueGap));
             PREPARED_COMMANDS.put(car.getUUID(), command);
         }
     }
@@ -248,33 +280,44 @@ public final class BasicAiFleetManager {
         PREPARED_COMMANDS.put(car.getUUID(), BasicAiDriveCommand.stopped(0.0f));
     }
 
-    private static double nearestAheadGap(CarSnapshot subject, List<CarSnapshot> snapshots, double routeLength) {
-        if (!usableForSpacing(subject.localization())) {
+    private static double nearestOrderedGap(CarSnapshot subject, List<CarSnapshot> snapshots, double routeLength) {
+        if (subject.localization().best().isEmpty()) {
             return Double.POSITIVE_INFINITY;
         }
-        double subjectDistance = subject.localization().best().orElseThrow().distanceAlongRoute();
+        double from = subject.localization().best().orElseThrow().distanceAlongRoute();
         double nearest = Double.POSITIVE_INFINITY;
         for (CarSnapshot candidate : snapshots) {
-            if (candidate == subject || !candidate.identity().fleetId().equals(subject.identity().fleetId())
-                || !healthyMovingAi(candidate.car()) || !usableForSpacing(candidate.localization())) {
+            if (candidate == subject || !candidate.identity().fleetId().equals(subject.identity().fleetId()) || candidate.localization().best().isEmpty()) {
                 continue;
             }
-            double gap = SurveyRouteSampler.forwardDelta(subjectDistance, candidate.localization().best().orElseThrow().distanceAlongRoute(), routeLength);
-            if (gap > 0.1 && gap <= BasicAiCarController.MAX_SPACING_RANGE) {
+            double gap = SurveyRouteSampler.forwardDelta(from, candidate.localization().best().orElseThrow().distanceAlongRoute(), routeLength);
+            if (gap > 0.1) {
                 nearest = Math.min(nearest, gap);
             }
         }
         return nearest;
     }
 
-    static boolean healthyMovingAi(OpenwheelCarEntity car) {
-        return BasicAiTrafficPolicy.healthyMovingAi(car.isBasicAiOwned(), car.isAutonomousControlEnabled(), car.getControllingPassenger() != null,
-            car.getSpeedKmh(), car.getDebugVelocityLong(), car.getDebugVelocityLat());
-    }
-
-    private static boolean usableForSpacing(SurveyRouteLocalizer.Result localization) {
-        return (localization.status() == SurveyRouteLocalizer.Status.TRACKED || localization.status() == SurveyRouteLocalizer.Status.LOW_CONFIDENCE)
-            && localization.best().isPresent();
+    private static BasicAiGripModel.State gripState(OpenwheelCarEntity car, long tick) {
+        GripCache cached = GRIP_CACHE.get(car.getUUID());
+        if (cached != null && tick < cached.refreshAt()) {
+            return cached.state();
+        }
+        PrototypeCarSetup setup = car.getSetup();
+        double worstWheelDamage = Math.max(Math.max(car.getFrontLeftWheelDamagePercent(), car.getFrontRightWheelDamagePercent()),
+            Math.max(car.getRearLeftWheelDamagePercent(), car.getRearRightWheelDamagePercent()));
+        double frontAero = CarComponentDamage.frontWingAeroMultiplier(car.getFrontEndDamagePercent());
+        double rearAero = CarComponentDamage.rearWingAeroMultiplier(car.getRearEndDamagePercent());
+        double powerFactor = CarComponentDamage.chassisPowerMultiplier(car.getChassisDamagePercent())
+            * CarComponentDamage.enginePowerMultiplier(car.getEngineDamagePercent());
+        double dragFactor = CarComponentDamage.chassisDragMultiplier(car.getChassisDamagePercent());
+        BasicAiGripModel.State state = BasicAiGripModel.build(new BasicAiGripModel.Input(
+            car.getTyreTemperatureCelsius(), car.getTyreWorkingTemperatureMinCelsius(), car.getTyreWorkingTemperatureMaxCelsius(),
+            car.getTyreWearPercent(), worstWheelDamage, setup.tyreMuCoefficient(), car.getAiCurrentSurfaceGrip(),
+            setup.clACoefficient(), frontAero, rearAero, setup.powerMultiplier(), powerFactor,
+            setup.cdACoefficient(), dragFactor));
+        GRIP_CACHE.put(car.getUUID(), new GripCache(state, tick + 10L + Math.floorMod(car.getId(), 10)));
+        return state;
     }
 
     private static SurveyRouteModel.Point point(OpenwheelCarEntity car) {
@@ -324,6 +367,9 @@ public final class BasicAiFleetManager {
     private static void invalidatePreparedTick() {
         preparedTick = Long.MIN_VALUE;
         PREPARED_COMMANDS.clear();
+    }
+
+    private record GripCache(BasicAiGripModel.State state, long refreshAt) {
     }
 
     private record CarSnapshot(OpenwheelCarEntity car, BasicAiDriverIdentity identity, SurveyRouteLocalizer.Result localization,

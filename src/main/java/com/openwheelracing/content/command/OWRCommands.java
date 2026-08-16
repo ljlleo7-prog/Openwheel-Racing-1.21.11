@@ -10,6 +10,7 @@ import com.openwheelracing.content.ai.BasicAiDriverIdentity;
 import com.openwheelracing.content.ai.BasicAiFleetChunkTickets;
 import com.openwheelracing.content.ai.BasicAiFleetManager;
 import com.openwheelracing.content.ai.BasicAiStatus;
+import com.openwheelracing.content.ai.BasicAiTrafficMode;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.race.OWRRaceControlState;
@@ -73,6 +74,8 @@ public final class OWRCommands {
                     .then(Commands.literal("start").executes(OWRCommands::startAiFleet))
                     .then(Commands.literal("stop").executes(OWRCommands::stopAiFleet))
                     .then(Commands.literal("despawn").executes(OWRCommands::despawnAiFleet))
+                    .then(Commands.literal("mode")
+                        .then(Commands.argument("mode", StringArgumentType.word()).executes(OWRCommands::setAiFleetMode)))
                     .then(Commands.literal("status").executes(OWRCommands::showAiFleetStatus))))
             .then(Commands.literal("steward")
                 .then(Commands.literal("list")
@@ -279,6 +282,18 @@ public final class OWRCommands {
         return count;
     }
 
+    private static int setAiFleetMode(CommandContext<CommandSourceStack> context) {
+        String value = StringArgumentType.getString(context, "mode");
+        Optional<BasicAiTrafficMode> mode = BasicAiTrafficMode.parse(value);
+        if (mode.isEmpty()) {
+            send(context, "Unknown AI mode " + value + ". Use auto, race, formation, vsc, safety_car, or hold.");
+            return 0;
+        }
+        BasicAiFleetManager.setModeOverride(mode.get());
+        send(context, "AI fleet mode override set to " + mode.get().name().toLowerCase(java.util.Locale.ROOT) + ".");
+        return 1;
+    }
+
     private static int showAiFleetStatus(CommandContext<CommandSourceStack> context) {
         Optional<TrackDefinition> track = activeTrack(context);
         if (track.isEmpty()) {
@@ -291,7 +306,10 @@ public final class OWRCommands {
             return 0;
         }
         UUID fleetId = statuses.getFirst().fleetId();
-        send(context, "AI fleet " + fleetId + " cars=" + statuses.size() + " track=" + track.get().name() + " forcedChunks=" + BasicAiFleetChunkTickets.totalTicketCount() + "/" + BasicAiFleetChunkTickets.MAX_TOTAL_CHUNKS + ".");
+        send(context, "AI fleet " + fleetId + " cars=" + statuses.size() + " track=" + track.get().name()
+            + " mode=" + BasicAiFleetManager.mode(context.getSource().getLevel()).name().toLowerCase(java.util.Locale.ROOT)
+            + " override=" + BasicAiFleetManager.modeOverride().name().toLowerCase(java.util.Locale.ROOT)
+            + " forcedChunks=" + BasicAiFleetChunkTickets.totalTicketCount() + "/" + BasicAiFleetChunkTickets.MAX_TOTAL_CHUNKS + ".");
         for (BasicAiStatus status : statuses) {
             String gap = Double.isFinite(status.nearestAheadGap()) ? String.format(java.util.Locale.ROOT, "%.1fm", status.nearestAheadGap()) : "none";
             send(context, "%s entity=%d grid=%d %s loc=%s conf=%.2f route=%.1fm laps=%d speed=%.1fkm/h gap=%s reason=%s".formatted(

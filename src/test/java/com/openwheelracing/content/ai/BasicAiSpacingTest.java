@@ -7,9 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BasicAiSpacingTest {
     @Test
-    void closeFollowerSlowsAndBrakes() {
-        assertTrue(BasicAiCarController.applySpacing(20.0, 15.0, 8.0) < 15.0);
-        assertTrue(BasicAiCarController.speedCommand(15.0, 15.0, 0.0f, 4.0).brake() >= 0.35f);
+    void selfishCommandDoesNotQueueBehindGap() {
+        BasicAiDriveCommand command = BasicAiCarController.speedCommand(15.0, 95.0, 0.0f, BasicAiNearbyAvoidance.Decision.NONE);
+        assertEquals(1.0f, command.throttle());
+        assertEquals(0.0f, command.brake());
     }
 
     @Test
