@@ -254,6 +254,13 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         addRenderableWidget(Button.builder(Component.literal("-R"), button -> OWRNetwork.sendToServer(new OWRNetwork.TeamTerminalBindCarMessage(1, -1)))
             .bounds(leftPos + RIGHT_X + 92, topPos + 68, 28, 16)
             .build());
+        TeamCarRow selected = selectedTeamCar();
+        Button push = Button.builder(Component.translatable("screen.openwheelracing.team_terminal.ai_push"), button -> {
+            TeamCarRow car = selectedTeamCar();
+            if (car != null) OWRNetwork.sendToServer(new OWRNetwork.TeamTerminalAiPushMessage(car.entityId()));
+        }).bounds(leftPos + RIGHT_X + 124, topPos + 68, 52, 16).build();
+        push.active = selected != null && selected.aiOwned();
+        addRenderableWidget(push);
         addMapWidgets();
     }
 
@@ -357,7 +364,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.drawString(font, String.format("TYRE %3.0f%%  %3.0fC", car.tyrePercent(), car.tyreTemperatureC()), x + 8, y + 82, 0xFFFFD866, false);
         graphics.drawString(font, String.format("DMG %3.0f%%", car.damagePercent()), x + 8, y + 96, car.damagePercent() > 70.0f ? 0xFFFF7777 : 0xFFC9D1D9, false);
         ComponentDamageDisplay.drawCompact(graphics, font, car.componentDamage(), x + 8, y + 108, 0xFFC9D1D9);
-        graphics.drawString(font, car.inPitLane() ? "MAP PIT" : (car.onMap() ? "MAP TRACK" : "MAP OFF"), x + 8, y + 134, car.onMap() ? 0xFF7EE787 : 0xFFFF7777, false);
+        String lapText = "LST " + telemetryLapTime(car.lastLapMillis()) + "  BST " + telemetryLapTime(car.bestLapMillis());
+        graphics.drawString(font, fit(lapText, width - 16), x + 8, y + 122, 0xFF7EE787, false);
+        if (car.aiOwned()) graphics.drawString(font, String.format(java.util.Locale.ROOT, "AI PUSH x%.4f", car.aiPaceScale()), x + 8, y + 136, 0xFFFFD866, false);
+        graphics.drawString(font, car.inPitLane() ? "MAP PIT" : (car.onMap() ? "MAP TRACK" : "MAP OFF"), x + 8, y + 150, car.onMap() ? 0xFF7EE787 : 0xFFFF7777, false);
     }
 
     private void drawDirectorTelemetry(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
@@ -582,6 +592,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         int seconds = millis / 1000 % 60;
         int milliseconds = millis % 1000;
         return String.format("%d:%02d.%03d", minutes, seconds, milliseconds);
+    }
+
+    private static String telemetryLapTime(int millis) {
+        return millis > 0 ? formatLapTime(millis) : "--:--.---";
     }
 
     private class AutoDetectRangeSlider extends AbstractSliderButton {

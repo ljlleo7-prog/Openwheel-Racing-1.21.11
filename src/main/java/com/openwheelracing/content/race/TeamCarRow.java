@@ -12,17 +12,19 @@ import net.minecraft.world.entity.LivingEntity;
 import java.util.UUID;
 
 public record TeamCarRow(int entityId, UUID riderId, String liveryName, String riderName, int liveryColor, float speedKmh, int gear, int rpm, float ersPercent, float ersPowerKw, float tyrePercent, float tyreTemperatureC, float damagePercent, CarComponentDamage componentDamage,
+                         boolean aiOwned, int lastLapMillis, int bestLapMillis, float aiPaceScale,
                          double x, double z, float headingDegrees, boolean onMap, boolean inPitLane, int liveRank) {
     public static TeamCarRow fromCar(OpenwheelCarEntity car, TrackMapSnapshot map, int liveRank) {
         Entity passenger = car.getFirstPassenger();
-        String rider = passenger instanceof LivingEntity living ? living.getDisplayName().getString() : "--";
+        var aiIdentity = car.getBasicAiIdentity().orElse(null);
+        String rider = aiIdentity != null ? aiIdentity.displayName() : passenger instanceof LivingEntity living ? living.getDisplayName().getString() : "--";
         int blockX = (int) Math.floor(car.getX());
         int blockZ = (int) Math.floor(car.getZ());
         boolean inPitLane = contains(map.pitRuns(), blockX, blockZ);
         boolean onMap = inPitLane || contains(map.asphaltRuns(), blockX, blockZ);
         return new TeamCarRow(
             car.getId(),
-            passenger instanceof ServerPlayer serverPlayer ? serverPlayer.getUUID() : new UUID(0L, 0L),
+            aiIdentity != null ? aiIdentity.driverId() : passenger instanceof ServerPlayer serverPlayer ? serverPlayer.getUUID() : new UUID(0L, 0L),
             CarLivery.fromIndex(car.getLivery()).displayName(),
             rider,
             car.getLiveryColors().bodySide(),
@@ -35,6 +37,10 @@ public record TeamCarRow(int entityId, UUID riderId, String liveryName, String r
             car.getTyreTemperatureCelsius(),
             car.getDamagePercent(),
             car.getComponentDamage(),
+            car.isBasicAiOwned(),
+            car.getCompletedLapTicks(),
+            car.getBestLapTicks(),
+            (float) com.openwheelracing.content.ai.BasicAiFleetManager.calibrationPaceScale(car),
             car.getX(),
             car.getZ(),
             car.getYRot(),
@@ -70,6 +76,10 @@ public record TeamCarRow(int entityId, UUID riderId, String liveryName, String r
         buffer.writeVarInt(row.componentDamage.frontRightWheel());
         buffer.writeVarInt(row.componentDamage.rearLeftWheel());
         buffer.writeVarInt(row.componentDamage.rearRightWheel());
+        buffer.writeBoolean(row.aiOwned);
+        buffer.writeVarInt(row.lastLapMillis);
+        buffer.writeVarInt(row.bestLapMillis);
+        buffer.writeFloat(row.aiPaceScale);
         buffer.writeDouble(row.x);
         buffer.writeDouble(row.z);
         buffer.writeFloat(row.headingDegrees);
@@ -93,7 +103,12 @@ public record TeamCarRow(int entityId, UUID riderId, String liveryName, String r
         float tyreTemperatureC = buffer.readFloat();
         float damagePercent = buffer.readFloat();
         CarComponentDamage componentDamage = new CarComponentDamage(buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt());
-        return new TeamCarRow(entityId, riderId, liveryName, riderName, liveryColor, speedKmh, gear, rpm, ersPercent, ersPowerKw, tyrePercent, tyreTemperatureC, damagePercent, componentDamage, buffer.readDouble(), buffer.readDouble(), buffer.readFloat(), buffer.readBoolean(), buffer.readBoolean(), buffer.readInt());
+        boolean aiOwned = buffer.readBoolean();
+        int lastLapMillis = buffer.readVarInt();
+        int bestLapMillis = buffer.readVarInt();
+        float aiPaceScale = buffer.readFloat();
+        return new TeamCarRow(entityId, riderId, liveryName, riderName, liveryColor, speedKmh, gear, rpm, ersPercent, ersPowerKw, tyrePercent, tyreTemperatureC, damagePercent, componentDamage,
+            aiOwned, lastLapMillis, bestLapMillis, aiPaceScale, buffer.readDouble(), buffer.readDouble(), buffer.readFloat(), buffer.readBoolean(), buffer.readBoolean(), buffer.readInt());
     }
 
     private static boolean contains(java.util.List<TrackMapSnapshot.CellRun> runs, int x, int z) {

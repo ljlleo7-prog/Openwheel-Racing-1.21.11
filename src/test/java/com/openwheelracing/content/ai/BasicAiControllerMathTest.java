@@ -97,6 +97,14 @@ class BasicAiControllerMathTest {
         assertTrue(supervised < 70.0, "braking supervisor must intervene before the corner");
     }
 
+    @Test
+    void launchMergeIsBoundedToRaceStartStraight() {
+        assertTrue(BasicAiCarController.launchMergeActive(BasicAiTrafficMode.RACE, 20, 15.0, 0.0));
+        org.junit.jupiter.api.Assertions.assertFalse(BasicAiCarController.launchMergeActive(BasicAiTrafficMode.RACE, 61, 15.0, 0.0));
+        org.junit.jupiter.api.Assertions.assertFalse(BasicAiCarController.launchMergeActive(BasicAiTrafficMode.RACE, 20, 15.0, 0.02));
+        org.junit.jupiter.api.Assertions.assertFalse(BasicAiCarController.launchMergeActive(BasicAiTrafficMode.FORMATION, 20, 15.0, 0.0));
+    }
+
     private static SurveyRouteModel straightRoute() {
         return new SurveyRouteModel(UUID.randomUUID(), UUID.randomUUID(), List.of(), List.of(
             SurveyRouteSamplerTest.node(0, 0, 0, 0, 0),

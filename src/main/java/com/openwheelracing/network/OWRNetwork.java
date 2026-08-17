@@ -99,6 +99,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
         registrar.playToServer(TeamTerminalSenseCarsMessage.TYPE, codec(TeamTerminalSenseCarsMessage::encode, TeamTerminalSenseCarsMessage::decode), TeamTerminalSenseCarsMessage::handle);
         registrar.playToServer(TeamTerminalBindCarMessage.TYPE, codec(TeamTerminalBindCarMessage::encode, TeamTerminalBindCarMessage::decode), TeamTerminalBindCarMessage::handle);
+        registrar.playToServer(TeamTerminalAiPushMessage.TYPE, codec(TeamTerminalAiPushMessage::encode, TeamTerminalAiPushMessage::decode), TeamTerminalAiPushMessage::handle);
         registrar.playToServer(MonitorTelemetrySubscribeMessage.TYPE, codec(MonitorTelemetrySubscribeMessage::encode, MonitorTelemetrySubscribeMessage::decode), MonitorTelemetrySubscribeMessage::handle);
         registrar.playToServer(RaceMonitorAutoDetectMapMessage.TYPE, codec(RaceMonitorAutoDetectMapMessage::encode, RaceMonitorAutoDetectMapMessage::decode), RaceMonitorAutoDetectMapMessage::handle);
         registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
@@ -1633,6 +1634,26 @@ public final class OWRNetwork {
                 }
                 menu.bindTeamCar(message.side, message.entityId);
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
+    public record TeamTerminalAiPushMessage(int entityId) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<TeamTerminalAiPushMessage> TYPE = payloadType("team_terminal_ai_push_message");
+        @Override public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(TeamTerminalAiPushMessage message, FriendlyByteBuf buffer) { buffer.writeInt(message.entityId); }
+        private static TeamTerminalAiPushMessage decode(FriendlyByteBuf buffer) { return new TeamTerminalAiPushMessage(buffer.readInt()); }
+        private static void handle(TeamTerminalAiPushMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.showsTeamTerminal()) return;
+                if (player.level().getEntity(message.entityId) instanceof OpenwheelCarEntity car && car.isBasicAiOwned()) {
+                    boolean changed = com.openwheelracing.content.ai.BasicAiFleetManager.requestPush(car);
+                    sendCommandFeedback(player, changed
+                        ? "AI push accepted: " + com.openwheelracing.content.ai.BasicAiFleetManager.calibrationStatus(car)
+                        : "AI push refused: car is already at the maximum trial envelope.");
+                    sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+                }
             });
         }
     }

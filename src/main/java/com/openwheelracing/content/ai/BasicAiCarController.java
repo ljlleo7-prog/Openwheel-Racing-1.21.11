@@ -23,7 +23,10 @@ public final class BasicAiCarController {
     private long runningTicks;
     private long ticksSinceLap;
     private int lastCompletedLapTicks;
+    private int lastLapMillis;
     private float previousSteering;
+    private double lastLateralError;
+    private double lastHeadingError;
 
     public BasicAiStatus status() {
         return status;
@@ -68,23 +71,30 @@ public final class BasicAiCarController {
             AiTrackSample planned = input.plan().sample(routeDistance);
             double lateralError = candidate == null ? 0.0 : candidate.signedLateralDistance() - planned.lateralOffset();
             double headingError = TrackGeometry.wrapRadians(planned.tangentRadians() - input.headingRadians());
-            float routeSteering = deterministicSteering(planned.curvature(), lateralError, headingError,
+            lastLateralError = lateralError;
+            lastHeadingError = headingError;
+            boolean launchMerge = launchMergeActive(input.mode(), runningTicks, input.speedMetersPerSecond(), planned.curvature());
+            double steeringLateralError = launchMerge ? lateralError * 0.30 : lateralError;
+            float routeSteering = deterministicSteering(planned.curvature(), steeringLateralError, headingError,
                 input.yawRateRadiansPerSecond(), input.speedMetersPerSecond());
+            if (launchMerge) routeSteering = (float) clamp(routeSteering, -0.22, 0.22);
             float desiredSteering = input.avoidance().threat()
                 ? (float) clamp(routeSteering + input.avoidance().steeringBias(), -1.0, 1.0)
                 : routeSteering;
             previousSteering = approach(previousSteering, desiredSteering, STEERING_RATE_PER_TICK);
-            targetSpeed = planned.targetSpeedMetersPerSecond();
-            double envelope = clamp(1.0 - Math.abs(lateralError) * 0.10 - Math.abs(headingError) * 0.45, 0.35, 1.0);
+            targetSpeed = planned.targetSpeedMetersPerSecond() * input.calibration().paceScale();
+            double lateralEnvelopeGain = launchMerge ? 0.02 : 0.10;
+            double envelope = clamp(1.0 - Math.abs(lateralError) * lateralEnvelopeGain - Math.abs(headingError) * 0.45, 0.35, 1.0);
             targetSpeed = Math.min(targetSpeed * envelope, input.mode().speedCapMetersPerSecond());
-            double supervisedSpeed = supervisedTargetSpeed(input.plan(), routeDistance, input.speedMetersPerSecond(), input.grip());
+            double supervisedSpeed = supervisedTargetSpeed(input.plan(), routeDistance, input.speedMetersPerSecond(), input.grip(),
+                input.calibration().paceScale(), input.calibration().brakingCapabilityFraction());
             targetSpeed = Math.min(targetSpeed, supervisedSpeed);
             targetSpeed = applyQueueing(targetSpeed, input.speedMetersPerSecond(), input.queueGap(), input.mode());
             double nextSpeed = supervisedTargetSpeed(input.plan(), routeDistance + input.plan().spacing(),
-                input.speedMetersPerSecond(), input.grip());
+                input.speedMetersPerSecond(), input.grip(), input.calibration().paceScale(), input.calibration().brakingCapabilityFraction());
             double accelerationFeedForward = (nextSpeed * nextSpeed - supervisedSpeed * supervisedSpeed) / (2.0 * input.plan().spacing());
             command = speedCommand(input.speedMetersPerSecond(), targetSpeed, accelerationFeedForward, previousSteering,
-                input.avoidance(), input.grip());
+                input.avoidance(), input.grip(), input.calibration().speedErrorGain());
         }
 
         BasicAiDriverIdentity identity = input.identity();
@@ -92,6 +102,7 @@ public final class BasicAiCarController {
             localization.status(), localization.confidence(), routeDistance, routeLaps, runningTicks, input.speedMetersPerSecond() * 3.6,
             input.queueGap(), reason + " progress=" + progress.state().name().toLowerCase(java.util.Locale.ROOT)
                 + " source=" + input.plan().referenceSource().name().toLowerCase(java.util.Locale.ROOT)
+                + " pace=" + String.format(java.util.Locale.ROOT, "%.3f", input.calibration().paceScale())
                 + " mode=" + input.mode().name().toLowerCase(java.util.Locale.ROOT)
                 + (input.avoidance().threat() ? " avoidance" : "")
                 + (targetSpeed > 0.0 ? " target=" + Math.round(targetSpeed * 3.6) + "km/h" : ""));
@@ -102,6 +113,8 @@ public final class BasicAiCarController {
     public int completedLapTicks() {
         return lastCompletedLapTicks;
     }
+
+    public int lastLapMillis() { return lastLapMillis; }
 
     public void stop(BasicAiDriverIdentity identity, int entityId, double speedKmh, String reason) {
         status = BasicAiStatus.stopped(identity, entityId, speedKmh, reason);
@@ -151,11 +164,17 @@ public final class BasicAiCarController {
 
     static BasicAiDriveCommand speedCommand(double currentSpeed, double targetSpeed, double accelerationFeedForward, float steering,
                                              BasicAiNearbyAvoidance.Decision avoidance, BasicAiGripModel.State capability) {
+        return speedCommand(currentSpeed, targetSpeed, accelerationFeedForward, steering, avoidance, capability, 0.75);
+    }
+
+    static BasicAiDriveCommand speedCommand(double currentSpeed, double targetSpeed, double accelerationFeedForward, float steering,
+                                             BasicAiNearbyAvoidance.Decision avoidance, BasicAiGripModel.State capability,
+                                             double speedErrorGain) {
         if (avoidance.threat() && avoidance.brake() > 0.0) {
             return new BasicAiDriveCommand(0.0f, (float) avoidance.brake(), steering);
         }
         double error = targetSpeed - currentSpeed;
-        double requestedAcceleration = accelerationFeedForward + error * 0.75;
+        double requestedAcceleration = accelerationFeedForward + error * speedErrorGain;
         if (requestedAcceleration >= 0.05) {
             float throttle = (float) clamp(requestedAcceleration / Math.max(0.25, capability.driveAcceleration(currentSpeed)), 0.0, 1.0);
             return new BasicAiDriveCommand(throttle, 0.0f, steering);
@@ -174,14 +193,28 @@ public final class BasicAiCarController {
         return (float) clamp(desired, -1.0, 1.0);
     }
 
+    static boolean launchMergeActive(BasicAiTrafficMode mode, long runningTicks, double speed, double curvature) {
+        return mode == BasicAiTrafficMode.RACE && runningTicks <= 60L && speed < 30.0 && Math.abs(curvature) < 0.012;
+    }
+
     static double supervisedTargetSpeed(AiTrackPlan plan, double routeDistance, double currentSpeed,
                                         BasicAiGripModel.State capability) {
-        double target = plan.sample(routeDistance).targetSpeedMetersPerSecond();
+        return supervisedTargetSpeed(plan, routeDistance, currentSpeed, capability, 1.0);
+    }
+
+    static double supervisedTargetSpeed(AiTrackPlan plan, double routeDistance, double currentSpeed,
+                                        BasicAiGripModel.State capability, double paceScale) {
+        return supervisedTargetSpeed(plan, routeDistance, currentSpeed, capability, paceScale, 0.50);
+    }
+
+    static double supervisedTargetSpeed(AiTrackPlan plan, double routeDistance, double currentSpeed,
+                                        BasicAiGripModel.State capability, double paceScale, double brakingCapabilityFraction) {
+        double target = plan.sample(routeDistance).targetSpeedMetersPerSecond() * paceScale;
         double previewDistance = Math.min(320.0, plan.routeLength() * 0.5);
         double reactionDistance = Math.max(4.0, currentSpeed * 0.55);
-        double conservativeBrake = Math.max(1.0, capability.brakeAcceleration(currentSpeed) * 0.45);
+        double conservativeBrake = Math.max(1.0, capability.brakeAcceleration(currentSpeed) * brakingCapabilityFraction);
         for (double ahead = plan.spacing(); ahead <= previewDistance; ahead += plan.spacing()) {
-            double futureSpeed = plan.sample(routeDistance + ahead).targetSpeedMetersPerSecond();
+            double futureSpeed = plan.sample(routeDistance + ahead).targetSpeedMetersPerSecond() * paceScale;
             double usableDistance = Math.max(0.0, ahead - reactionDistance);
             double stoppingLimit = Math.sqrt(futureSpeed * futureSpeed + 2.0 * conservativeBrake * usableDistance);
             target = Math.min(target, stoppingLimit);
@@ -197,6 +230,7 @@ public final class BasicAiCarController {
         routeLaps = 0;
         runningTicks = 0L;
         ticksSinceLap = 0L;
+        lastLapMillis = 0;
         previousSteering = 0.0f;
         progressEstimator.reset();
     }
@@ -213,6 +247,7 @@ public final class BasicAiCarController {
         if (accumulatedLapProgress >= routeLength && ticksSinceLap >= MIN_LAP_TICKS) {
             routeLaps++;
             accumulatedLapProgress -= routeLength;
+            lastLapMillis = (int) Math.min(Integer.MAX_VALUE, ticksSinceLap * 50L);
             ticksSinceLap = 0L;
         }
     }
@@ -230,8 +265,11 @@ public final class BasicAiCarController {
                         double headingRadians, double speedMetersPerSecond, double longitudinalSpeedMetersPerSecond,
                         double yawRateRadiansPerSecond, SurveyRouteLocalizer.Result localization,
                         BasicAiNearbyAvoidance.Decision avoidance, BasicAiTrafficMode mode, BasicAiGripModel.State grip,
-                        AiTrackPlan plan, double queueGap) {
+                        AiTrackPlan plan, double queueGap, AiGripCalibration.Settings calibration) {
     }
+
+    public double lastLateralError() { return lastLateralError; }
+    public double lastHeadingError() { return lastHeadingError; }
 
     private record UUIDPair(java.util.UUID routeId, java.util.UUID trackId) {
         boolean matches(java.util.UUID candidateRouteId, java.util.UUID candidateTrackId) {

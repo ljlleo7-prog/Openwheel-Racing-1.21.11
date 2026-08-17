@@ -1348,6 +1348,13 @@ public class OpenwheelCarEntity extends Entity {
         return entityData.get(COMPLETED_LAP_TICKS);
     }
 
+    public void setAiLapTelemetry(int lastLapMillis) {
+        if (!isBasicAiOwned() || lastLapMillis <= 0) return;
+        entityData.set(COMPLETED_LAP_TICKS, lastLapMillis);
+        int best = entityData.get(BEST_LAP_TICKS);
+        if (best <= 0 || lastLapMillis < best) entityData.set(BEST_LAP_TICKS, lastLapMillis);
+    }
+
     public int getCompletedLapLingerTicks() {
         return entityData.get(COMPLETED_LAP_LINGER_TICKS);
     }
@@ -1578,7 +1585,11 @@ public class OpenwheelCarEntity extends Entity {
         activeTrack.ifPresent(track -> commitValidTimingSegments(records, player.getUUID(), serverLevel.dimension().identifier().toString(), track, timingSegments));
         if (activeTrack.isPresent()) {
             OWRLapProfiles.BestLapProfile profile = lapProfileCollector.finish(serverLevel.dimension().identifier().toString(), activeTrack.get().trackId(), player.getScoreboardName(), lapRecord.id(), lapMillis, gameTime);
-            if (profile != null) OWRLapProfiles.get(serverLevel).putIfFaster(profile);
+            if (profile != null) {
+                if (OWRLapProfiles.get(serverLevel).putIfFaster(profile)) messageDriver(Component.literal("Best racing line saved"));
+            } else {
+                messageDriver(Component.literal("Racing line not saved — route coverage " + Math.round(lapProfileCollector.coverage() * 100.0) + "%"));
+            }
         }
         int bestLap = records.getBestLap(player.getUUID());
         boolean personalBest = bestLap != 0 && bestLap != previousBest && bestLap == lapMillis;
@@ -2184,7 +2195,7 @@ public class OpenwheelCarEntity extends Entity {
         return getSurfaceAt(position());
     }
 
-    private boolean isOnTrackSurface() {
+    public boolean isFootprintOnTrackSurface() {
         double yaw = Math.toRadians(getYRot());
         Vec3 forward = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
         Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
@@ -2203,6 +2214,10 @@ public class OpenwheelCarEntity extends Entity {
             }
         }
         return false;
+    }
+
+    private boolean isOnTrackSurface() {
+        return isFootprintOnTrackSurface();
     }
 
     private boolean isCheckpointCheckEnabled() {

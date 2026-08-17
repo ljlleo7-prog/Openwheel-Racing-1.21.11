@@ -324,6 +324,7 @@
   "screen.openwheelracing.race_director.checkpoints_short": "CP",
   "screen.openwheelracing.race_director.off_track_short": "Track",
   "screen.openwheelracing.team_terminal.sense_cars_short": "Scan",
+  "screen.openwheelracing.team_terminal.ai_push": "Push",
   "screen.openwheelracing.race_director.auto_detect_map": "Auto-Detect Map",
   "screen.openwheelracing.race_director.no_track_map": "No stored map",
   "entity.openwheelracing.safety_car": "Safety Car",

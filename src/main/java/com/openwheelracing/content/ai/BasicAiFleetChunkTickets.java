@@ -18,7 +18,7 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class BasicAiFleetChunkTickets {
-    public static final int MAX_TOTAL_CHUNKS = 128;
+    public static final int MAX_TOTAL_CHUNKS = 512;
     private static final Identifier ID = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "basic_ai_fleet");
     private static final Map<UUID, OwnedTickets> OWNED = new HashMap<>();
     private static final TicketController CONTROLLER = new TicketController(ID, BasicAiFleetChunkTickets::validate);
@@ -34,27 +34,35 @@ public final class BasicAiFleetChunkTickets {
     public static boolean acquire(ServerLevel level, OpenwheelCarEntity car, SurveyRouteModel route, double distance) {
         Set<AiRouteChunkWindow.ChunkCoordinate> desired = AiRouteChunkWindow.around(route, distance);
         OwnedTickets existing = OWNED.get(car.getUUID());
-        Set<AiRouteChunkWindow.ChunkCoordinate> currentUnique = uniqueChunks();
-        Set<AiRouteChunkWindow.ChunkCoordinate> additionalChunks = new HashSet<>(desired);
-        additionalChunks.removeAll(currentUnique);
-        if (currentUnique.size() + additionalChunks.size() > MAX_TOTAL_CHUNKS) {
-            deniedAcquisitions++;
-            return false;
-        }
         if (existing == null) {
             existing = new OwnedTickets(level, new HashSet<>());
             OWNED.put(car.getUUID(), existing);
-        }
-        for (AiRouteChunkWindow.ChunkCoordinate chunk : desired) {
-            if (existing.chunks().add(chunk)) {
-                CONTROLLER.forceChunk(level, car.getUUID(), chunk.x(), chunk.z(), true, true);
-            }
         }
         Set<AiRouteChunkWindow.ChunkCoordinate> stale = new HashSet<>(existing.chunks());
         stale.removeAll(desired);
         for (AiRouteChunkWindow.ChunkCoordinate chunk : stale) {
             CONTROLLER.forceChunk(level, car.getUUID(), chunk.x(), chunk.z(), false, true);
             existing.chunks().remove(chunk);
+        }
+        boolean complete = true;
+        Set<AiRouteChunkWindow.ChunkCoordinate> currentUnique = uniqueChunks();
+        for (AiRouteChunkWindow.ChunkCoordinate chunk : desired) {
+            if (existing.chunks().contains(chunk)) continue;
+            if (!currentUnique.contains(chunk) && currentUnique.size() >= MAX_TOTAL_CHUNKS) {
+                complete = false;
+                continue;
+            }
+            existing.chunks().add(chunk);
+            currentUnique.add(chunk);
+            CONTROLLER.forceChunk(level, car.getUUID(), chunk.x(), chunk.z(), true, true);
+        }
+        if (!complete) deniedAcquisitions++;
+        // The first nine desired entries are the current 3x3 ticking area.
+        int corePresent = 0;
+        for (AiRouteChunkWindow.ChunkCoordinate chunk : desired) {
+            if (corePresent >= 9) break;
+            if (!existing.chunks().contains(chunk)) return false;
+            corePresent++;
         }
         return true;
     }

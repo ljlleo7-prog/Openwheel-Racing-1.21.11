@@ -105,10 +105,26 @@ public final class LapProfileCollector {
     public OWRLapProfiles.BestLapProfile finish(String dimensionId, UUID trackId, String driverName, OWRLapProfiles.Origin origin,
                                                 long lapRecordId, int lapMillis, long gameTime) {
         if (route == null || coverage() < MIN_COVERAGE) return null;
-        int last = timeMillis.length - 1;
-        if (!filled[last]) return null;
+        fillSmallGaps();
         return new OWRLapProfiles.BestLapProfile(dimensionId, trackId, route.routeId(), driverId, driverName, origin, lapRecordId, lapMillis,
             route.length(), spacing, timeMillis, speedCmps, lateralOffsetCm, headingResidualMilliRad, gameTime);
+    }
+
+    private void fillSmallGaps() {
+        if (filled.length == 0) return;
+        for (int index = 0; index < filled.length; index++) {
+            if (filled[index]) continue;
+            int before = index;
+            int after = index;
+            do before = Math.floorMod(before - 1, filled.length); while (!filled[before] && before != index);
+            do after = (after + 1) % filled.length; while (!filled[after] && after != index);
+            int source = filled[before] ? before : after;
+            timeMillis[index] = timeMillis[source];
+            speedCmps[index] = speedCmps[source];
+            lateralOffsetCm[index] = lateralOffsetCm[source];
+            headingResidualMilliRad[index] = headingResidualMilliRad[source];
+            filled[index] = true;
+        }
     }
 
     public PrefixSnapshot safePrefix() {

@@ -33,12 +33,16 @@ public final class BasicAiFleetManager {
     private static final Map<UUID, BasicAiDriveCommand> PREPARED_COMMANDS = new HashMap<>();
     private static final Map<UUID, GripCache> GRIP_CACHE = new HashMap<>();
     private static final Map<UUID, PlanCache> PLAN_CACHE = new HashMap<>();
+    private static final Map<UUID, AiGripCalibration> CALIBRATIONS = new HashMap<>();
+    private static final Map<UUID, LapTrialState> LAP_TRIALS = new HashMap<>();
     private static final Map<DriverRouteKey, LineCache> LINE_CACHE = new HashMap<>();
     private static final Map<UUID, Long> LOW_SPEED_SINCE = new HashMap<>();
     private static final Map<UUID, Long> LAST_RECORDED_LAP = new HashMap<>();
     private static final Map<UUID, com.openwheelracing.content.race.LapProfileCollector> AI_LAP_COLLECTORS = new HashMap<>();
     private static final Map<UUID, Long> AI_LAP_STARTED_AT = new HashMap<>();
     private static BasicAiTrafficMode modeOverride = BasicAiTrafficMode.AUTO;
+    private static double calibrationStepPercent = 2.5;
+    private static boolean calibrationRandomSteps;
     private static UUID cachedRouteId;
     private static int cachedSurveyRevision = Integer.MIN_VALUE;
     private static SurveyRouteModel cachedRouteModel;
@@ -106,6 +110,8 @@ public final class BasicAiFleetManager {
         LINE_CACHE.clear();
         GRIP_CACHE.clear();
         PLAN_CACHE.clear();
+        CALIBRATIONS.clear();
+        LAP_TRIALS.clear();
         LOW_SPEED_SINCE.clear();
         LAST_RECORDED_LAP.clear();
         AI_LAP_COLLECTORS.clear();
@@ -232,15 +238,80 @@ public final class BasicAiFleetManager {
         return List.copyOf(traces);
     }
 
+    public static List<RacingLineTrace> playerBestLineTrace(ServerLevel level, UUID trackId, UUID playerId) {
+        Optional<SurveyRoute> stored = TrackSurveyData.get(level).get(trackId);
+        if (stored.isEmpty()) return List.of();
+        SurveyRouteModel route = stored.get().toModel();
+        OWRLapProfiles.BestLapProfile profile = OWRLapProfiles.get(level).get(trackId, route.routeId(), playerId).orElse(null);
+        if (profile == null || profile.origin() != OWRLapProfiles.Origin.PLAYER || !profile.hasRecordedLine()) return List.of();
+        int count = Math.max(3, (int) Math.ceil(route.length() / 2.0));
+        List<com.openwheelracing.content.race.LapProfileCollector.TracePoint> points = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            double distance = index * route.length() / count;
+            SurveyRouteSampler.Sample center = SurveyRouteSampler.sample(route, distance);
+            double offset = profile.lateralOffsetMeters(distance);
+            points.add(new com.openwheelracing.content.race.LapProfileCollector.TracePoint(
+                center.position().x() - Math.sin(center.headingRadians()) * offset,
+                center.position().y() + 0.08,
+                center.position().z() + Math.cos(center.headingRadians()) * offset));
+        }
+        return List.of(new RacingLineTrace(playerId, profile.driverName() + " best " + profile.lapMillis() + "ms", true, points));
+    }
+
     public static String calibrationStatus(ServerLevel level, UUID trackId) {
         Optional<SurveyRoute> route = TrackSurveyData.get(level).get(trackId);
         if (route.isEmpty()) return "unavailable (no survey)";
         boolean human = OWRLapProfiles.get(level).fastestValidPlayer(trackId, route.get().routeId(), route.get().length()).isPresent();
-        return human ? "not required (player reference available)" : "pending survey-only bounded trials";
+        String runtime = CALIBRATIONS.values().stream().findFirst().map(AiGripCalibration::status)
+            .orElseGet(() -> String.format(java.util.Locale.ROOT, "not started step_max=%.3f%% mode=%s",
+                calibrationStepPercent, calibrationRandomSteps ? "random" : "fixed"));
+        return (human ? "player-reference " : "survey-only ") + runtime;
     }
 
     public static void resetCalibration(UUID trackId) {
         PLAN_CACHE.entrySet().removeIf(entry -> entry.getValue().plan().trackId().equals(trackId));
+        CALIBRATIONS.clear();
+        LAP_TRIALS.clear();
+    }
+
+    public static void setCalibrationStepPercent(double percent) {
+        calibrationStepPercent = Math.max(0.0, Math.min(10.0, percent));
+        CALIBRATIONS.clear();
+        LAP_TRIALS.clear();
+    }
+
+    public static void setCalibrationRandomSteps(boolean enabled) {
+        calibrationRandomSteps = enabled;
+        CALIBRATIONS.clear();
+        LAP_TRIALS.clear();
+    }
+
+    public static double calibrationStepPercent() { return calibrationStepPercent; }
+    public static boolean calibrationRandomSteps() { return calibrationRandomSteps; }
+
+    public static boolean requestPush(OpenwheelCarEntity car) {
+        if (car == null || !car.isBasicAiOwned()) return false;
+        BasicAiDriverIdentity identity = car.getBasicAiIdentity().orElse(null);
+        if (identity == null) return false;
+        AiGripCalibration calibration = CALIBRATIONS.computeIfAbsent(identity.driverId(), driverId ->
+            new AiGripCalibration(calibrationStepPercent, calibrationRandomSteps,
+                driverId.getMostSignificantBits() ^ driverId.getLeastSignificantBits()));
+        LAP_TRIALS.remove(identity.driverId());
+        return calibration.manualPush();
+    }
+
+    public static double calibrationPaceScale(OpenwheelCarEntity car) {
+        if (car == null) return 1.0;
+        BasicAiDriverIdentity identity = car.getBasicAiIdentity().orElse(null);
+        AiGripCalibration calibration = identity == null ? null : CALIBRATIONS.get(identity.driverId());
+        return calibration == null ? 1.0 : calibration.paceScale();
+    }
+
+    public static String calibrationStatus(OpenwheelCarEntity car) {
+        if (car == null) return "unavailable";
+        BasicAiDriverIdentity identity = car.getBasicAiIdentity().orElse(null);
+        AiGripCalibration calibration = identity == null ? null : CALIBRATIONS.get(identity.driverId());
+        return calibration == null ? "not started" : calibration.status();
     }
 
     public static double learnedLineDistance(ServerLevel level, UUID trackId) {
@@ -371,14 +442,19 @@ public final class BasicAiFleetManager {
                 car.getDeltaMovement().x, car.getDeltaMovement().z);
             BasicAiNearbyAvoidance.Decision avoidance = BasicAiNearbyAvoidance.choose(subject, traffic);
             BasicAiGripModel.State grip = gripState(car, tick);
-            AiTrackPlan plan = trackPlan(level, route, car, grip);
+            BasicAiGripModel.State planningGrip = GRIP_CACHE.get(car.getUUID()).planningState();
+            AiTrackPlan plan = trackPlan(level, route, car, planningGrip);
             captureActualPath(level, storedRoute.get(), car, tick);
             double queueGap = trafficMode.queueing() ? nearestOrderedGap(snapshot, snapshots, route.length()) : Double.POSITIVE_INFINITY;
             BasicAiCarController controller = snapshot.controller();
+            AiGripCalibration calibration = CALIBRATIONS.computeIfAbsent(snapshot.identity().driverId(), driverId ->
+                new AiGripCalibration(calibrationStepPercent, calibrationRandomSteps,
+                    driverId.getMostSignificantBits() ^ driverId.getLeastSignificantBits()));
             BasicAiDriveCommand command = controller.tick(new BasicAiCarController.Input(snapshot.identity(), car.getId(), route, point(car), heading(car),
                 car.getSpeedKmh() / 3.6, car.getSpeedKmh() / 3.6, car.getYawRateRadiansPerSecond(), snapshot.localization(),
-                avoidance, trafficMode, grip, plan, queueGap));
+                avoidance, trafficMode, grip, plan, queueGap, calibration.settings()));
             PREPARED_COMMANDS.put(car.getUUID(), command);
+            updateCalibrationTrial(car, snapshot.identity(), controller, calibration);
             updateLowSpeedTimer(car, tick);
             if (shouldRecover(car, tick)) {
                 recover(level, car, activeTrack.get(), tick);
@@ -442,8 +518,7 @@ public final class BasicAiFleetManager {
     private static AiTrackPlan trackPlan(ServerLevel level, SurveyRouteModel route, OpenwheelCarEntity car, BasicAiGripModel.State grip) {
         OWRLapProfiles profiles = OWRLapProfiles.get(level);
         PlanCache cached = PLAN_CACHE.get(car.getUUID());
-        if (cached != null && cached.routeId().equals(route.routeId()) && cached.profileRevision() == profiles.revision()
-            && cached.capability() == grip) {
+        if (cached != null && cached.routeId().equals(route.routeId()) && cached.profileRevision() == profiles.revision()) {
             return cached.plan();
         }
         AiTrackPlan plan = AiTrackPlanCompiler.compile(route, profiles.matching(route.trackId(), route.routeId()), grip);
@@ -472,13 +547,21 @@ public final class BasicAiFleetManager {
         double powerFactor = CarComponentDamage.chassisPowerMultiplier(car.getChassisDamagePercent())
             * CarComponentDamage.enginePowerMultiplier(car.getEngineDamagePercent());
         double dragFactor = CarComponentDamage.chassisDragMultiplier(car.getChassisDamagePercent());
-        BasicAiGripModel.State state = BasicAiGripModel.build(new BasicAiGripModel.Input(
-            car.getTyreTemperatureCelsius(), car.getTyreWorkingTemperatureMinCelsius(), car.getTyreWorkingTemperatureMaxCelsius(),
+        BasicAiGripModel.State state = buildGripState(car, car.getTyreTemperatureCelsius(), setup, worstWheelDamage, frontAero, rearAero, powerFactor, dragFactor);
+        double planningTemperature = (car.getTyreWorkingTemperatureMinCelsius() + car.getTyreWorkingTemperatureMaxCelsius()) * 0.5;
+        BasicAiGripModel.State planningState = buildGripState(car, planningTemperature, setup, worstWheelDamage, frontAero, rearAero, powerFactor, dragFactor);
+        GRIP_CACHE.put(car.getUUID(), new GripCache(state, planningState, tick + 10L + Math.floorMod(car.getId(), 10)));
+        return state;
+    }
+
+    private static BasicAiGripModel.State buildGripState(OpenwheelCarEntity car, double temperature, PrototypeCarSetup setup,
+                                                         double worstWheelDamage, double frontAero, double rearAero,
+                                                         double powerFactor, double dragFactor) {
+        return BasicAiGripModel.build(new BasicAiGripModel.Input(
+            temperature, car.getTyreWorkingTemperatureMinCelsius(), car.getTyreWorkingTemperatureMaxCelsius(),
             car.getTyreWearPercent(), worstWheelDamage, setup.tyreMuCoefficient(), car.getAiCurrentSurfaceGrip(),
             setup.clACoefficient(), frontAero, rearAero, setup.powerMultiplier(), powerFactor,
             setup.cdACoefficient(), dragFactor));
-        GRIP_CACHE.put(car.getUUID(), new GripCache(state, tick + 10L + Math.floorMod(car.getId(), 10)));
-        return state;
     }
 
     private static void updateLowSpeedTimer(OpenwheelCarEntity car, long tick) {
@@ -486,6 +569,20 @@ public final class BasicAiFleetManager {
             LOW_SPEED_SINCE.putIfAbsent(car.getUUID(), tick);
         } else {
             LOW_SPEED_SINCE.remove(car.getUUID());
+        }
+    }
+
+    private static void updateCalibrationTrial(OpenwheelCarEntity car, BasicAiDriverIdentity identity,
+                                               BasicAiCarController controller, AiGripCalibration calibration) {
+        LapTrialState state = LAP_TRIALS.computeIfAbsent(identity.driverId(), ignored ->
+            new LapTrialState(controller.status() == null ? 0 : controller.status().routeLaps()));
+        int laps = controller.status() == null ? state.laps() : controller.status().routeLaps();
+        if (laps > state.laps()) {
+            // Calibration cleanliness intentionally means only "completed without a recovery".
+            // Recovery records the failed trial immediately and resets this lap state.
+            calibration.recordLap(true);
+            car.setAiLapTelemetry(controller.lastLapMillis());
+            LAP_TRIALS.put(identity.driverId(), new LapTrialState(laps));
         }
     }
 
@@ -505,6 +602,9 @@ public final class BasicAiFleetManager {
     private static boolean recover(ServerLevel level, OpenwheelCarEntity oldCar, TrackDefinition track, long tick) {
         BasicAiDriverIdentity identity = oldCar.getBasicAiIdentity().orElse(null);
         if (identity == null) return false;
+        AiGripCalibration calibration = CALIBRATIONS.get(identity.driverId());
+        if (calibration != null) calibration.recordLap(false);
+        LAP_TRIALS.remove(identity.driverId());
         TrackDefinition.GridSlot slot = track.gridSlots().stream().filter(candidate -> candidate.index() == identity.gridIndex()).findFirst().orElse(null);
         if (slot == null) return false;
         Optional<SurveyRoute> storedRoute = TrackSurveyData.get(level).get(track.trackId());
@@ -687,10 +787,13 @@ public final class BasicAiFleetManager {
     private record LineCache(int revision, BasicAiRacingLineProfile profile) {
     }
 
-    private record GripCache(BasicAiGripModel.State state, long refreshAt) {
+    private record GripCache(BasicAiGripModel.State state, BasicAiGripModel.State planningState, long refreshAt) {
     }
 
     private record PlanCache(UUID routeId, int profileRevision, BasicAiGripModel.State capability, AiTrackPlan plan) {
+    }
+
+    private record LapTrialState(int laps) {
     }
 
     private record CarSnapshot(OpenwheelCarEntity car, BasicAiDriverIdentity identity, SurveyRouteLocalizer.Result localization,

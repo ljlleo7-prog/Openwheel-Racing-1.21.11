@@ -324,6 +324,7 @@
   "screen.openwheelracing.race_director.checkpoints_short": "检查",
   "screen.openwheelracing.race_director.off_track_short": "离道",
   "screen.openwheelracing.team_terminal.sense_cars_short": "扫描",
+  "screen.openwheelracing.team_terminal.ai_push": "推进",
   "screen.openwheelracing.race_director.auto_detect_map": "自动检测地图",
   "screen.openwheelracing.race_director.no_track_map": "无已存地图",
   "entity.openwheelracing.safety_car": "安全车",

@@ -18,6 +18,9 @@ class AiRouteChunkWindowTest {
         Set<AiRouteChunkWindow.ChunkCoordinate> chunks = AiRouteChunkWindow.around(route, 0.0);
         assertTrue(chunks.size() <= AiRouteChunkWindow.MAX_CHUNKS_PER_CAR);
         assertTrue(chunks.size() >= 1);
+        for (int z = -1; z <= 1; z++) {
+            for (int x = -1; x <= 1; x++) assertTrue(chunks.contains(new AiRouteChunkWindow.ChunkCoordinate(x, z)));
+        }
     }
 
     private static SurveyRouteModel.Node node(int index, double x, double z, double distance) {

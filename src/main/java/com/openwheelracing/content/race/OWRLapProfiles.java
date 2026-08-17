@@ -67,6 +67,7 @@ public final class OWRLapProfiles extends SavedData {
     public Optional<BestLapProfile> fastestValidPlayer(UUID trackId, UUID routeId, double routeLength) {
         return profiles.stream()
             .filter(profile -> profile.origin() == Origin.PLAYER && profile.trackId().equals(trackId) && profile.routeId().equals(routeId))
+            .filter(BestLapProfile::hasRecordedLine)
             .filter(profile -> profile.lapMillis() > 0 && Math.abs(profile.routeLength() - routeLength) <= Math.max(2.0, routeLength * 0.01))
             .min(Comparator.comparingInt(BestLapProfile::lapMillis));
     }
@@ -77,7 +78,8 @@ public final class OWRLapProfiles extends SavedData {
 
     public boolean putIfFaster(BestLapProfile profile) {
         Optional<BestLapProfile> previous = get(profile.trackId(), profile.routeId(), profile.driverId());
-        if (previous.isPresent() && previous.get().lapMillis() <= profile.lapMillis()) return false;
+        if (previous.isPresent() && previous.get().lapMillis() <= profile.lapMillis()
+            && (previous.get().hasRecordedLine() || !profile.hasRecordedLine())) return false;
         profiles.removeIf(existing -> existing.trackId().equals(profile.trackId()) && existing.routeId().equals(profile.routeId()) && existing.driverId().equals(profile.driverId()));
         profiles.add(profile);
         trim(profile.trackId(), profile.routeId());
@@ -117,15 +119,15 @@ public final class OWRLapProfiles extends SavedData {
         public BestLapProfile {
             timeMillis = timeMillis.clone();
             speedCmps = speedCmps.clone();
-            lateralOffsetCm = lateralOffsetCm == null || lateralOffsetCm.length != timeMillis.length ? new int[timeMillis.length] : lateralOffsetCm.clone();
-            headingResidualMilliRad = headingResidualMilliRad == null || headingResidualMilliRad.length != timeMillis.length ? new int[timeMillis.length] : headingResidualMilliRad.clone();
+            lateralOffsetCm = lateralOffsetCm == null || lateralOffsetCm.length != timeMillis.length ? new int[0] : lateralOffsetCm.clone();
+            headingResidualMilliRad = headingResidualMilliRad == null || headingResidualMilliRad.length != timeMillis.length ? new int[0] : headingResidualMilliRad.clone();
             if (timeMillis.length == 0 || timeMillis.length > MAX_PROFILE_SAMPLES || speedCmps.length != timeMillis.length) throw new IllegalArgumentException("invalid profile samples");
         }
 
         public BestLapProfile(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, long lapRecordId,
                               int lapMillis, double routeLength, double spacing, int[] timeMillis, int[] speedCmps, long createdGameTime) {
             this(dimensionId, trackId, routeId, driverId, driverName, Origin.PLAYER, lapRecordId, lapMillis, routeLength, spacing, timeMillis, speedCmps,
-                new int[timeMillis.length], new int[timeMillis.length], createdGameTime);
+                new int[0], new int[0], createdGameTime);
         }
 
         private static BestLapProfile create(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, Origin origin, long lapRecordId,
@@ -141,8 +143,11 @@ public final class OWRLapProfiles extends SavedData {
         private List<Integer> lateralOffsetList() { return java.util.Arrays.stream(lateralOffsetCm).boxed().toList(); }
         private List<Integer> headingResidualList() { return java.util.Arrays.stream(headingResidualMilliRad).boxed().toList(); }
 
-        public double lateralOffsetMeters(double routeDistance) { return interpolate(lateralOffsetCm, routeDistance) * 0.01; }
-        public double headingResidualRadians(double routeDistance) { return interpolate(headingResidualMilliRad, routeDistance) * 0.001; }
+        public boolean hasRecordedLine() {
+            return lateralOffsetCm.length == timeMillis.length && headingResidualMilliRad.length == timeMillis.length;
+        }
+        public double lateralOffsetMeters(double routeDistance) { return lateralOffsetCm.length == 0 ? 0.0 : interpolate(lateralOffsetCm, routeDistance) * 0.01; }
+        public double headingResidualRadians(double routeDistance) { return headingResidualMilliRad.length == 0 ? 0.0 : interpolate(headingResidualMilliRad, routeDistance) * 0.001; }
         private double interpolate(int[] values, double routeDistance) {
             double index = normalize(routeDistance, routeLength) / spacing;
             int lower = Math.min((int) Math.floor(index), values.length - 1);

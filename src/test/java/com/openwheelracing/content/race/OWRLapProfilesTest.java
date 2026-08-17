@@ -6,6 +6,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OWRLapProfilesTest {
     @Test
@@ -37,6 +39,23 @@ class OWRLapProfilesTest {
     void rejectsOversizedProfile() {
         int[] values = new int[OWRLapProfiles.MAX_PROFILE_SAMPLES + 1];
         assertThrows(IllegalArgumentException.class, () -> profile(UUID.randomUUID(), UUID.randomUUID(), values, values));
+    }
+
+    @Test
+    void legacyProfileIsNotMistakenForRecordedCenterlineAndCanBeReplaced() {
+        UUID track = UUID.randomUUID();
+        UUID route = UUID.randomUUID();
+        UUID driver = UUID.randomUUID();
+        OWRLapProfiles.BestLapProfile legacy = profile(track, route, driver, 3000);
+        assertFalse(legacy.hasRecordedLine());
+        OWRLapProfiles profiles = new OWRLapProfiles();
+        assertTrue(profiles.putIfFaster(legacy));
+        int[] values = {0, 10, 20, 30};
+        OWRLapProfiles.BestLapProfile recorded = new OWRLapProfiles.BestLapProfile("minecraft:overworld", track, route, driver, "Driver",
+            OWRLapProfiles.Origin.PLAYER, 2L, 4000, 16, 4, new int[]{0, 1000, 2000, 3000},
+            new int[]{1000, 1000, 1000, 1000}, values, values, 2L);
+        assertTrue(profiles.putIfFaster(recorded));
+        assertTrue(profiles.get(track, route, driver).orElseThrow().hasRecordedLine());
     }
 
     private static OWRLapProfiles.BestLapProfile profile(UUID trackId, UUID routeId, int[] times, int[] speeds) {

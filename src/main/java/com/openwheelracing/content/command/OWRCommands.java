@@ -79,10 +79,17 @@ public final class OWRCommands {
                         .then(Commands.argument("mode", StringArgumentType.word()).executes(OWRCommands::setAiFleetMode)))
                     .then(Commands.literal("calibration")
                         .then(Commands.literal("status").executes(OWRCommands::showAiCalibrationStatus))
+                        .then(Commands.literal("step")
+                            .then(Commands.argument("percent", DoubleArgumentType.doubleArg(0.0, 10.0))
+                                .executes(OWRCommands::setAiCalibrationStep)))
+                        .then(Commands.literal("random")
+                            .then(Commands.literal("on").executes(context -> setAiCalibrationRandom(context, true)))
+                            .then(Commands.literal("off").executes(context -> setAiCalibrationRandom(context, false))))
                         .then(Commands.literal("reset").executes(OWRCommands::resetAiCalibration)))
                     .then(Commands.literal("line")
                         .then(Commands.literal("planned").executes(context -> showAiLine(context, "planned")))
                         .then(Commands.literal("current").executes(context -> showAiLine(context, "current")))
+                        .then(Commands.literal("player").executes(context -> showAiLine(context, "player")))
                         .then(Commands.literal("hide").executes(OWRCommands::hideAiLine)))
                     .then(Commands.literal("status").executes(OWRCommands::showAiFleetStatus))))
             .then(Commands.literal("steward")
@@ -341,6 +348,20 @@ public final class OWRCommands {
         return 1;
     }
 
+    private static int setAiCalibrationStep(CommandContext<CommandSourceStack> context) {
+        double percent = DoubleArgumentType.getDouble(context, "percent");
+        BasicAiFleetManager.setCalibrationStepPercent(percent);
+        send(context, String.format(java.util.Locale.ROOT,
+            "AI calibration maximum promotion step set to %.3f%%; active trials reset.", percent));
+        return 1;
+    }
+
+    private static int setAiCalibrationRandom(CommandContext<CommandSourceStack> context, boolean enabled) {
+        BasicAiFleetManager.setCalibrationRandomSteps(enabled);
+        send(context, "AI calibration random-step mode " + (enabled ? "enabled" : "disabled") + "; active trials reset.");
+        return 1;
+    }
+
     private static int showAiTrainingTime(CommandContext<CommandSourceStack> context) {
         return showAiTrainingStatus(context);
     }
@@ -384,9 +405,11 @@ public final class OWRCommands {
         Optional<TrackDefinition> track = activeTrack(context);
         if (player == null || track.isEmpty()) return 0;
         ServerLevel level = context.getSource().getLevel();
-        List<com.openwheelracing.content.ai.BasicAiFleetManager.RacingLineTrace> traces = source.equals("current")
-            ? BasicAiFleetManager.currentLineTraces(level, track.get().trackId())
-            : BasicAiFleetManager.plannedLineTraces(level, track.get().trackId());
+        List<com.openwheelracing.content.ai.BasicAiFleetManager.RacingLineTrace> traces = switch (source) {
+            case "current" -> BasicAiFleetManager.currentLineTraces(level, track.get().trackId());
+            case "player" -> BasicAiFleetManager.playerBestLineTrace(level, track.get().trackId(), player.getUUID());
+            default -> BasicAiFleetManager.plannedLineTraces(level, track.get().trackId());
+        };
         List<OWRNetwork.AiRacingLineStrip> strips = new java.util.ArrayList<>();
         for (int traceIndex = 0; traceIndex < traces.size(); traceIndex++) {
             com.openwheelracing.content.ai.BasicAiFleetManager.RacingLineTrace trace = traces.get(traceIndex);
@@ -397,7 +420,11 @@ public final class OWRCommands {
             strips.add(new OWRNetwork.AiRacingLineStrip(trace.id(), trace.label(), trace.closed(), color, x, y, z));
         }
         OWRNetwork.sendAiRacingLineOverlay(player, true, level.dimension().identifier().toString(), track.get().trackId(), source, strips);
-        send(context, "Showing " + strips.size() + " " + source + " AI line" + (strips.size() == 1 ? "" : "s") + ".");
+        if (source.equals("player") && strips.isEmpty()) {
+            send(context, "No saved best player racing line for the active survey route. Complete a valid lap with at least 97% route coverage.");
+            return 0;
+        }
+        send(context, "Showing " + strips.size() + " " + source + " racing line" + (strips.size() == 1 ? "" : "s") + ".");
         return strips.size();
     }
 

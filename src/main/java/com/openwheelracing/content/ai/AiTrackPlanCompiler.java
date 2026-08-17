@@ -14,10 +14,11 @@ public final class AiTrackPlanCompiler {
     private static final double MAX_OFFSET = 2.0;
     private static final double HUMAN_OFFSET_SHARE = 0.80;
     private static final double MAX_OFFSET_CHANGE_PER_SAMPLE = 0.30;
-    private static final double GRIP_UTILIZATION = 0.82;
+    private static final double GRIP_UTILIZATION = 0.94;
+    private static final double HUMAN_SPEED_DIVISOR = 1.10;
     // The capability model is an instantaneous peak. Reserve margin for combined slip,
     // brake build-up, surface sampling differences, and controller latency.
-    private static final double BRAKING_UTILIZATION = 0.52;
+    private static final double BRAKING_UTILIZATION = 0.58;
 
     private AiTrackPlanCompiler() {}
 
@@ -25,6 +26,7 @@ public final class AiTrackPlanCompiler {
         List<OWRLapProfiles.BestLapProfile> profiles, SurveyRouteModel route) {
         return profiles.stream()
             .filter(profile -> profile.origin() == OWRLapProfiles.Origin.PLAYER)
+            .filter(OWRLapProfiles.BestLapProfile::hasRecordedLine)
             .filter(profile -> profile.trackId().equals(route.trackId()) && profile.routeId().equals(route.routeId()))
             .filter(profile -> profile.lapMillis() > 0 && profile.routeLength() > 0.0)
             .filter(profile -> Math.abs(profile.routeLength() - route.length()) <= Math.max(2.0, route.length() * 0.01))
@@ -53,6 +55,7 @@ public final class AiTrackPlanCompiler {
                 survey.position().y(),
                 survey.position().z() + Math.cos(survey.headingRadians()) * offset);
         }
+        repairDisplacedSeam(route, positions, spacing);
         double[] tangent = new double[count];
         double[] curvature = new double[count];
         for (int i = 0; i < count; i++) {
@@ -66,10 +69,9 @@ public final class AiTrackPlanCompiler {
 
         double[] speed = new double[count];
         for (int i = 0; i < count; i++) {
-            double human = profile == null ? BasicAiCarController.MAX_TARGET_SPEED_MPS : profile.speedKmh(i * spacing) / 3.6 / 1.20;
+            double human = profile == null ? BasicAiCarController.MAX_TARGET_SPEED_MPS : profile.speedKmh(i * spacing) / 3.6 / HUMAN_SPEED_DIVISOR;
             if (!Double.isFinite(human) || human <= 0.0) human = BasicAiCarController.MIN_TARGET_SPEED_MPS;
-            double lateralLimit = Math.abs(curvature[i]) < 1.0E-6 ? BasicAiCarController.MAX_TARGET_SPEED_MPS
-                : Math.sqrt(Math.max(0.0, capability.lateralAcceleration(human) * GRIP_UTILIZATION / Math.abs(curvature[i])));
+            double lateralLimit = lateralSpeedLimit(Math.abs(curvature[i]), capability);
             speed[i] = clamp(Math.min(human, lateralLimit), BasicAiCarController.MIN_TARGET_SPEED_MPS, BasicAiCarController.MAX_TARGET_SPEED_MPS);
         }
         for (int pass = 0; pass < 2; pass++) {
@@ -109,6 +111,36 @@ public final class AiTrackPlanCompiler {
         for (int pass = 0; pass < 2; pass++) {
             for (int i = 1; i < values.length; i++) values[i] = clamp(values[i], values[i - 1] - MAX_OFFSET_CHANGE_PER_SAMPLE, values[i - 1] + MAX_OFFSET_CHANGE_PER_SAMPLE);
             values[0] = clamp(values[0], values[values.length - 1] - MAX_OFFSET_CHANGE_PER_SAMPLE, values[values.length - 1] + MAX_OFFSET_CHANGE_PER_SAMPLE);
+        }
+    }
+
+    private static double lateralSpeedLimit(double curvature, BasicAiGripModel.State capability) {
+        if (curvature < 1.0E-6) return BasicAiCarController.MAX_TARGET_SPEED_MPS;
+        for (double speed = BasicAiCarController.MAX_TARGET_SPEED_MPS; speed >= BasicAiCarController.MIN_TARGET_SPEED_MPS; speed -= 0.5) {
+            if (speed * speed * curvature <= capability.lateralAcceleration(speed) * GRIP_UTILIZATION) return speed;
+        }
+        return BasicAiCarController.MIN_TARGET_SPEED_MPS;
+    }
+
+    private static void repairDisplacedSeam(SurveyRouteModel route, SurveyRouteModel.Point[] positions, double spacing) {
+        if (positions.length < 4) return;
+        SurveyRouteModel.Point first = positions[0];
+        SurveyRouteModel.Point last = positions[positions.length - 1];
+        double gap = Math.hypot(first.x() - last.x(), first.z() - last.z());
+        double heading = SurveyRouteSampler.sample(route, 0.0).headingRadians();
+        double seamHeading = Math.atan2(first.z() - last.z(), first.x() - last.x());
+        double seamHeadingError = Math.abs(TrackGeometry.wrapRadians(seamHeading - heading));
+        if (gap <= spacing * 1.75 && seamHeadingError <= Math.toRadians(20.0)) return;
+        SurveyRouteModel.Point desiredLast = new SurveyRouteModel.Point(
+            first.x() - Math.cos(heading) * spacing, last.y(), first.z() - Math.sin(heading) * spacing);
+        double correctionX = desiredLast.x() - last.x();
+        double correctionZ = desiredLast.z() - last.z();
+        int taperSamples = Math.min(20, positions.length / 4);
+        for (int back = 0; back < taperSamples; back++) {
+            int index = positions.length - 1 - back;
+            double weight = 1.0 - back / (double) taperSamples;
+            SurveyRouteModel.Point point = positions[index];
+            positions[index] = new SurveyRouteModel.Point(point.x() + correctionX * weight, point.y(), point.z() + correctionZ * weight);
         }
     }
 
