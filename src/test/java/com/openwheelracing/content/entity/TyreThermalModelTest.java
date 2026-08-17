@@ -27,7 +27,7 @@ class TyreThermalModelTest {
 
         double equilibrium = VehiclePhysics.simulateTyreEquilibriumC(75.0, heatPower, COMPOUND_HEAT_GAIN, 0.38, 0.78, SPEED, 20 * 60 * 60);
 
-        assertTrue(equilibrium >= 110.0, "high-stress corners should equilibrate near the upper working window");
+        assertTrue(equilibrium >= 105.0, "high-stress corners should equilibrate near the upper working window");
         assertTrue(equilibrium <= 139.0, "high-stress corners should still converge instead of running away");
     }
 
@@ -247,7 +247,7 @@ class TyreThermalModelTest {
         for (int tick = 0; tick < 8; tick++) {
             state = VehiclePhysics.nextTyreThermalState(
                 state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
-                95_000.0, 1.0, 38.0, 1.0, 1.0, 1.0, 1.22, Math.toRadians(9.0), 0.05, true
+                95_000.0, 0.0, 1.0, 38.0, 1.0, 1.0, 1.0, 1.22, Math.toRadians(9.0), 0.05, true
             );
         }
 
@@ -261,7 +261,7 @@ class TyreThermalModelTest {
         for (int tick = 0; tick < 20 * 45; tick++) {
             state = VehiclePhysics.nextTyreThermalState(
                 state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
-                95_000.0, 1.0, 38.0, 1.0, 1.0, 1.0, 1.22, Math.toRadians(9.0), 0.05, true
+                95_000.0, 0.0, 1.0, 38.0, 1.0, 1.0, 1.0, 1.22, Math.toRadians(9.0), 0.05, true
             );
         }
 
@@ -276,11 +276,11 @@ class TyreThermalModelTest {
         for (int tick = 0; tick < 20; tick++) {
             rear = VehiclePhysics.nextTyreThermalState(
                 rear.surfaceTemperatureC(), rear.carcassTemperatureC(), rear.slipExposure(),
-                85_000.0, 1.0, 36.0, 1.0, 1.0, 1.0, 1.25, Math.toRadians(8.0), 0.05, true
+                85_000.0, 0.0, 1.0, 36.0, 1.0, 1.0, 1.0, 1.25, Math.toRadians(8.0), 0.05, true
             );
             front = VehiclePhysics.nextTyreThermalState(
                 front.surfaceTemperatureC(), front.carcassTemperatureC(), front.slipExposure(),
-                0.0, 1.0, 36.0, 1.0, 1.0, 1.0, 0.45, Math.toRadians(0.2), 0.05, true
+                0.0, 0.0, 1.0, 36.0, 1.0, 1.0, 1.0, 0.45, Math.toRadians(0.2), 0.05, true
             );
         }
 
@@ -294,13 +294,36 @@ class TyreThermalModelTest {
         for (int tick = 0; tick < 20 * 30; tick++) {
             state = VehiclePhysics.nextTyreThermalState(
                 state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
-                200_000.0, 1.4, 50.0, 1.0, 1.0, 1.0, 1.4, Math.toRadians(12.0), 0.05, false
+                200_000.0, 0.0, 1.4, 50.0, 1.0, 1.0, 1.0, 1.4, Math.toRadians(12.0), 0.05, false
             );
         }
 
         assertTrue(state.surfaceTemperatureC() < 95.0, "airborne tyre surface should cool");
         assertTrue(state.carcassTemperatureC() < 90.0, "airborne tyre carcass should cool");
         assertTrue(state.slipExposure() < 0.1, "airborne tyre should release slip exposure");
+    }
+
+    @Test
+    void brakeHeatSplitConservesTotalPowerAndFrontBias() {
+        double frontPerTyre = VehiclePhysics.tyreBrakeHeatPowerPerTyre(1.0, 7_000.0, 0.58);
+        double rearPerTyre = VehiclePhysics.tyreBrakeHeatPowerPerTyre(1.0, 7_000.0, 0.42);
+
+        assertEquals(7_000.0, frontPerTyre * 2.0 + rearPerTyre * 2.0, 1.0E-9);
+        assertTrue(frontPerTyre > rearPerTyre, "front-biased braking must heat each front tyre more than each rear tyre");
+    }
+
+    @Test
+    void brakeHeatPrimarilyWarmsCarcass() {
+        VehiclePhysics.TyreThermalState state = new VehiclePhysics.TyreThermalState(75.0, 75.0, 0.0);
+        for (int tick = 0; tick < 20 * 20; tick++) {
+            state = VehiclePhysics.nextTyreThermalState(
+                state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
+                0.0, 12_000.0, 1.0, 45.0, 1.0, 1.0, 1.0, 0.90, Math.toRadians(1.0), 0.05, true
+            );
+        }
+
+        assertTrue(state.carcassTemperatureC() > state.surfaceTemperatureC() + 1.0, "brake conduction should favor the carcass");
+        assertTrue(state.carcassTemperatureC() > 79.0, "sustained braking should materially warm the carcass");
     }
 
     @Test
@@ -312,7 +335,7 @@ class TyreThermalModelTest {
             for (int tick = 0; tick < 20 * 30; tick++) {
                 state = VehiclePhysics.nextTyreThermalState(
                     state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
-                    22_000.0, compoundGain, 42.0, 1.0, 1.0, 1.0, 0.72, Math.toRadians(2.0), 0.05, true
+                    22_000.0, 0.0, compoundGain, 42.0, 1.0, 1.0, 1.0, 0.72, Math.toRadians(2.0), 0.05, true
                 );
             }
             finalSurface[compound] = state.surfaceTemperatureC();

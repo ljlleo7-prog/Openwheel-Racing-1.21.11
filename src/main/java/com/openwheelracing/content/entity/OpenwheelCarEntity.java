@@ -1006,19 +1006,19 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public float getTyreCarcassTemperatureFlCelsius() {
-        return (float) tyreCarcassTemperatureFlC;
+        return entityData.get(TYRE_CARCASS_TEMPERATURE_FL);
     }
 
     public float getTyreCarcassTemperatureFrCelsius() {
-        return (float) tyreCarcassTemperatureFrC;
+        return entityData.get(TYRE_CARCASS_TEMPERATURE_FR);
     }
 
     public float getTyreCarcassTemperatureRlCelsius() {
-        return (float) tyreCarcassTemperatureRlC;
+        return entityData.get(TYRE_CARCASS_TEMPERATURE_RL);
     }
 
     public float getTyreCarcassTemperatureRrCelsius() {
-        return (float) tyreCarcassTemperatureRrC;
+        return entityData.get(TYRE_CARCASS_TEMPERATURE_RR);
     }
 
     public float getTyreWorkingTemperatureMinCelsius() {
@@ -4365,6 +4365,9 @@ public class OpenwheelCarEntity extends Entity {
             return;
         }
         destructionTriggered = true;
+        if (isBasicAiOwned() && com.openwheelracing.content.ai.BasicAiFleetManager.regenerateDestroyedCar(serverLevel, this)) {
+            return;
+        }
         destroyIntoMaterials(serverLevel);
     }
 
@@ -4572,14 +4575,14 @@ public class OpenwheelCarEntity extends Entity {
         double compoundRollingHeatGain = tyreRollingHeatGainMultiplier(getTyreCompound());
         double compoundNearSaturationHeatGain = tyreNearSaturationHeatGainMultiplier(getTyreCompound());
         double compoundCoolingGain = tyreCoolingMultiplier(getTyreCompound());
-        double frontBrakeHeatPower = brakeInput * TYRE_BRAKE_HEAT_POWER_PER_INPUT * brakeFrontBias;
-        double rearBrakeHeatPower = brakeInput * TYRE_BRAKE_HEAT_POWER_PER_INPUT * (1.0 - brakeFrontBias);
+        double frontBrakeHeatPowerPerTyre = VehiclePhysics.tyreBrakeHeatPowerPerTyre(brakeInput, TYRE_BRAKE_HEAT_POWER_PER_INPUT, brakeFrontBias);
+        double rearBrakeHeatPowerPerTyre = VehiclePhysics.tyreBrakeHeatPowerPerTyre(brakeInput, TYRE_BRAKE_HEAT_POWER_PER_INPUT, 1.0 - brakeFrontBias);
         double workingMin = tyreWorkingTemperatureMin(getTyreCompound());
         double workingMax = tyreWorkingTemperatureMax(getTyreCompound());
-        WheelThermalUpdate flThermal = nextWheelTyreThermalState(tyreTemperatureFlC, tyreCarcassTemperatureFlC, tyreSlipExposureFl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPower, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fl);
-        WheelThermalUpdate frThermal = nextWheelTyreThermalState(tyreTemperatureFrC, tyreCarcassTemperatureFrC, tyreSlipExposureFr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPower, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fr);
-        WheelThermalUpdate rlThermal = nextWheelTyreThermalState(tyreTemperatureRlC, tyreCarcassTemperatureRlC, tyreSlipExposureRl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPower, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rl);
-        WheelThermalUpdate rrThermal = nextWheelTyreThermalState(tyreTemperatureRrC, tyreCarcassTemperatureRrC, tyreSlipExposureRr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPower, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rr);
+        WheelThermalUpdate flThermal = nextWheelTyreThermalState(tyreTemperatureFlC, tyreCarcassTemperatureFlC, tyreSlipExposureFl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fl);
+        WheelThermalUpdate frThermal = nextWheelTyreThermalState(tyreTemperatureFrC, tyreCarcassTemperatureFrC, tyreSlipExposureFr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fr);
+        WheelThermalUpdate rlThermal = nextWheelTyreThermalState(tyreTemperatureRlC, tyreCarcassTemperatureRlC, tyreSlipExposureRl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rl);
+        WheelThermalUpdate rrThermal = nextWheelTyreThermalState(tyreTemperatureRrC, tyreCarcassTemperatureRrC, tyreSlipExposureRr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rr);
         tyreTemperatureFlC = flThermal.surfaceTemperatureC();
         tyreTemperatureFrC = frThermal.surfaceTemperatureC();
         tyreTemperatureRlC = rlThermal.surfaceTemperatureC();
@@ -4634,12 +4637,13 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private WheelThermalUpdate nextWheelTyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure, double speedMetersPerSecond, double compoundRollingHeatGain, double compoundNearSaturationHeatGain, double brakeHeatPower, double surfaceCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier, WheelWearSample sample) {
-        double heatPower = wheelHeatPower(sample, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, brakeHeatPower);
+        double frictionHeatPower = wheelFrictionHeatPower(sample, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain);
         VehiclePhysics.TyreThermalState state = VehiclePhysics.nextTyreThermalState(
             surfaceTemperatureC,
             carcassTemperatureC,
             slipExposure,
-            heatPower,
+            frictionHeatPower,
+            brakeHeatPower,
             1.0,
             speedMetersPerSecond,
             surfaceCoolingMultiplier,
@@ -4666,12 +4670,12 @@ public class OpenwheelCarEntity extends Entity {
         return VehiclePhysics.tyreLateralNearSaturation(sample.lateralForce, sample.normalLoad);
     }
 
-    private static double wheelHeatPower(WheelWearSample sample, double speedMetersPerSecond, double compoundRollingHeatGain, double compoundNearSaturationHeatGain, double brakeHeatPower) {
+    private static double wheelFrictionHeatPower(WheelWearSample sample, double speedMetersPerSecond, double compoundRollingHeatGain, double compoundNearSaturationHeatGain) {
         double rollingHeat = VehiclePhysics.tyreRollingHeatPowerWatts(sample.normalLoad, speedMetersPerSecond, ROLLING_RESISTANCE) * compoundRollingHeatGain;
         double lateralNearSaturation = wheelLateralNearSaturation(sample);
         double nearSaturationHeat = Math.abs(sample.lateralForce) * lateralNearSaturation * lateralNearSaturation * speedMetersPerSecond * 0.55 * compoundNearSaturationHeatGain * VehiclePhysics.TYRE_SLIP_HEAT_FRACTION;
         double slipHeat = VehiclePhysics.tyreSlipHeatPowerWatts(sample.longitudinalForce, sample.lateralForce, sample.normalLoad, speedMetersPerSecond, sample.demand, sample.slipAngle);
-        return rollingHeat + nearSaturationHeat + slipHeat + brakeHeatPower;
+        return rollingHeat + nearSaturationHeat + slipHeat;
     }
 
     private static double wheelCoolingDelta(double temperatureC, double speedMetersPerSecond, double surfaceCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier) {

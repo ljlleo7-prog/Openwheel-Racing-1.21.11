@@ -4,6 +4,7 @@ import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.car.CarComponentDamage;
 import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.openwheelracing.content.race.OWRRaceControlState;
+import com.openwheelracing.content.race.OWRLapProfiles;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRoute;
@@ -31,6 +32,12 @@ public final class BasicAiFleetManager {
     private static final Set<UUID> STOPPING = new HashSet<>();
     private static final Map<UUID, BasicAiDriveCommand> PREPARED_COMMANDS = new HashMap<>();
     private static final Map<UUID, GripCache> GRIP_CACHE = new HashMap<>();
+    private static final Map<UUID, PlanCache> PLAN_CACHE = new HashMap<>();
+    private static final Map<DriverRouteKey, LineCache> LINE_CACHE = new HashMap<>();
+    private static final Map<UUID, Long> LOW_SPEED_SINCE = new HashMap<>();
+    private static final Map<UUID, Long> LAST_RECORDED_LAP = new HashMap<>();
+    private static final Map<UUID, com.openwheelracing.content.race.LapProfileCollector> AI_LAP_COLLECTORS = new HashMap<>();
+    private static final Map<UUID, Long> AI_LAP_STARTED_AT = new HashMap<>();
     private static BasicAiTrafficMode modeOverride = BasicAiTrafficMode.AUTO;
     private static UUID cachedRouteId;
     private static int cachedSurveyRevision = Integer.MIN_VALUE;
@@ -84,6 +91,11 @@ public final class BasicAiFleetManager {
             BasicAiStatus status = controller == null ? null : controller.status();
             if (status != null) {
                 BasicAiFleetChunkTickets.acquire(level, car, route.get().toModel(), status.routeDistance());
+            } else if (!BasicAiFleetChunkTickets.hasTickets(car.getUUID())) {
+                SurveyRouteModel model = route.get().toModel();
+                SurveyRouteLocalizer.Result location = SurveyRouteLocalizer.locate(model, point(car), heading(car), new SurveyRouteLocalizer.State());
+                double distance = location.best().map(SurveyRouteGeometry.Candidate::distanceAlongRoute).orElse(0.0);
+                BasicAiFleetChunkTickets.acquire(level, car, model, distance);
             }
         }
     }
@@ -91,12 +103,24 @@ public final class BasicAiFleetManager {
         CONTROLLERS.clear();
         STOPPING.clear();
         PREPARED_COMMANDS.clear();
+        LINE_CACHE.clear();
         GRIP_CACHE.clear();
+        PLAN_CACHE.clear();
+        LOW_SPEED_SINCE.clear();
+        LAST_RECORDED_LAP.clear();
+        AI_LAP_COLLECTORS.clear();
+        AI_LAP_STARTED_AT.clear();
         modeOverride = BasicAiTrafficMode.AUTO;
         cachedRouteId = null;
         cachedRouteModel = null;
         BasicAiFleetChunkTickets.releaseAll();
         invalidatePreparedTick();
+    }
+
+    public static void clearTrainingRuntime() {
+        LOW_SPEED_SINCE.clear();
+        AI_LAP_COLLECTORS.clear();
+        AI_LAP_STARTED_AT.clear();
     }
 
     public static BasicAiTrafficMode mode(ServerLevel level) {
@@ -181,6 +205,95 @@ public final class BasicAiFleetManager {
         return statuses;
     }
 
+    public static List<RacingLineTrace> currentLineTraces(ServerLevel level, UUID trackId) {
+        List<RacingLineTrace> traces = new ArrayList<>();
+        for (OpenwheelCarEntity car : ownedCars(level, trackId)) {
+            BasicAiDriverIdentity identity = car.getBasicAiIdentity().orElse(null);
+            if (identity == null) continue;
+            com.openwheelracing.content.race.LapProfileCollector collector = AI_LAP_COLLECTORS.get(identity.driverId());
+            if (collector == null) continue;
+            List<com.openwheelracing.content.race.LapProfileCollector.TracePoint> points = collector.tracePoints();
+            if (points.size() >= 2) traces.add(new RacingLineTrace(identity.driverId(), identity.displayName(), false, points));
+        }
+        return List.copyOf(traces);
+    }
+
+    public static List<RacingLineTrace> plannedLineTraces(ServerLevel level, UUID trackId) {
+        List<RacingLineTrace> traces = new ArrayList<>();
+        for (OpenwheelCarEntity car : ownedCars(level, trackId)) {
+            BasicAiDriverIdentity identity = car.getBasicAiIdentity().orElse(null);
+            PlanCache cached = PLAN_CACHE.get(car.getUUID());
+            if (identity == null || cached == null) continue;
+            List<com.openwheelracing.content.race.LapProfileCollector.TracePoint> points = cached.plan().samples().stream()
+                .map(sample -> new com.openwheelracing.content.race.LapProfileCollector.TracePoint(
+                    sample.position().x(), sample.position().y(), sample.position().z())).toList();
+            traces.add(new RacingLineTrace(identity.driverId(), identity.displayName(), true, points));
+        }
+        return List.copyOf(traces);
+    }
+
+    public static String calibrationStatus(ServerLevel level, UUID trackId) {
+        Optional<SurveyRoute> route = TrackSurveyData.get(level).get(trackId);
+        if (route.isEmpty()) return "unavailable (no survey)";
+        boolean human = OWRLapProfiles.get(level).fastestValidPlayer(trackId, route.get().routeId(), route.get().length()).isPresent();
+        return human ? "not required (player reference available)" : "pending survey-only bounded trials";
+    }
+
+    public static void resetCalibration(UUID trackId) {
+        PLAN_CACHE.entrySet().removeIf(entry -> entry.getValue().plan().trackId().equals(trackId));
+    }
+
+    public static double learnedLineDistance(ServerLevel level, UUID trackId) {
+        Optional<SurveyRoute> route = TrackSurveyData.get(level).get(trackId);
+        return route.map(value -> OWRAiTrainingData.get(level).matching(trackId, value.routeId()).stream()
+            .mapToDouble(record -> record.prefix().distance()).max().orElse(0.0)).orElse(0.0);
+    }
+
+    public static List<RacingLineTrace> learnedLineTraces(ServerLevel level, UUID trackId) {
+        Optional<SurveyRoute> stored = TrackSurveyData.get(level).get(trackId);
+        if (stored.isEmpty()) return List.of();
+        SurveyRoute route = stored.get();
+        List<RacingLineTrace> traces = new ArrayList<>();
+        for (OWRAiTrainingData.Record record : OWRAiTrainingData.get(level).matching(trackId, route.routeId())) {
+            String archetype = record.archetype();
+            if (!archetype.startsWith("prototype_default:")) continue;
+            UUID driverId;
+            try {
+                driverId = UUID.fromString(archetype.substring("prototype_default:".length()));
+            } catch (IllegalArgumentException ignored) {
+                continue;
+            }
+            BasicAiDriverIdentity identity = ownedCars(level, trackId).stream().map(OpenwheelCarEntity::getBasicAiIdentity)
+                .flatMap(Optional::stream).filter(value -> value.driverId().equals(driverId)).findFirst().orElse(null);
+            if (identity == null) continue;
+            RacingLineTrace trace = prefixTrace(route, identity, record.prefix());
+            if (trace != null) traces.add(trace);
+        }
+        return List.copyOf(traces);
+    }
+
+    private static RacingLineTrace prefixTrace(SurveyRoute route, BasicAiDriverIdentity identity, OWRAiTrainingData.Prefix prefix) {
+        if (prefix.distance() < 12.0) return null;
+        List<com.openwheelracing.content.race.LapProfileCollector.TracePoint> points = new ArrayList<>();
+        int count = Math.max(2, (int) Math.ceil(prefix.distance() / Math.max(0.25, prefix.spacing())));
+        for (int index = 0; index <= count; index++) {
+            double distance = prefix.startDistance() + Math.min(prefix.distance(), index * prefix.spacing());
+            SurveyRoute.Node node = route.nodes().get(Math.floorMod((int) Math.floor(distance / route.spacing()), route.nodes().size()));
+            double relative = SurveyRouteSampler.forwardDelta(prefix.startDistance(), distance, route.length());
+            int sample = Math.min(prefix.offsets().length - 1, Math.max(0, (int) Math.floor(relative / prefix.spacing())));
+            if (prefix.observed().length != prefix.offsets().length || prefix.observed()[sample] <= 0) {
+                if (points.size() >= 2) break;
+                continue;
+            }
+            double offset = prefix.offsets()[sample] / 100.0;
+            double sideX = -Math.sin(node.headingRadians());
+            double sideZ = Math.cos(node.headingRadians());
+            points.add(new com.openwheelracing.content.race.LapProfileCollector.TracePoint(node.position().x() + sideX * offset,
+                node.position().y(), node.position().z() + sideZ * offset));
+        }
+        return new RacingLineTrace(identity.driverId(), identity.displayName(), false, points);
+    }
+
     public static List<OpenwheelCarEntity> ownedCars(ServerLevel level, UUID trackId) {
         List<OpenwheelCarEntity> cars = new ArrayList<>();
         for (Entity entity : level.getAllEntities()) {
@@ -258,11 +371,18 @@ public final class BasicAiFleetManager {
                 car.getDeltaMovement().x, car.getDeltaMovement().z);
             BasicAiNearbyAvoidance.Decision avoidance = BasicAiNearbyAvoidance.choose(subject, traffic);
             BasicAiGripModel.State grip = gripState(car, tick);
+            AiTrackPlan plan = trackPlan(level, route, car, grip);
+            captureActualPath(level, storedRoute.get(), car, tick);
             double queueGap = trafficMode.queueing() ? nearestOrderedGap(snapshot, snapshots, route.length()) : Double.POSITIVE_INFINITY;
             BasicAiCarController controller = snapshot.controller();
             BasicAiDriveCommand command = controller.tick(new BasicAiCarController.Input(snapshot.identity(), car.getId(), route, point(car), heading(car),
-                car.getSpeedKmh() / 3.6, snapshot.localization(), avoidance, trafficMode, grip, queueGap));
+                car.getSpeedKmh() / 3.6, car.getSpeedKmh() / 3.6, car.getYawRateRadiansPerSecond(), snapshot.localization(),
+                avoidance, trafficMode, grip, plan, queueGap));
             PREPARED_COMMANDS.put(car.getUUID(), command);
+            updateLowSpeedTimer(car, tick);
+            if (shouldRecover(car, tick)) {
+                recover(level, car, activeTrack.get(), tick);
+            }
         }
     }
 
@@ -298,6 +418,47 @@ public final class BasicAiFleetManager {
         return nearest;
     }
 
+    private static BasicAiRacingLineProfile racingLine(ServerLevel level, SurveyRouteModel route, BasicAiTrafficMode mode, UUID driverId) {
+        if (mode != BasicAiTrafficMode.RACE) return BasicAiRacingLineProfile.empty(route.length(), 1000);
+        OWRLapProfiles profiles = OWRLapProfiles.get(level);
+        DriverRouteKey cacheKey = new DriverRouteKey(driverId, route.routeId());
+        LineCache cached = LINE_CACHE.get(cacheKey);
+        OWRAiTrainingData.Record training = trainingState(level, route, driverId);
+        int revision = profiles.revision() ^ (int) training.lastUpdate();
+        if (cached != null && cached.revision() == revision) return cached.profile();
+        int pointCount = Math.min(2000, Math.max(1000, (int) Math.ceil(route.length() / 2.0)));
+        BasicAiRacingLineProfile profile;
+        OWRAiTrainingData.Prefix prefix = training.prefix();
+        if (prefix.distance() > 0.0) {
+            profile = BasicAiRacingLineProfile.fromPrefix(route.length(), pointCount, prefix);
+        } else {
+            profile = BasicAiRacingLineProfile.empty(route.length(), pointCount);
+        }
+        BasicAiRacingLineProfile explored = profile.withExploration(training.incidents(), route.length());
+        LINE_CACHE.put(cacheKey, new LineCache(revision, explored));
+        return explored;
+    }
+
+    private static AiTrackPlan trackPlan(ServerLevel level, SurveyRouteModel route, OpenwheelCarEntity car, BasicAiGripModel.State grip) {
+        OWRLapProfiles profiles = OWRLapProfiles.get(level);
+        PlanCache cached = PLAN_CACHE.get(car.getUUID());
+        if (cached != null && cached.routeId().equals(route.routeId()) && cached.profileRevision() == profiles.revision()
+            && cached.capability() == grip) {
+            return cached.plan();
+        }
+        AiTrackPlan plan = AiTrackPlanCompiler.compile(route, profiles.matching(route.trackId(), route.routeId()), grip);
+        PLAN_CACHE.put(car.getUUID(), new PlanCache(route.routeId(), profiles.revision(), grip, plan));
+        return plan;
+    }
+
+    private static String driverArchetype(UUID driverId) {
+        return "prototype_default:" + driverId;
+    }
+
+    private static OWRAiTrainingData.Record trainingState(ServerLevel level, SurveyRouteModel route, UUID driverId) {
+        return OWRAiTrainingData.get(level).getOrCreate(route.trackId(), route.routeId(), driverArchetype(driverId));
+    }
+
     private static BasicAiGripModel.State gripState(OpenwheelCarEntity car, long tick) {
         GripCache cached = GRIP_CACHE.get(car.getUUID());
         if (cached != null && tick < cached.refreshAt()) {
@@ -318,6 +479,150 @@ public final class BasicAiFleetManager {
             setup.cdACoefficient(), dragFactor));
         GRIP_CACHE.put(car.getUUID(), new GripCache(state, tick + 10L + Math.floorMod(car.getId(), 10)));
         return state;
+    }
+
+    private static void updateLowSpeedTimer(OpenwheelCarEntity car, long tick) {
+        if (car.getSpeedKmh() < 3.6f) {
+            LOW_SPEED_SINCE.putIfAbsent(car.getUUID(), tick);
+        } else {
+            LOW_SPEED_SINCE.remove(car.getUUID());
+        }
+    }
+
+    private static boolean shouldRecover(OpenwheelCarEntity car, long tick) {
+        long lowSince = LOW_SPEED_SINCE.getOrDefault(car.getUUID(), tick);
+        return BasicAiTrainingMath.stalled(car.getSpeedKmh() / 3.6, tick - lowSince + 1L);
+    }
+
+    public static boolean regenerateDestroyedCar(ServerLevel level, OpenwheelCarEntity car) {
+        BasicAiDriverIdentity identity = car.getBasicAiIdentity().orElse(null);
+        if (identity == null) return false;
+        TrackDefinition track = TrackDefinitionsData.get(level).get(identity.trackId()).orElse(null);
+        if (track == null) return false;
+        return recover(level, car, track, level.getGameTime());
+    }
+
+    private static boolean recover(ServerLevel level, OpenwheelCarEntity oldCar, TrackDefinition track, long tick) {
+        BasicAiDriverIdentity identity = oldCar.getBasicAiIdentity().orElse(null);
+        if (identity == null) return false;
+        TrackDefinition.GridSlot slot = track.gridSlots().stream().filter(candidate -> candidate.index() == identity.gridIndex()).findFirst().orElse(null);
+        if (slot == null) return false;
+        Optional<SurveyRoute> storedRoute = TrackSurveyData.get(level).get(track.trackId());
+        if (storedRoute.isEmpty()) return false;
+        SurveyRouteModel routeModel = storedRoute.get().toModel();
+        SurveyRouteLocalizer.Result spawnLocation = SurveyRouteLocalizer.locate(routeModel,
+            new SurveyRouteModel.Point(slot.position().x(), slot.position().y(), slot.position().z()), slot.headingRadians(), new SurveyRouteLocalizer.State());
+        double spawnDistance = spawnLocation.best().map(SurveyRouteGeometry.Candidate::distanceAlongRoute).orElse(0.0);
+        boolean resume = oldCar.isAutonomousControlEnabled();
+        OpenwheelCarEntity replacement = new OpenwheelCarEntity(com.openwheelracing.registry.OWREntities.PROTOTYPE_CAR.get(), level);
+        replacement.setPos(slot.position().x(), slot.position().y() + 0.02, slot.position().z());
+        replacement.setYRot((float) Math.toDegrees(slot.headingRadians()) - 90.0f);
+        replacement.setBasicAiIdentity(identity);
+        replacement.setSetup(oldCar.getSetup());
+        replacement.setLivery(oldCar.getLivery());
+        replacement.setLiveryColors(oldCar.getLiveryColors());
+        prepareAiCarDefaults(replacement);
+        if (!level.addFreshEntity(replacement)) {
+            return false;
+        }
+        CONTROLLERS.remove(oldCar.getUUID());
+        PREPARED_COMMANDS.remove(oldCar.getUUID());
+        GRIP_CACHE.remove(oldCar.getUUID());
+        PLAN_CACHE.remove(oldCar.getUUID());
+        LOW_SPEED_SINCE.remove(oldCar.getUUID());
+        LAST_RECORDED_LAP.remove(oldCar.getUUID());
+        BasicAiFleetChunkTickets.replaceOwner(level, oldCar, replacement, routeModel, spawnDistance);
+        oldCar.discard();
+        if (resume) {
+            replacement.resetAiDrivetrain();
+            replacement.setAutonomousControlEnabled(true);
+        }
+        AI_LAP_COLLECTORS.remove(identity.driverId());
+        AI_LAP_STARTED_AT.remove(identity.driverId());
+        return true;
+    }
+
+    private static void recordIncident(ServerLevel level, UUID trackId, OpenwheelCarEntity car, BasicAiDriverIdentity identity, long tick) {
+        Optional<SurveyRoute> stored = TrackSurveyData.get(level).get(trackId);
+        if (stored.isEmpty()) return;
+        SurveyRouteModel route = stored.get().toModel();
+        BasicAiCarController controller = CONTROLLERS.get(car.getUUID());
+        SurveyRouteLocalizer.Result localization = controller == null
+            ? SurveyRouteLocalizer.locate(route, point(car), heading(car), new SurveyRouteLocalizer.State())
+            : controller.localize(route, point(car), heading(car));
+        double distance = localization.best().map(SurveyRouteGeometry.Candidate::distanceAlongRoute).orElse(0.0);
+        com.openwheelracing.content.race.LapProfileCollector collector = AI_LAP_COLLECTORS.get(identity.driverId());
+        OWRAiTrainingData data = OWRAiTrainingData.get(level);
+        OWRAiTrainingData.Record record = data.getOrCreate(trackId, route.routeId(), driverArchetype(identity.driverId()));
+        OWRAiTrainingData.Record updated = record.withRecovery(distance, route.length(), tick);
+            if (collector != null) updated = updated.withPrefix(collector.safePrefix(), tick);
+        data.save(updated);
+        LINE_CACHE.remove(new DriverRouteKey(identity.driverId(), route.routeId()));
+        AI_LAP_STARTED_AT.remove(identity.driverId());
+    }
+
+    private static void captureActualPath(ServerLevel level, SurveyRoute route, OpenwheelCarEntity car, long tick) {
+        BasicAiDriverIdentity identity = car.getBasicAiIdentity().orElse(null);
+        if (identity == null) return;
+        com.openwheelracing.content.race.LapProfileCollector collector = AI_LAP_COLLECTORS.computeIfAbsent(identity.driverId(), ignored -> {
+            com.openwheelracing.content.race.LapProfileCollector created = new com.openwheelracing.content.race.LapProfileCollector();
+            created.start(route, identity.driverId(), tick);
+            AI_LAP_STARTED_AT.put(identity.driverId(), tick);
+            return created;
+        });
+        collector.sample(point(car), heading(car), tick, car.getSpeedKmh());
+    }
+
+    private static void recordTrainingLap(ServerLevel level, SurveyRouteModel route, OpenwheelCarEntity car, int laps,
+                                          BasicAiTrafficMode mode, long tick) {
+        UUID key = car.getUUID();
+        Long last = LAST_RECORDED_LAP.put(key, (long) laps);
+        if (last != null && last >= laps) return;
+        BasicAiDriverIdentity identity = car.getBasicAiIdentity().orElse(null);
+        com.openwheelracing.content.race.LapProfileCollector collector = identity == null ? null : AI_LAP_COLLECTORS.remove(identity.driverId());
+        Long startedAt = identity == null ? null : AI_LAP_STARTED_AT.remove(identity.driverId());
+        int lapMillis = startedAt == null ? 0 : (int) Math.min(Integer.MAX_VALUE, Math.max(1L, tick - startedAt) * 50L);
+        if (collector != null && identity != null && lapMillis > 0) {
+            OWRLapProfiles.BestLapProfile profile = collector.finish(level.dimension().identifier().toString(), route.trackId(), identity.displayName(),
+                OWRLapProfiles.Origin.AI, -1L, lapMillis, tick);
+            if (profile != null) OWRLapProfiles.get(level).putIfFaster(profile);
+            Optional<SurveyRoute> stored = TrackSurveyData.get(level).get(route.trackId());
+            stored.ifPresent(value -> {
+                com.openwheelracing.content.race.LapProfileCollector next = new com.openwheelracing.content.race.LapProfileCollector();
+                next.start(value, identity.driverId(), tick);
+                AI_LAP_COLLECTORS.put(identity.driverId(), next);
+                AI_LAP_STARTED_AT.put(identity.driverId(), tick);
+            });
+        }
+        if (identity == null) return;
+        OWRAiTrainingData data = OWRAiTrainingData.get(level);
+        OWRAiTrainingData.Record record = data.getOrCreate(route.trackId(), route.routeId(), driverArchetype(identity.driverId()));
+        if (!record.enabled()) return;
+        BasicAiTrainingMath.Update update = BasicAiTrainingMath.update(record.targetScale(), record.brakingScale(), record.steeringScale(),
+            record.validLaps(), record.rejectedLaps(), record.recoveries(), record.emaLapMillis() > 0.0 ? record.emaLapMillis() : 120_000.0,
+            Math.max(1.0, car.getCurrentLapTicks() * 50.0), true, mode == BasicAiTrafficMode.RACE);
+        if (update.accepted()) data.save(record.withLap((int) Math.min(Integer.MAX_VALUE, car.getCurrentLapTicks() * 50L), update, tick));
+    }
+
+    private static int playerPriorSampleCount(ServerLevel level, SurveyRouteModel route) {
+        if (!BasicAiPlayerPrior.enabled()) return 0;
+        return OWRLapProfiles.get(level).matching(route.trackId(), route.routeId(), OWRLapProfiles.Origin.PLAYER).size();
+    }
+
+    private static double playerPriorSpeed(ServerLevel level, SurveyRouteModel route, double routeDistance, BasicAiTrafficMode mode) {
+        if (!BasicAiPlayerPrior.enabled() || mode != BasicAiTrafficMode.RACE) return 0.0;
+        List<OWRLapProfiles.BestLapProfile> profiles = OWRLapProfiles.get(level).matching(route.trackId(), route.routeId(), OWRLapProfiles.Origin.PLAYER);
+        if (profiles.isEmpty()) return 0.0;
+        double total = 0.0;
+        int count = 0;
+        for (OWRLapProfiles.BestLapProfile profile : profiles) {
+            double speed = profile.speedKmh(routeDistance) / 3.6;
+            if (speed > 0.0 && Double.isFinite(speed)) {
+                total += speed;
+                count++;
+            }
+        }
+        return count == 0 ? 0.0 : total / count;
     }
 
     private static SurveyRouteModel.Point point(OpenwheelCarEntity car) {
@@ -369,7 +674,23 @@ public final class BasicAiFleetManager {
         PREPARED_COMMANDS.clear();
     }
 
+    public record RacingLineTrace(UUID id, String label, boolean closed,
+                                  List<com.openwheelracing.content.race.LapProfileCollector.TracePoint> points) {
+        public RacingLineTrace {
+            points = List.copyOf(points);
+        }
+    }
+
+    private record DriverRouteKey(UUID driverId, UUID routeId) {
+    }
+
+    private record LineCache(int revision, BasicAiRacingLineProfile profile) {
+    }
+
     private record GripCache(BasicAiGripModel.State state, long refreshAt) {
+    }
+
+    private record PlanCache(UUID routeId, int profileRevision, BasicAiGripModel.State capability, AiTrackPlan plan) {
     }
 
     private record CarSnapshot(OpenwheelCarEntity car, BasicAiDriverIdentity identity, SurveyRouteLocalizer.Result localization,

@@ -22,6 +22,7 @@ public final class BasicAiFleetChunkTickets {
     private static final Identifier ID = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "basic_ai_fleet");
     private static final Map<UUID, OwnedTickets> OWNED = new HashMap<>();
     private static final TicketController CONTROLLER = new TicketController(ID, BasicAiFleetChunkTickets::validate);
+    private static int deniedAcquisitions;
 
     private BasicAiFleetChunkTickets() {
     }
@@ -37,6 +38,7 @@ public final class BasicAiFleetChunkTickets {
         Set<AiRouteChunkWindow.ChunkCoordinate> additionalChunks = new HashSet<>(desired);
         additionalChunks.removeAll(currentUnique);
         if (currentUnique.size() + additionalChunks.size() > MAX_TOTAL_CHUNKS) {
+            deniedAcquisitions++;
             return false;
         }
         if (existing == null) {
@@ -57,11 +59,27 @@ public final class BasicAiFleetChunkTickets {
         return true;
     }
 
+    public static boolean replaceOwner(ServerLevel level, OpenwheelCarEntity oldCar, OpenwheelCarEntity replacement,
+                                       SurveyRouteModel route, double distance) {
+        OwnedTickets previous = OWNED.remove(oldCar.getUUID());
+        if (previous != null) {
+            for (AiRouteChunkWindow.ChunkCoordinate chunk : previous.chunks()) {
+                CONTROLLER.forceChunk(previous.level(), oldCar.getUUID(), chunk.x(), chunk.z(), false, true);
+            }
+        }
+        if (acquire(level, replacement, route, distance)) return true;
+        if (previous != null) {
+            OWNED.put(oldCar.getUUID(), previous);
+            for (AiRouteChunkWindow.ChunkCoordinate chunk : previous.chunks()) {
+                CONTROLLER.forceChunk(previous.level(), oldCar.getUUID(), chunk.x(), chunk.z(), true, true);
+            }
+        }
+        return false;
+    }
+
     public static void release(OpenwheelCarEntity car) {
         OwnedTickets owned = OWNED.remove(car.getUUID());
-        if (owned == null) {
-            return;
-        }
+        if (owned == null) return;
         for (AiRouteChunkWindow.ChunkCoordinate chunk : owned.chunks()) {
             CONTROLLER.forceChunk(owned.level(), car.getUUID(), chunk.x(), chunk.z(), false, true);
         }
@@ -74,6 +92,7 @@ public final class BasicAiFleetChunkTickets {
             }
         }
         OWNED.clear();
+        deniedAcquisitions = 0;
     }
 
     public static int totalTicketCount() {
@@ -86,17 +105,20 @@ public final class BasicAiFleetChunkTickets {
         return chunks;
     }
 
+    public static int deniedAcquisitions() {
+        return deniedAcquisitions;
+    }
+
+    public static boolean hasTickets(UUID carId) {
+        return OWNED.containsKey(carId);
+    }
+
     public static int ticketCount(UUID carId) {
         OwnedTickets owned = OWNED.get(carId);
         return owned == null ? 0 : owned.chunks().size();
     }
 
     private static void validate(ServerLevel level, TicketHelper helper) {
-        for (UUID owner : helper.getEntityTickets().keySet()) {
-            if (!(level.getEntity(owner) instanceof OpenwheelCarEntity car) || !car.isBasicAiOwned()) {
-                helper.removeAllTickets(owner);
-            }
-        }
     }
 
     private record OwnedTickets(ServerLevel level, Set<AiRouteChunkWindow.ChunkCoordinate> chunks) {

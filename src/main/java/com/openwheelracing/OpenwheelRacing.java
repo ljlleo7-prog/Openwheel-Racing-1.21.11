@@ -23,7 +23,6 @@ import com.openwheelracing.registry.OWRSoundEvents;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
-import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.furnace.FurnaceFuelBurnTimeEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
@@ -55,11 +54,6 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(OWRFuelHandler::onFuelBurnTime);
         NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> OWRCommands.register(event));
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
-        NeoForge.EVENT_BUS.addListener((EntityLeaveLevelEvent event) -> {
-            if (event.getEntity() instanceof com.openwheelracing.content.entity.OpenwheelCarEntity car) {
-                BasicAiFleetChunkTickets.release(car);
-            }
-        });
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedOut);
         NeoForge.EVENT_BUS.addListener(this::onPlayerChangedDimension);
         NeoForge.EVENT_BUS.addListener(this::onPlayerRespawn);

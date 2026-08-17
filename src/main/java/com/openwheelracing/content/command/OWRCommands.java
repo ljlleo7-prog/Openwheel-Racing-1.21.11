@@ -11,6 +11,7 @@ import com.openwheelracing.content.ai.BasicAiFleetChunkTickets;
 import com.openwheelracing.content.ai.BasicAiFleetManager;
 import com.openwheelracing.content.ai.BasicAiStatus;
 import com.openwheelracing.content.ai.BasicAiTrafficMode;
+import com.openwheelracing.content.ai.OWRAiTrainingData;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.race.OWRRaceControlState;
@@ -76,6 +77,13 @@ public final class OWRCommands {
                     .then(Commands.literal("despawn").executes(OWRCommands::despawnAiFleet))
                     .then(Commands.literal("mode")
                         .then(Commands.argument("mode", StringArgumentType.word()).executes(OWRCommands::setAiFleetMode)))
+                    .then(Commands.literal("calibration")
+                        .then(Commands.literal("status").executes(OWRCommands::showAiCalibrationStatus))
+                        .then(Commands.literal("reset").executes(OWRCommands::resetAiCalibration)))
+                    .then(Commands.literal("line")
+                        .then(Commands.literal("planned").executes(context -> showAiLine(context, "planned")))
+                        .then(Commands.literal("current").executes(context -> showAiLine(context, "current")))
+                        .then(Commands.literal("hide").executes(OWRCommands::hideAiLine)))
                     .then(Commands.literal("status").executes(OWRCommands::showAiFleetStatus))))
             .then(Commands.literal("steward")
                 .then(Commands.literal("list")
@@ -294,6 +302,110 @@ public final class OWRCommands {
         return 1;
     }
 
+    private static int showAiTrainingStatus(CommandContext<CommandSourceStack> context) {
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (track.isEmpty()) {
+            send(context, "AI training unavailable: no active track.");
+            return 0;
+        }
+        ServerLevel level = context.getSource().getLevel();
+        Optional<SurveyRoute> survey = TrackSurveyData.get(level).get(track.get().trackId());
+        if (survey.isEmpty()) {
+            send(context, "AI training unavailable: no active survey.");
+            return 0;
+        }
+        OWRAiTrainingData.Record record = OWRAiTrainingData.get(level).getOrCreate(track.get().trackId(), survey.get().routeId(), "prototype_default");
+        send(context, "AI training track=" + track.get().name() + " enabled=" + record.enabled() + " laps=" + record.validLaps()
+            + " rejected=" + record.rejectedLaps() + " recoveries=" + record.recoveries() + " best=" + record.bestLapMillis()
+            + " targetScale=" + String.format(java.util.Locale.ROOT, "%.3f", record.targetScale())
+            + " brakingScale=" + String.format(java.util.Locale.ROOT, "%.3f", record.brakingScale()) + ".");
+        return 1;
+    }
+
+    private static int showAiCalibrationStatus(CommandContext<CommandSourceStack> context) {
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (track.isEmpty()) {
+            send(context, "AI calibration unavailable: no active track.");
+            return 0;
+        }
+        String status = BasicAiFleetManager.calibrationStatus(context.getSource().getLevel(), track.get().trackId());
+        send(context, "AI calibration " + status + ".");
+        return 1;
+    }
+
+    private static int resetAiCalibration(CommandContext<CommandSourceStack> context) {
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (track.isEmpty()) return 0;
+        BasicAiFleetManager.resetCalibration(track.get().trackId());
+        send(context, "Reset deterministic AI calibration cache for " + track.get().name() + ".");
+        return 1;
+    }
+
+    private static int showAiTrainingTime(CommandContext<CommandSourceStack> context) {
+        return showAiTrainingStatus(context);
+    }
+
+    private static int clearAiTraining(CommandContext<CommandSourceStack> context) {
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (track.isEmpty()) {
+            send(context, "AI training clear refused: no active track.");
+            return 0;
+        }
+        ServerLevel level = context.getSource().getLevel();
+        Optional<SurveyRoute> survey = TrackSurveyData.get(level).get(track.get().trackId());
+        int removed = survey.map(route -> OWRAiTrainingData.get(level).clear(track.get().trackId(), route.routeId())).orElse(0);
+        BasicAiFleetManager.clearTrainingRuntime();
+        send(context, "Cleared " + removed + " AI training record(s).");
+        return 1;
+    }
+
+    private static int setAiTraining(CommandContext<CommandSourceStack> context, boolean enabled) {
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (track.isEmpty()) return 0;
+        ServerLevel level = context.getSource().getLevel();
+        Optional<SurveyRoute> survey = TrackSurveyData.get(level).get(track.get().trackId());
+        if (survey.isEmpty()) return 0;
+        OWRAiTrainingData data = OWRAiTrainingData.get(level);
+        OWRAiTrainingData.Record record = data.getOrCreate(track.get().trackId(), survey.get().routeId(), "prototype_default").withEnabled(enabled);
+        data.save(record);
+        send(context, "AI training " + (enabled ? "enabled" : "disabled") + ".");
+        return 1;
+    }
+
+    private static int hideAiLine(CommandContext<CommandSourceStack> context) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) return 0;
+        OWRNetwork.sendAiRacingLineOverlay(player, false, "", new UUID(0, 0), "planned", List.of());
+        return 1;
+    }
+
+    private static int showAiLine(CommandContext<CommandSourceStack> context, String source) {
+        ServerPlayer player = context.getSource().getPlayer();
+        Optional<TrackDefinition> track = activeTrack(context);
+        if (player == null || track.isEmpty()) return 0;
+        ServerLevel level = context.getSource().getLevel();
+        List<com.openwheelracing.content.ai.BasicAiFleetManager.RacingLineTrace> traces = source.equals("current")
+            ? BasicAiFleetManager.currentLineTraces(level, track.get().trackId())
+            : BasicAiFleetManager.plannedLineTraces(level, track.get().trackId());
+        List<OWRNetwork.AiRacingLineStrip> strips = new java.util.ArrayList<>();
+        for (int traceIndex = 0; traceIndex < traces.size(); traceIndex++) {
+            com.openwheelracing.content.ai.BasicAiFleetManager.RacingLineTrace trace = traces.get(traceIndex);
+            double[] x = trace.points().stream().mapToDouble(com.openwheelracing.content.race.LapProfileCollector.TracePoint::x).toArray();
+            double[] y = trace.points().stream().mapToDouble(com.openwheelracing.content.race.LapProfileCollector.TracePoint::y).toArray();
+            double[] z = trace.points().stream().mapToDouble(com.openwheelracing.content.race.LapProfileCollector.TracePoint::z).toArray();
+            int color = source.equals("current") ? currentLineColor(traceIndex) : 0xFFFF8A3D;
+            strips.add(new OWRNetwork.AiRacingLineStrip(trace.id(), trace.label(), trace.closed(), color, x, y, z));
+        }
+        OWRNetwork.sendAiRacingLineOverlay(player, true, level.dimension().identifier().toString(), track.get().trackId(), source, strips);
+        send(context, "Showing " + strips.size() + " " + source + " AI line" + (strips.size() == 1 ? "" : "s") + ".");
+        return strips.size();
+    }
+
+    private static int currentLineColor(int index) {
+        int[] colors = {0xFF42D4F4, 0xFFF032E6, 0xFFBFEF45, 0xFF4363D8, 0xFFF58231, 0xFF911EB4};
+        return colors[Math.floorMod(index, colors.length)];
+    }
+
     private static int showAiFleetStatus(CommandContext<CommandSourceStack> context) {
         Optional<TrackDefinition> track = activeTrack(context);
         if (track.isEmpty()) {
@@ -309,7 +421,8 @@ public final class OWRCommands {
         send(context, "AI fleet " + fleetId + " cars=" + statuses.size() + " track=" + track.get().name()
             + " mode=" + BasicAiFleetManager.mode(context.getSource().getLevel()).name().toLowerCase(java.util.Locale.ROOT)
             + " override=" + BasicAiFleetManager.modeOverride().name().toLowerCase(java.util.Locale.ROOT)
-            + " forcedChunks=" + BasicAiFleetChunkTickets.totalTicketCount() + "/" + BasicAiFleetChunkTickets.MAX_TOTAL_CHUNKS + ".");
+            + " forcedChunks=" + BasicAiFleetChunkTickets.totalTicketCount() + "/" + BasicAiFleetChunkTickets.MAX_TOTAL_CHUNKS
+            + " ticketDenials=" + BasicAiFleetChunkTickets.deniedAcquisitions() + ".");
         for (BasicAiStatus status : statuses) {
             String gap = Double.isFinite(status.nearestAheadGap()) ? String.format(java.util.Locale.ROOT, "%.1fm", status.nearestAheadGap()) : "none";
             send(context, "%s entity=%d grid=%d %s loc=%s conf=%.2f route=%.1fm laps=%d speed=%.1fkm/h gap=%s reason=%s".formatted(

@@ -10,6 +10,7 @@ import com.openwheelracing.client.input.OWRClientInputHandler;
 import com.openwheelracing.client.input.OWRKeyMappings;
 import com.openwheelracing.client.render.StewardLineOverlay;
 import com.openwheelracing.client.render.SurveyRouteOverlay;
+import com.openwheelracing.client.render.AiRacingLineOverlay;
 import com.openwheelracing.client.screen.OpenwheelSetupScreen;
 import com.openwheelracing.client.sound.CarSoundManager;
 import net.minecraft.client.Minecraft;
@@ -64,6 +65,7 @@ public final class OpenwheelRacingClientEvents {
         if (Minecraft.getInstance().level == null) {
             StewardLineOverlay.clear();
             SurveyRouteOverlay.clear();
+            AiRacingLineOverlay.clear();
         }
     }
 
@@ -92,5 +94,6 @@ public final class OpenwheelRacingClientEvents {
     public static void onRenderLevelAfterEntities(RenderLevelStageEvent.AfterEntities event) {
         StewardLineOverlay.render(event);
         SurveyRouteOverlay.render(event);
+        AiRacingLineOverlay.render(event);
     }
 }

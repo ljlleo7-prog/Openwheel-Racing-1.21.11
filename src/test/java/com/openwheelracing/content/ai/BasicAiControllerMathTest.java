@@ -11,13 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BasicAiControllerMathTest {
     @Test
-    void straightRouteUsesHighSpeedTargetAndFullThrottle() {
+    void straightRouteUsesHighSpeedTargetAndProportionalThrottle() {
         BasicAiGripModel.State grip = BasicAiGripModel.build(new BasicAiGripModel.Input(95.0, 88.0, 104.0, 0.0, 0.0,
             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0));
         assertEquals(BasicAiCarController.MAX_TARGET_SPEED_MPS,
             BasicAiSpeedPlanner.targetSpeed(straightRoute(), 0.0, grip, BasicAiTrafficMode.RACE), 1.0E-6);
         BasicAiDriveCommand command = BasicAiCarController.speedCommand(10.0, BasicAiCarController.MAX_TARGET_SPEED_MPS, 0.0f, BasicAiNearbyAvoidance.Decision.NONE);
-        assertEquals(1.0f, command.throttle());
+        assertTrue(command.throttle() > 0.0f);
         assertEquals(0.0f, command.brake());
     }
 
@@ -49,6 +49,22 @@ class BasicAiControllerMathTest {
     }
 
     @Test
+    void learnedLineGradientChangesSteeringTarget() {
+        SurveyRouteModel route = straightRoute();
+        float centered = BasicAiCarController.desiredSteering(route, 5.0, new SurveyRouteModel.Point(5, 64, 0), 0.0, 0.0, 10.0, 0.0, 0.0);
+        float offsetLine = BasicAiCarController.desiredSteering(route, 5.0, new SurveyRouteModel.Point(5, 64, 0), 0.0, -1.0, 10.0, 1.0, 0.1);
+        assertTrue(offsetLine > centered);
+    }
+    @Test
+    void repeatedIncidentReducesApproachSpeed() {
+        double target = BasicAiSpeedPlanner.applyIncidentLimit(80.0, 100.0, 1000.0,
+            List.of(new OWRAiTrainingData.Incident(130.0, 4, 1, 0.5)));
+        assertTrue(target < 40.0);
+        assertEquals(80.0, BasicAiSpeedPlanner.applyIncidentLimit(80.0, 100.0, 1000.0,
+            List.of(new OWRAiTrainingData.Incident(400.0, 4, 1, 0.5))), 1.0E-6);
+    }
+
+    @Test
     void curvatureReducesTargetSpeed() {
         BasicAiGripModel.State grip = BasicAiGripModel.build(new BasicAiGripModel.Input(95.0, 88.0, 104.0, 0.0, 0.0,
             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0));
@@ -62,6 +78,23 @@ class BasicAiControllerMathTest {
         BasicAiDriveCommand command = BasicAiCarController.speedCommand(20.0, 10.0, 0.0f, BasicAiNearbyAvoidance.Decision.NONE);
         assertEquals(0.0f, command.throttle());
         assertTrue(command.brake() > 0.0f);
+    }
+
+    @Test
+    void safetySupervisorCapsSpeedWellBeforeSlowCorner() {
+        BasicAiGripModel.State grip = BasicAiGripModel.build(new BasicAiGripModel.Input(95, 88, 104, 0, 0,
+            1, 1, 1, 1, 1, 1, 1, 1, 1));
+        UUID routeId = UUID.randomUUID();
+        UUID trackId = UUID.randomUUID();
+        java.util.ArrayList<AiTrackSample> samples = new java.util.ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            double speed = i >= 50 && i < 65 ? 12.0 : 80.0;
+            samples.add(new AiTrackSample(i * 2.0, new SurveyRouteModel.Point(i * 2.0, 64, 0), 0, 0, 0, speed,
+                AiTrackPlan.ReferenceSource.SURVEY));
+        }
+        AiTrackPlan plan = new AiTrackPlan(trackId, routeId, 200, 2, samples, AiTrackPlan.ReferenceSource.SURVEY, 0, 0, false);
+        double supervised = BasicAiCarController.supervisedTargetSpeed(plan, 0, 70, grip);
+        assertTrue(supervised < 70.0, "braking supervisor must intervene before the corner");
     }
 
     private static SurveyRouteModel straightRoute() {

@@ -110,6 +110,7 @@ public final class OWRNetwork {
         registrar.playToClient(CommandFeedbackMessage.TYPE, codec(CommandFeedbackMessage::encode, CommandFeedbackMessage::decode), CommandFeedbackMessage::handle);
         registrar.playToClient(StewardLineOverlayMessage.TYPE, codec(StewardLineOverlayMessage::encode, StewardLineOverlayMessage::decode), StewardLineOverlayMessage::handle);
         registrar.playToClient(SurveyRouteOverlayMessage.TYPE, codec(SurveyRouteOverlayMessage::encode, SurveyRouteOverlayMessage::decode), SurveyRouteOverlayMessage::handle);
+        registrar.playToClient(AiRacingLineOverlayMessage.TYPE, codec(AiRacingLineOverlayMessage::encode, AiRacingLineOverlayMessage::decode), AiRacingLineOverlayMessage::handle);
         registrar.playToClient(TimingDeltaHudMessage.TYPE, codec(TimingDeltaHudMessage::encode, TimingDeltaHudMessage::decode), TimingDeltaHudMessage::handle);
         registrar.playToClient(LiveLapDeltaHudMessage.TYPE, codec(LiveLapDeltaHudMessage::encode, LiveLapDeltaHudMessage::decode), LiveLapDeltaHudMessage::handle);
         registrar.playToClient(MonitorTelemetryMessage.TYPE, codec(MonitorTelemetryMessage::encode, MonitorTelemetryMessage::decode), MonitorTelemetryMessage::handle);
@@ -919,6 +920,11 @@ public final class OWRNetwork {
         String trackName = track == null ? "" : track.name();
         List<TrackDefinition.StewardLine> lines = track == null ? List.of() : track.stewardLines();
         PacketDistributor.sendToPlayer(player, new StewardLineOverlayMessage(visible, trackId, trackName, revision, lines));
+    }
+
+    public static void sendAiRacingLineOverlay(ServerPlayer player, boolean visible, String dimensionId, UUID trackId, String source,
+                                                List<AiRacingLineStrip> strips) {
+        PacketDistributor.sendToPlayer(player, new AiRacingLineOverlayMessage(visible, dimensionId, trackId, source, strips));
     }
 
     public static void sendSurveyRouteOverlay(ServerPlayer player, boolean visible, String dimensionId, UUID trackId, String trackName, boolean recording, SurveyRoute route) {
@@ -1903,6 +1909,49 @@ public final class OWRNetwork {
 
         private static void handle(StewardLineOverlayMessage message, IPayloadContext context) {
             context.enqueueWork(() -> applyStewardLineOverlay(message));
+        }
+    }
+
+    public record AiRacingLineStrip(UUID id, String label, boolean closed, int color, double[] x, double[] y, double[] z) {
+        public AiRacingLineStrip {
+            label = label == null ? "" : label;
+            x = x == null ? new double[0] : x.clone();
+            y = y == null ? new double[0] : y.clone();
+            z = z == null ? new double[0] : z.clone();
+            if (x.length != y.length || x.length != z.length || x.length > 4096) throw new IllegalArgumentException("invalid AI line strip");
+        }
+    }
+
+    public record AiRacingLineOverlayMessage(boolean visible, String dimensionId, UUID trackId, String source,
+                                              List<AiRacingLineStrip> strips) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<AiRacingLineOverlayMessage> TYPE = payloadType("ai_racing_line_overlay_message");
+        public AiRacingLineOverlayMessage {
+            strips = strips == null ? List.of() : List.copyOf(strips);
+            if (strips.size() > 24) throw new IllegalArgumentException("too many AI line strips");
+        }
+        @Override public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(AiRacingLineOverlayMessage message, FriendlyByteBuf buffer) {
+            buffer.writeBoolean(message.visible); buffer.writeUtf(message.dimensionId, 128); buffer.writeUUID(message.trackId); buffer.writeUtf(message.source, 32);
+            buffer.writeVarInt(message.strips.size());
+            for (AiRacingLineStrip strip : message.strips) {
+                buffer.writeUUID(strip.id()); buffer.writeUtf(strip.label(), 64); buffer.writeBoolean(strip.closed()); buffer.writeInt(strip.color());
+                buffer.writeVarInt(strip.x().length);
+                for (int i = 0; i < strip.x().length; i++) { buffer.writeDouble(strip.x()[i]); buffer.writeDouble(strip.y()[i]); buffer.writeDouble(strip.z()[i]); }
+            }
+        }
+        private static AiRacingLineOverlayMessage decode(FriendlyByteBuf buffer) {
+            boolean visible = buffer.readBoolean(); String dimension = buffer.readUtf(128); UUID track = buffer.readUUID(); String source = buffer.readUtf(32);
+            int stripCount = Math.min(buffer.readVarInt(), 24); List<AiRacingLineStrip> strips = new java.util.ArrayList<>(stripCount);
+            for (int stripIndex = 0; stripIndex < stripCount; stripIndex++) {
+                UUID id = buffer.readUUID(); String label = buffer.readUtf(64); boolean closed = buffer.readBoolean(); int color = buffer.readInt();
+                int count = Math.min(buffer.readVarInt(), 4096); double[] x = new double[count], y = new double[count], z = new double[count];
+                for (int i = 0; i < count; i++) { x[i] = buffer.readDouble(); y[i] = buffer.readDouble(); z[i] = buffer.readDouble(); }
+                strips.add(new AiRacingLineStrip(id, label, closed, color, x, y, z));
+            }
+            return new AiRacingLineOverlayMessage(visible, dimension, track, source, strips);
+        }
+        private static void handle(AiRacingLineOverlayMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> com.openwheelracing.client.render.AiRacingLineOverlay.apply(message));
         }
     }
 

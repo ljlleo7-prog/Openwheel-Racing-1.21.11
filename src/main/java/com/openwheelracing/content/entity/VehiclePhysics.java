@@ -14,16 +14,20 @@ public final class VehiclePhysics {
 
     public static final double TYRE_AMBIENT_TEMPERATURE_C = 28.0;
     public static final double TYRE_HEAT_CAPACITY_J_PER_C = 43_500.0;
+    public static final double TYRE_SURFACE_HEAT_CAPACITY_J_PER_C = 20_000.0;
+    public static final double TYRE_CARCASS_HEAT_CAPACITY_J_PER_C = TYRE_HEAT_CAPACITY_J_PER_C - TYRE_SURFACE_HEAT_CAPACITY_J_PER_C;
     public static final double TYRE_ROLLING_RESISTANCE_HEAT_FRACTION = 0.80;
     public static final double TYRE_SLIP_HEAT_FRACTION = 1.43;
-    public static final double TYRE_STATIONARY_COOLING_PER_SECOND = 0.00209;
-    public static final double TYRE_WIND_COOLING_PER_MPS_SECOND = 0.00001848;
+    public static final double TYRE_STATIONARY_COOLING_PER_SECOND = 0.00225;
+    public static final double TYRE_WIND_COOLING_PER_MPS_SECOND = 0.0000195;
     public static final double TYRE_HOT_COOLING_PER_SECOND = 0.00250;
     public static final double TYRE_HOT_COOLING_SCALE_C = 150.0;
     public static final double TYRE_G_FORCE_HEAT_FACTOR = 0.61;
-    public static final double TYRE_SURFACE_HEAT_FRACTION = 0.55;
-    public static final double TYRE_CARCASS_TRANSFER_PER_SECOND = 0.12;
-    public static final double TYRE_CARCASS_COOLING_FRACTION = 0.22;
+    public static final double TYRE_SURFACE_FRICTION_HEAT_FRACTION = 0.72;
+    public static final double TYRE_CARCASS_FRICTION_HEAT_FRACTION = 1.0 - TYRE_SURFACE_FRICTION_HEAT_FRACTION;
+    public static final double TYRE_BRAKE_TO_CARCASS_HEAT_FRACTION = 0.90;
+    public static final double TYRE_CARCASS_TRANSFER_WATTS_PER_C = 600.0;
+    public static final double TYRE_CARCASS_COOLING_FRACTION = 0.16;
     public static final double TYRE_EXPOSURE_ATTACK_PER_SECOND = 1.8;
     public static final double TYRE_EXPOSURE_RELEASE_PER_SECOND = 2.8;
     public static final double TYRE_EXPOSURE_TRANSFER_FLOOR = 0.05;
@@ -73,6 +77,10 @@ public final class VehiclePhysics {
         double availableBrakeForce = ASPHALT_MU_LONGITUDINAL * surfaceGrip * normalLoad;
         double brakeAcceleration = Math.min(MAX_BRAKE_FORCE, availableBrakeForce) / CAR_MASS_KG;
         return initialSpeedMetersPerSecond * initialSpeedMetersPerSecond / (2.0 * brakeAcceleration);
+    }
+
+    public static double tyreBrakeHeatPowerPerTyre(double brakeInput, double totalBrakeHeatPower, double axleBias) {
+        return Math.max(0.0, brakeInput) * Math.max(0.0, totalBrakeHeatPower) * clamp(axleBias, 0.0, 1.0) * 0.5;
     }
 
     public static double tyreRollingHeatPowerWatts(double normalLoad, double speedMetersPerSecond, double rollingResistance) {
@@ -143,9 +151,9 @@ public final class VehiclePhysics {
     }
 
     public static TyreThermalState nextTyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure,
-            double heatPowerWatts, double compoundHeatGain, double speedMetersPerSecond, double surfaceCoolingMultiplier,
-            double stationaryCoolingMultiplier, double windCoolingMultiplier, double exposureDemand, double slipAngleRadians,
-            double dtSeconds, boolean groundContact) {
+            double frictionHeatPowerWatts, double brakeHeatPowerWatts, double compoundHeatGain, double speedMetersPerSecond,
+            double surfaceCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier,
+            double exposureDemand, double slipAngleRadians, double dtSeconds, boolean groundContact) {
         double dt = Math.max(0.0, dtSeconds);
         double abuseTarget = clamp(Math.max(0.0, exposureDemand - 0.82) * 3.0 + Math.abs(slipAngleRadians) / 0.16, 0.0, 1.0);
         double exposureRate = abuseTarget > slipExposure ? TYRE_EXPOSURE_ATTACK_PER_SECOND : TYRE_EXPOSURE_RELEASE_PER_SECOND;
@@ -154,16 +162,22 @@ public final class VehiclePhysics {
             nextExposure = moveToward(nextExposure, 0.0, TYRE_EXPOSURE_RELEASE_PER_SECOND * dt);
         }
 
-        double generatedHeat = groundContact ? Math.max(0.0, heatPowerWatts) * Math.max(0.0, compoundHeatGain) * dt / TYRE_HEAT_CAPACITY_J_PER_C : 0.0;
-        double surfaceHeat = generatedHeat * TYRE_SURFACE_HEAT_FRACTION;
+        double frictionPower = groundContact ? Math.max(0.0, frictionHeatPowerWatts) * Math.max(0.0, compoundHeatGain) : 0.0;
+        double brakePower = groundContact ? Math.max(0.0, brakeHeatPowerWatts) : 0.0;
+        double surfacePower = frictionPower * TYRE_SURFACE_FRICTION_HEAT_FRACTION + brakePower * (1.0 - TYRE_BRAKE_TO_CARCASS_HEAT_FRACTION);
+        double carcassPower = frictionPower * TYRE_CARCASS_FRICTION_HEAT_FRACTION + brakePower * TYRE_BRAKE_TO_CARCASS_HEAT_FRACTION;
+        double transientTransfer = TYRE_EXPOSURE_TRANSFER_FLOOR + (1.0 - TYRE_EXPOSURE_TRANSFER_FLOOR) * nextExposure;
+        double conductionPower = (surfaceTemperatureC - carcassTemperatureC) * TYRE_CARCASS_TRANSFER_WATTS_PER_C * transientTransfer;
+        surfacePower -= conductionPower;
+        carcassPower += conductionPower;
+
         double surfaceCooling = tyreCoolingDeltaC(surfaceTemperatureC, speedMetersPerSecond, dt)
             * Math.max(0.0, surfaceCoolingMultiplier)
             * Math.max(0.0, stationaryCoolingMultiplier)
             * Math.max(0.0, windCoolingMultiplier);
-        double surface = clamp(surfaceTemperatureC + surfaceHeat - surfaceCooling, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
-        double transfer = (surface - carcassTemperatureC) * TYRE_CARCASS_TRANSFER_PER_SECOND * dt * (TYRE_EXPOSURE_TRANSFER_FLOOR + (1.0 - TYRE_EXPOSURE_TRANSFER_FLOOR) * nextExposure);
         double carcassCooling = tyreCoolingDeltaC(carcassTemperatureC, speedMetersPerSecond, dt) * TYRE_CARCASS_COOLING_FRACTION;
-        double carcass = clamp(carcassTemperatureC + transfer - carcassCooling, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+        double surface = clamp(surfaceTemperatureC + surfacePower * dt / TYRE_SURFACE_HEAT_CAPACITY_J_PER_C - surfaceCooling, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
+        double carcass = clamp(carcassTemperatureC + carcassPower * dt / TYRE_CARCASS_HEAT_CAPACITY_J_PER_C - carcassCooling, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
         return new TyreThermalState(surface, carcass, nextExposure);
     }
 
