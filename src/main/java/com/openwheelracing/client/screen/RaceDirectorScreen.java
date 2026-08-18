@@ -191,6 +191,12 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.archive"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetArchiveModeMessage(!menu.getSnapshot().archiveMode())))
             .bounds(leftPos + 136, topPos + 68, 48, 16)
             .build());
+        addRenderableWidget(Button.builder(Component.literal("-"), button -> setRaceLapLimit(menu.getSnapshot().raceLapLimit() - 1))
+            .bounds(leftPos + 142, topPos + 106, 18, 14)
+            .build());
+        addRenderableWidget(Button.builder(Component.literal("+"), button -> setRaceLapLimit(menu.getSnapshot().raceLapLimit() + 1))
+            .bounds(leftPos + 164, topPos + 106, 18, 14)
+            .build());
         addRenderableWidget(Button.builder(Component.literal("<"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetPageMessage(menu.getSnapshot().page() - 1)))
             .bounds(leftPos + 190, topPos + 68, 16, 16)
             .build());
@@ -236,6 +242,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     private String sessionName() {
         String value = sessionNameBox == null ? "" : sessionNameBox.getValue().trim();
         return value.isEmpty() ? "Session" : value;
+    }
+
+    private void setRaceLapLimit(int laps) {
+        OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetRaceLapLimitMessage(laps));
     }
 
     private void addTeamWidgets() {
@@ -296,7 +306,8 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     }
 
     private void drawBoardPage(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.countdown_placeholder"), 12, 108, 0xFFC9D1D9, false);
+        String lapLimit = snapshot.raceLapLimit() == 0 ? Component.translatable("screen.openwheelracing.race_director.race_laps_open").getString() : Integer.toString(snapshot.raceLapLimit());
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.race_laps", lapLimit), 12, 108, 0xFFC9D1D9, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.lap_counter_placeholder", snapshot.laps().size()), 12, 120, 0xFFC9D1D9, false);
         drawLapRows(graphics, snapshot);
         CircuitMapRenderer.render(graphics, snapshot.trackMap(), snapshot.teamCars(), MAP_X, MAP_Y, MAP_WIDTH, MAP_HEIGHT, selectedTeamCarId, snapshot.leftTeamCarId(), snapshot.rightTeamCarId());

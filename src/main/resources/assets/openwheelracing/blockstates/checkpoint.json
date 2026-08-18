@@ -1,8 +1,6 @@
-{
-  "variants": {
-    "facing=north": { "model": "openwheelracing:block/checkpoint" },
-    "facing=east": { "model": "openwheelracing:block/checkpoint", "y": 90 },
-    "facing=south": { "model": "openwheelracing:block/checkpoint", "y": 180 },
-    "facing=west": { "model": "openwheelracing:block/checkpoint", "y": 270 }
-  }
-}
+{"multipart":[
+ {"when":{"facing":"north"},"apply":{"model":"openwheelracing:block/checkpoint"}},
+ {"when":{"facing":"east"},"apply":{"model":"openwheelracing:block/checkpoint","y":90}},
+ {"when":{"facing":"south"},"apply":{"model":"openwheelracing:block/checkpoint","y":180}},
+ {"when":{"facing":"west"},"apply":{"model":"openwheelracing:block/checkpoint","y":270}}
+]}

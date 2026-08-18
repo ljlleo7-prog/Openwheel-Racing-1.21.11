@@ -1,6 +1,7 @@
 package com.openwheelracing.content.item;
 
 import com.openwheelracing.content.car.PrototypeCarSetup;
+import com.openwheelracing.content.car.TyreType;
 import com.openwheelracing.registry.OWRDataComponents;
 import com.openwheelracing.registry.OWRItems;
 import java.util.function.Consumer;
@@ -17,18 +18,29 @@ public class TyreItem extends Item {
     }
 
     public static ItemStack create(int compound) {
-        return create(compound, 1, 100);
+        return create(compound, TyreType.SLICK, 1, 100);
     }
 
     public static ItemStack create(int compound, int count) {
-        return create(compound, count, 100);
+        return create(compound, TyreType.SLICK, count, 100);
     }
 
     public static ItemStack create(int compound, int count, double remainingPercent) {
+        return create(compound, TyreType.SLICK, count, remainingPercent);
+    }
+
+    public static ItemStack create(int compound, TyreType type, int count, double remainingPercent) {
         ItemStack stack = new ItemStack(OWRItems.TIRES.get(), count);
-        stack.set(OWRDataComponents.TYRE_COMPOUND.get(), clampCompound(compound));
+        TyreType normalizedType = type == null ? TyreType.SLICK : type;
+        stack.set(OWRDataComponents.TYRE_COMPOUND.get(), normalizedType == TyreType.SLICK ? clampCompound(compound) : PrototypeCarSetup.DEFAULT.grip());
+        if (normalizedType != TyreType.SLICK) stack.set(OWRDataComponents.TYRE_TYPE.get(), normalizedType.id());
         setRemainingPercent(stack, remainingPercent);
         return stack;
+    }
+
+    public static TyreType getType(ItemStack stack) {
+        Integer type = stack.get(OWRDataComponents.TYRE_TYPE.get());
+        return type == null ? TyreType.SLICK : TyreType.fromId(type);
     }
 
     public static int getCompound(ItemStack stack) {
@@ -43,7 +55,9 @@ public class TyreItem extends Item {
 
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext context, TooltipDisplay display, Consumer<Component> tooltip, TooltipFlag flag) {
-        tooltip.accept(Component.translatable("tooltip.openwheelracing.tires.compound", getCompound(stack) + 1).withStyle(ChatFormatting.GREEN));
+        TyreType type = getType(stack);
+        if (type == TyreType.SLICK) tooltip.accept(Component.translatable("tooltip.openwheelracing.tires.compound", getCompound(stack) + 1).withStyle(ChatFormatting.GREEN));
+        else tooltip.accept(Component.translatable("tooltip.openwheelracing.tires.type", type.displayName()).withStyle(ChatFormatting.AQUA));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.tires.remaining", getRemainingPercent(stack)).withStyle(ChatFormatting.YELLOW));
     }
 

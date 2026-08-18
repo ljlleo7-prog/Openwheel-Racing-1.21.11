@@ -10,12 +10,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import org.jspecify.annotations.Nullable;
 
-public class DirectionalTrackBlock extends HorizontalDirectionalBlock {
+public class DirectionalTrackBlock extends HorizontalDirectionalBlock implements WettableTrack {
     public static final MapCodec<DirectionalTrackBlock> CODEC = simpleCodec(DirectionalTrackBlock::new);
 
     public DirectionalTrackBlock(Properties properties) {
-        super(properties);
-        registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH));
+        super(properties.randomTicks());
+        registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH).setValue(MOISTURE, TrackMoisture.DRY));
     }
 
     @Override
@@ -40,6 +40,12 @@ public class DirectionalTrackBlock extends HorizontalDirectionalBlock {
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<net.minecraft.world.level.block.Block, BlockState> builder) {
-        builder.add(FACING);
+        builder.add(FACING, MOISTURE);
+    }
+
+    @Override
+    protected void randomTick(BlockState state, net.minecraft.server.level.ServerLevel level, net.minecraft.core.BlockPos pos,
+                              net.minecraft.util.RandomSource random) {
+        WettableTrackWeather.randomTick(state, level, pos, random);
     }
 }

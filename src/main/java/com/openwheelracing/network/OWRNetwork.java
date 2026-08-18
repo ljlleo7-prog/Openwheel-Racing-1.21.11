@@ -90,6 +90,7 @@ public final class OWRNetwork {
         registrar.playToServer(TrackEditorUndoMessage.TYPE, codec(TrackEditorUndoMessage::encode, TrackEditorUndoMessage::decode), TrackEditorUndoMessage::handle);
         registrar.playToServer(RaceDirectorToggleRuleMessage.TYPE, codec(RaceDirectorToggleRuleMessage::encode, RaceDirectorToggleRuleMessage::decode), RaceDirectorToggleRuleMessage::handle);
         registrar.playToServer(RaceDirectorSetMinLapTicksMessage.TYPE, codec(RaceDirectorSetMinLapTicksMessage::encode, RaceDirectorSetMinLapTicksMessage::decode), RaceDirectorSetMinLapTicksMessage::handle);
+        registrar.playToServer(RaceDirectorSetRaceLapLimitMessage.TYPE, codec(RaceDirectorSetRaceLapLimitMessage::encode, RaceDirectorSetRaceLapLimitMessage::decode), RaceDirectorSetRaceLapLimitMessage::handle);
         registrar.playToServer(RaceDirectorSetErsLimitMessage.TYPE, codec(RaceDirectorSetErsLimitMessage::encode, RaceDirectorSetErsLimitMessage::decode), RaceDirectorSetErsLimitMessage::handle);
         registrar.playToServer(RaceDirectorSetGlobalFlagMessage.TYPE, codec(RaceDirectorSetGlobalFlagMessage::encode, RaceDirectorSetGlobalFlagMessage::decode), RaceDirectorSetGlobalFlagMessage::handle);
         registrar.playToServer(RaceDirectorCycleConditionModifierMessage.TYPE, codec(RaceDirectorCycleConditionModifierMessage::encode, RaceDirectorCycleConditionModifierMessage::decode), RaceDirectorCycleConditionModifierMessage::handle);
@@ -1002,6 +1003,8 @@ public final class OWRNetwork {
             buffer.writeLong(snapshot.revision());
             buffer.writeLong(snapshot.serverTick());
             buffer.writeDouble(snapshot.routeLengthMeters());
+            buffer.writeVarInt(snapshot.lapLimit());
+            buffer.writeLong(snapshot.remainingRaceTicks());
             List<RaceTimingRow> rows = snapshot.rows().stream().limit(MAX_ROWS).toList();
             buffer.writeVarInt(rows.size());
             for (RaceTimingRow row : rows) {
@@ -1024,6 +1027,8 @@ public final class OWRNetwork {
             long revision = buffer.readLong();
             long serverTick = buffer.readLong();
             double routeLength = buffer.readDouble();
+            int lapLimit = buffer.readVarInt();
+            long remainingRaceTicks = buffer.readLong();
             int rowCount = boundedCount(buffer.readVarInt(), MAX_ROWS, "live timing rows");
             List<RaceTimingRow> rows = new java.util.ArrayList<>(rowCount);
             for (int index = 0; index < rowCount; index++) {
@@ -1035,7 +1040,7 @@ public final class OWRNetwork {
                 changes.add(decodePositionChange(buffer));
             }
             return new LiveRaceTimingSnapshotMessage(new LiveRaceTimingSnapshot(active, reason, sessionId, sessionName, trackId, routeId,
-                revision, serverTick, routeLength, rows, changes));
+                revision, serverTick, routeLength, rows, changes, lapLimit, remainingRaceTicks));
         }
 
         private static void handle(LiveRaceTimingSnapshotMessage message, IPayloadContext context) {
@@ -1132,6 +1137,7 @@ public final class OWRNetwork {
             buffer.writeBoolean(snapshot.checkpointCheckEnabled());
             buffer.writeBoolean(snapshot.offTrackCheckEnabled());
             buffer.writeInt(snapshot.minimumValidLapTicks());
+            buffer.writeVarInt(snapshot.raceLapLimit());
             buffer.writeInt(snapshot.page());
             buffer.writeInt(snapshot.maxPage());
             buffer.writeInt(snapshot.raceControlRevision());
@@ -1167,6 +1173,7 @@ public final class OWRNetwork {
             boolean checkpointCheckEnabled = buffer.readBoolean();
             boolean offTrackCheckEnabled = buffer.readBoolean();
             int minimumValidLapTicks = buffer.readInt();
+            int raceLapLimit = buffer.readVarInt();
             int page = buffer.readInt();
             int maxPage = buffer.readInt();
             int raceControlRevision = buffer.readInt();
@@ -1198,7 +1205,11 @@ public final class OWRNetwork {
             for (int index = 0; index < carCount; index++) {
                 teamCars.add(TeamCarRow.decode(buffer));
             }
-            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, minimumValidLapTicks, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj, maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier, activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, trackMap, trackMapScanRunning, trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, laps, teamCars));
+            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled,
+                minimumValidLapTicks, raceLapLimit, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj,
+                maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier,
+                activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, trackMap, trackMapScanRunning,
+                trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, laps, teamCars));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {
@@ -1348,6 +1359,34 @@ public final class OWRNetwork {
         }
     }
 
+    public record RaceDirectorSetRaceLapLimitMessage(int laps) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSetRaceLapLimitMessage> TYPE = payloadType("race_director_set_race_lap_limit_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RaceDirectorSetRaceLapLimitMessage message, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(message.laps);
+        }
+
+        private static RaceDirectorSetRaceLapLimitMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorSetRaceLapLimitMessage(buffer.readVarInt());
+        }
+
+        private static void handle(RaceDirectorSetRaceLapLimitMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
+                    return;
+                }
+                OWRRaceControlState.get(player.level()).setRaceLapLimit(message.laps);
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
     public record RaceDirectorSetErsLimitMessage(int limit, int delta) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<RaceDirectorSetErsLimitMessage> TYPE = payloadType("race_director_set_ers_limit_message");
 
@@ -1491,7 +1530,8 @@ public final class OWRNetwork {
                 OWRLapRecords records = OWRLapRecords.get(player.level());
                 records.startNewSession(message.sessionName);
                 if (player.level() instanceof ServerLevel serverLevel) {
-                    LiveRaceTimingService.start(serverLevel, records.getActiveSessionId(), records.getActiveSessionName());
+                    int lapLimit = OWRRaceControlState.get(serverLevel).getRaceLapLimit();
+                    LiveRaceTimingService.start(serverLevel, records.getActiveSessionId(), records.getActiveSessionName(), lapLimit);
                 }
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
                 if (player.level() instanceof ServerLevel serverLevel) {

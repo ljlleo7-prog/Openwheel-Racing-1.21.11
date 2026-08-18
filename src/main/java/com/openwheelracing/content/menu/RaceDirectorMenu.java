@@ -160,6 +160,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             controlState.isCheckpointCheckEnabled(),
             controlState.isOffTrackCheckEnabled(),
             controlState.getMinimumValidLapTicks(),
+            controlState.getRaceLapLimit(),
             page,
             maxPage,
             controlState.getRevision(),

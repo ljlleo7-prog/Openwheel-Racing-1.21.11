@@ -1,7 +1,8 @@
 {
   "variants": {
-    "": {
-      "model": "openwheelracing:block/asphalt_track"
-    }
+    "moisture=dry": {"model":"openwheelracing:block/asphalt_track"},
+    "moisture=damp": {"model":"openwheelracing:block/asphalt_track_damp"},
+    "moisture=wet": {"model":"openwheelracing:block/asphalt_track_wet"},
+    "moisture=soaking": {"model":"openwheelracing:block/asphalt_track_soaking"}
   }
 }

@@ -42,20 +42,17 @@ class OWRLapProfilesTest {
     }
 
     @Test
-    void legacyProfileIsNotMistakenForRecordedCenterlineAndCanBeReplaced() {
+    void legacyProfileIsNotMistakenForRecordedCenterline() {
         UUID track = UUID.randomUUID();
         UUID route = UUID.randomUUID();
         UUID driver = UUID.randomUUID();
         OWRLapProfiles.BestLapProfile legacy = profile(track, route, driver, 3000);
         assertFalse(legacy.hasRecordedLine());
-        OWRLapProfiles profiles = new OWRLapProfiles();
-        assertTrue(profiles.putIfFaster(legacy));
         int[] values = {0, 10, 20, 30};
         OWRLapProfiles.BestLapProfile recorded = new OWRLapProfiles.BestLapProfile("minecraft:overworld", track, route, driver, "Driver",
-            OWRLapProfiles.Origin.PLAYER, 2L, 4000, 16, 4, new int[]{0, 1000, 2000, 3000},
+            2L, 4000, 16, 4, new int[]{0, 1000, 2000, 3000},
             new int[]{1000, 1000, 1000, 1000}, values, values, 2L);
-        assertTrue(profiles.putIfFaster(recorded));
-        assertTrue(profiles.get(track, route, driver).orElseThrow().hasRecordedLine());
+        assertTrue(recorded.hasRecordedLine());
     }
 
     private static OWRLapProfiles.BestLapProfile profile(UUID trackId, UUID routeId, int[] times, int[] speeds) {

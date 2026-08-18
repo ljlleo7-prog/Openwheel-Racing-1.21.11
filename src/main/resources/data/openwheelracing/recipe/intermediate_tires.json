@@ -1,0 +1,5 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": ["openwheelracing:tires", "minecraft:lime_dye"],
+  "result": {"id":"openwheelracing:tires","components":{"openwheelracing:tyre_type":1,"openwheelracing:tyre_compound":3}}
+}

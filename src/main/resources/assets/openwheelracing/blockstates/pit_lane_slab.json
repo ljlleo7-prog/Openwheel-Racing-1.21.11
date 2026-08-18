@@ -1,19 +1,14 @@
-{
-  "variants": {
-    "type=bottom,waterlogged=false": {
-      "model": "openwheelracing:block/pit_lane_slab"
-    },
-    "type=bottom,waterlogged=true": {
-      "model": "openwheelracing:block/pit_lane_slab"
-    },
-    "type=top,waterlogged=false": {
-      "model": "openwheelracing:block/pit_lane_slab_top"
-    },
-    "type=top,waterlogged=true": {
-      "model": "openwheelracing:block/pit_lane_slab_top"
-    },
-    "type=double,waterlogged=false": {
-      "model": "openwheelracing:block/pit_lane"
-    }
-  }
-}
+{"multipart":[
+ {"when":{"type":"bottom","moisture":"dry"},"apply":{"model":"openwheelracing:block/pit_lane_slab"}},
+ {"when":{"type":"top","moisture":"dry"},"apply":{"model":"openwheelracing:block/pit_lane_slab_top"}},
+ {"when":{"type":"double","moisture":"dry"},"apply":{"model":"openwheelracing:block/pit_lane"}},
+ {"when":{"type":"bottom","moisture":"damp"},"apply":{"model":"openwheelracing:block/pit_lane_slab_damp"}},
+ {"when":{"type":"top","moisture":"damp"},"apply":{"model":"openwheelracing:block/pit_lane_slab_top_damp"}},
+ {"when":{"type":"double","moisture":"damp"},"apply":{"model":"openwheelracing:block/pit_lane_damp"}},
+ {"when":{"type":"bottom","moisture":"wet"},"apply":{"model":"openwheelracing:block/pit_lane_slab_wet"}},
+ {"when":{"type":"top","moisture":"wet"},"apply":{"model":"openwheelracing:block/pit_lane_slab_top_wet"}},
+ {"when":{"type":"double","moisture":"wet"},"apply":{"model":"openwheelracing:block/pit_lane_wet"}},
+ {"when":{"type":"bottom","moisture":"soaking"},"apply":{"model":"openwheelracing:block/pit_lane_slab_soaking"}},
+ {"when":{"type":"top","moisture":"soaking"},"apply":{"model":"openwheelracing:block/pit_lane_slab_top_soaking"}},
+ {"when":{"type":"double","moisture":"soaking"},"apply":{"model":"openwheelracing:block/pit_lane_soaking"}}
+]}

@@ -6,6 +6,8 @@ import com.openwheelracing.content.block.CarPartsReplacementWorkstationBlock;
 import com.openwheelracing.content.block.CrudeOilBlock;
 import com.openwheelracing.content.block.DirectionalTrackBlock;
 import com.openwheelracing.content.block.LapMarkerBlock;
+import com.openwheelracing.content.block.WettableTrackBlock;
+import com.openwheelracing.content.block.WettableTrackSlabBlock;
 import com.openwheelracing.content.block.RaceDirectorBlock;
 import com.openwheelracing.content.block.RefineryBlock;
 import com.openwheelracing.content.block.entity.CarWorkstationType;
@@ -63,7 +65,7 @@ public final class OWRBlocks {
     public static final DeferredHolder<Block, Block> ASPHALT_TRACK = registerSimpleBlock("asphalt_track", MapColor.COLOR_BLACK, 2.4f, 6.0f);
     public static final DeferredHolder<Block, Block> ASPHALT_TRACK_SLAB = registerSlabBlock("asphalt_track_slab", MapColor.COLOR_BLACK, 2.4f, 6.0f);
     public static final DeferredHolder<Block, Block> KERB = registerDirectionalBlock("kerb", MapColor.COLOR_RED, 2.0f, 6.0f);
-    public static final DeferredHolder<Block, Block> BARRIER = registerSimpleBlock("barrier", MapColor.METAL, 4.0f, 8.0f);
+    public static final DeferredHolder<Block, Block> BARRIER = registerDrySimpleBlock("barrier", MapColor.METAL, 4.0f, 8.0f);
     public static final DeferredHolder<Block, Block> PIT_LANE = registerSimpleBlock("pit_lane", MapColor.COLOR_GRAY, 2.4f, 6.0f);
     public static final DeferredHolder<Block, Block> PIT_LANE_SLAB = registerSlabBlock("pit_lane_slab", MapColor.COLOR_GRAY, 2.4f, 6.0f);
     public static final DeferredHolder<Block, Block> PIT_STOP_MARK = registerSimpleBlock("pit_stop_mark", MapColor.COLOR_GRAY, 2.4f, 6.0f);
@@ -115,6 +117,15 @@ public final class OWRBlocks {
     }
 
     private static DeferredHolder<Block, Block> registerSimpleBlock(String name, MapColor mapColor, float destroyTime, float explosionResistance) {
+        return BLOCKS.register(name, () -> new WettableTrackBlock(BlockBehaviour.Properties.of()
+            .setId(key(name))
+            .mapColor(mapColor)
+            .strength(destroyTime, explosionResistance)
+            .requiresCorrectToolForDrops())
+        );
+    }
+
+    private static DeferredHolder<Block, Block> registerDrySimpleBlock(String name, MapColor mapColor, float destroyTime, float explosionResistance) {
         return BLOCKS.register(name, () -> new Block(BlockBehaviour.Properties.of()
             .setId(key(name))
             .mapColor(mapColor)
@@ -124,7 +135,7 @@ public final class OWRBlocks {
     }
 
     private static DeferredHolder<Block, Block> registerSlabBlock(String name, MapColor mapColor, float destroyTime, float explosionResistance) {
-        return BLOCKS.register(name, () -> new SlabBlock(BlockBehaviour.Properties.of()
+        return BLOCKS.register(name, () -> new WettableTrackSlabBlock(BlockBehaviour.Properties.of()
             .setId(key(name))
             .mapColor(mapColor)
             .strength(destroyTime, explosionResistance)

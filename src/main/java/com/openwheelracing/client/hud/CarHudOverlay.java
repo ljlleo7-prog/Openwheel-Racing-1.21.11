@@ -479,8 +479,8 @@ public final class CarHudOverlay {
         graphics.fill(px, py, px + panelWidth, py + 1, 0xAA55718B);
         String session = fit(font, LiveRaceTimingClient.snapshot().sessionName(), 112);
         graphics.drawString(font, session, px + 6, py + 3, 0xFFE8E8E8, false);
-        String raceLabel = Component.translatable("hud.openwheelracing.race").getString();
-        graphics.drawString(font, raceLabel, px + panelWidth - 6 - font.width(raceLabel), py + 3, 0xFF7EE787, false);
+        String raceProgress = raceProgressLabel(allRows);
+        graphics.drawString(font, raceProgress, px + panelWidth - 6 - font.width(raceProgress), py + 3, 0xFF7EE787, false);
         if (rows.isEmpty()) {
             graphics.drawString(font, Component.translatable("hud.openwheelracing.race.no_cars").getString(), px + 6, py + headerHeight + 1, 0xFF777777, false);
             return;
@@ -498,6 +498,22 @@ public final class CarHudOverlay {
             graphics.drawString(font, marker + name, px + 20, y, color, false);
             graphics.drawString(font, gap, px + panelWidth - 6 - font.width(gap), y, color, false);
         }
+    }
+
+    private static String raceProgressLabel(List<RaceTimingRow> rows) {
+        var snapshot = LiveRaceTimingClient.snapshot();
+        if (snapshot.lapLimit() > 0) {
+            int leaderLap = rows.isEmpty() ? 1 : rows.getFirst().completedLaps() + 1;
+            return "LAP " + Math.min(leaderLap, snapshot.lapLimit()) + "/" + snapshot.lapLimit();
+        }
+        if (snapshot.remainingRaceTicks() >= 0L) {
+            long totalSeconds = (snapshot.remainingRaceTicks() + 19L) / 20L;
+            long minutes = totalSeconds / 60L;
+            long seconds = totalSeconds % 60L;
+            return String.format("%d:%02d", minutes, seconds);
+        }
+        int leaderLap = rows.isEmpty() ? 1 : rows.getFirst().completedLaps() + 1;
+        return "LAP " + leaderLap;
     }
 
     private static String formatRaceGap(RaceGap gap) {

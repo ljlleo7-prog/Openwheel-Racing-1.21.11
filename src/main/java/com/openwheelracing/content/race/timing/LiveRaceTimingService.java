@@ -32,6 +32,10 @@ public final class LiveRaceTimingService {
     }
 
     public static StartResult start(ServerLevel level, long sessionId, String sessionName) {
+        return start(level, sessionId, sessionName, 0);
+    }
+
+    public static StartResult start(ServerLevel level, long sessionId, String sessionName, int lapLimit) {
         Optional<TrackDefinition> activeTrack = TrackDefinitionsData.get(level).activeTrack(level.dimension().identifier().toString());
         if (activeTrack.isEmpty()) {
             return new StartResult(false, "No active track in this dimension");
@@ -41,7 +45,8 @@ public final class LiveRaceTimingService {
         if (route.isEmpty() || route.get().nodes().size() < 2 || !(route.get().length() > 0.0)) {
             return new StartResult(false, "Active track has no valid survey route");
         }
-        RuntimeState runtime = new RuntimeState(sessionId, sessionName, activeTrack.get().trackId(), route.get().routeId(), surveys.revision(), route.get().toModel());
+        RuntimeState runtime = new RuntimeState(sessionId, sessionName, activeTrack.get().trackId(), route.get().routeId(),
+            surveys.revision(), route.get().toModel(), lapLimit);
         RUNTIMES.put(level, runtime);
         RECOVERY_CHECKED.add(level);
         runtime.tick(level);
@@ -121,7 +126,7 @@ public final class LiveRaceTimingService {
             return;
         }
         RuntimeState runtime = new RuntimeState(checkpoint.sessionId(), checkpoint.sessionName(), checkpoint.trackId(), checkpoint.routeId(),
-            surveys.revision(), route.get().toModel());
+            surveys.revision(), route.get().toModel(), checkpoint.lapLimit());
         runtime.active = false;
         runtime.suspensionReason = "SERVER_RECOVERY";
         List<LiveRaceClassificationEngine.RestoredProgress> restored = checkpoint.participants().stream().map(saved ->
@@ -160,6 +165,7 @@ public final class LiveRaceTimingService {
         private final UUID routeId;
         private final int surveyRevision;
         private final SurveyRouteModel route;
+        private final int lapLimit;
         private final LiveRaceClassificationEngine engine = new LiveRaceClassificationEngine();
         private final Map<RaceParticipantKey, LocalizedParticipant> localized = new HashMap<>();
         private boolean active = true;
@@ -170,12 +176,17 @@ public final class LiveRaceTimingService {
         private boolean forceBroadcast;
 
         private RuntimeState(long sessionId, String sessionName, UUID trackId, UUID routeId, int surveyRevision, SurveyRouteModel route) {
+            this(sessionId, sessionName, trackId, routeId, surveyRevision, route, 0);
+        }
+
+        private RuntimeState(long sessionId, String sessionName, UUID trackId, UUID routeId, int surveyRevision, SurveyRouteModel route, int lapLimit) {
             this.sessionId = sessionId;
             this.sessionName = sessionName == null ? "" : sessionName;
             this.trackId = trackId;
             this.routeId = routeId;
             this.surveyRevision = surveyRevision;
             this.route = route;
+            this.lapLimit = Math.max(0, lapLimit);
             engine.reset(route.length());
         }
 
@@ -259,14 +270,15 @@ public final class LiveRaceTimingService {
                 new LiveRaceTimingData.SavedParticipant(row.participant().id(), row.participant().kind().ordinal(), row.displayName(),
                     row.completedLaps(), row.routeDistanceMeters(), row.position())).toList();
             LiveRaceTimingData.get(level).update(new LiveRaceTimingData.Checkpoint(true, snapshot.active(), snapshot.suspensionReason(),
-                sessionId, sessionName, trackId, routeId, surveyRevision, snapshot.revision(), saved));
+                sessionId, sessionName, trackId, routeId, surveyRevision, lapLimit, snapshot.revision(), saved));
         }
 
         private LiveRaceTimingSnapshot decoratedSnapshot(long serverTick) {
             List<RaceTimingRow> rows = engineSnapshot == null ? List.of() : engineSnapshot.rows();
             List<RacePositionChange> changes = engineSnapshot == null ? List.of() : engineSnapshot.recentPositionChanges();
             long revision = engineSnapshot == null ? engine.revision() : engineSnapshot.revision();
-            return new LiveRaceTimingSnapshot(active, suspensionReason, sessionId, sessionName, trackId, routeId, revision, serverTick, route.length(), rows, changes);
+            return new LiveRaceTimingSnapshot(active, suspensionReason, sessionId, sessionName, trackId, routeId, revision,
+                serverTick, route.length(), rows, changes, lapLimit, -1L);
         }
     }
 

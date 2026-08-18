@@ -1,8 +1,6 @@
-{
-  "variants": {
-    "facing=north": { "model": "openwheelracing:block/kerb" },
-    "facing=east": { "model": "openwheelracing:block/kerb", "y": 90 },
-    "facing=south": { "model": "openwheelracing:block/kerb", "y": 180 },
-    "facing=west": { "model": "openwheelracing:block/kerb", "y": 270 }
-  }
-}
+{"multipart":[
+ {"when":{"facing":"north"},"apply":{"model":"openwheelracing:block/kerb"}},
+ {"when":{"facing":"east"},"apply":{"model":"openwheelracing:block/kerb","y":90}},
+ {"when":{"facing":"south"},"apply":{"model":"openwheelracing:block/kerb","y":180}},
+ {"when":{"facing":"west"},"apply":{"model":"openwheelracing:block/kerb","y":270}}
+]}

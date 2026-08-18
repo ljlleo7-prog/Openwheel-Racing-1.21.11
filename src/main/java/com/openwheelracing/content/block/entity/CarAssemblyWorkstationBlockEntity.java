@@ -229,6 +229,7 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
             int compound = TyreItem.getCompound(tyreStack);
             int remainingPercent = TyreItem.getRemainingPercent(tyreStack);
             result.set(OWRDataComponents.CAR_SETUP.get(), new PrototypeCarSetup(setup.power(), compound, setup.aero(), setup.gearing()));
+            result.set(OWRDataComponents.TYRE_TYPE.get(), TyreItem.getType(tyreStack).id());
             result.set(OWRDataComponents.TYRE_WEAR.get(), 100 - remainingPercent);
             int livery = PrototypeCarItem.getLivery(result);
             CarLiveryColors colors = PrototypeCarItem.getLiveryColors(result);

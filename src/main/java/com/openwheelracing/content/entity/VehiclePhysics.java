@@ -12,22 +12,22 @@ public final class VehiclePhysics {
     public static final double PIT_LANE_GRIP = ASPHALT_GRIP;
     public static final double PIT_LANE_DRAG = ASPHALT_DRAG;
 
-    public static final double TYRE_AMBIENT_TEMPERATURE_C = 28.0;
+    public static final double TYRE_AMBIENT_TEMPERATURE_C = 33.0;
     public static final double TYRE_HEAT_CAPACITY_J_PER_C = 43_500.0;
     public static final double TYRE_SURFACE_HEAT_CAPACITY_J_PER_C = 20_000.0;
     public static final double TYRE_CARCASS_HEAT_CAPACITY_J_PER_C = TYRE_HEAT_CAPACITY_J_PER_C - TYRE_SURFACE_HEAT_CAPACITY_J_PER_C;
     public static final double TYRE_ROLLING_RESISTANCE_HEAT_FRACTION = 0.80;
     public static final double TYRE_SLIP_HEAT_FRACTION = 1.43;
-    public static final double TYRE_STATIONARY_COOLING_PER_SECOND = 0.00225;
-    public static final double TYRE_WIND_COOLING_PER_MPS_SECOND = 0.0000195;
-    public static final double TYRE_HOT_COOLING_PER_SECOND = 0.00250;
-    public static final double TYRE_HOT_COOLING_SCALE_C = 150.0;
+    public static final double TYRE_STATIONARY_COOLING_PER_SECOND = 0.00240;
+    public static final double TYRE_WIND_COOLING_PER_MPS_SECOND = 0.0000210;
+    public static final double TYRE_HOT_COOLING_PER_SECOND = 0.000030;
+    public static final double TYRE_HOT_COOLING_START_C = 110.0;
     public static final double TYRE_G_FORCE_HEAT_FACTOR = 0.61;
     public static final double TYRE_SURFACE_FRICTION_HEAT_FRACTION = 0.72;
     public static final double TYRE_CARCASS_FRICTION_HEAT_FRACTION = 1.0 - TYRE_SURFACE_FRICTION_HEAT_FRACTION;
     public static final double TYRE_BRAKE_TO_CARCASS_HEAT_FRACTION = 0.90;
     public static final double TYRE_CARCASS_TRANSFER_WATTS_PER_C = 600.0;
-    public static final double TYRE_CARCASS_COOLING_FRACTION = 0.16;
+    public static final double TYRE_CARCASS_COOLING_FRACTION = 0.45;
     public static final double TYRE_EXPOSURE_ATTACK_PER_SECOND = 1.8;
     public static final double TYRE_EXPOSURE_RELEASE_PER_SECOND = 2.8;
     public static final double TYRE_EXPOSURE_TRANSFER_FLOOR = 0.05;
@@ -141,8 +141,8 @@ public final class VehiclePhysics {
     }
 
     public static double tyreHotCoolingRate(double temperatureC) {
-        double normalizedHeat = Math.max(0.0, temperatureC - TYRE_AMBIENT_TEMPERATURE_C) / TYRE_HOT_COOLING_SCALE_C;
-        return TYRE_HOT_COOLING_PER_SECOND * Math.pow(normalizedHeat, 8.0);
+        double excessHeat = Math.max(0.0, temperatureC - TYRE_HOT_COOLING_START_C);
+        return TYRE_HOT_COOLING_PER_SECOND * excessHeat * excessHeat;
     }
 
     public static double nextTyreTemperatureC(double temperatureC, double heatPowerWatts, double compoundHeatGain, double longitudinalG, double lateralG, double speedMetersPerSecond, double dtSeconds) {
@@ -150,9 +150,57 @@ public final class VehiclePhysics {
         return Math.max(TYRE_AMBIENT_TEMPERATURE_C, next);
     }
 
+    public static double tyreOptimalTemperatureC(int compound) {
+        return switch (compound) {
+            case 0 -> 115.0;
+            case 1 -> 112.5;
+            case 2 -> 110.0;
+            case 3 -> 107.5;
+            default -> 105.0;
+        };
+    }
+
+    public static double tyreTemperatureGripMultiplier(int compound, double temperatureC) {
+        double offset = temperatureC - tyreOptimalTemperatureC(compound);
+        if (offset <= -55.0) return interpolate(offset, -65.0, -55.0, 0.52, 0.55);
+        if (offset <= -45.0) return interpolate(offset, -55.0, -45.0, 0.55, 0.62);
+        if (offset <= -35.0) return interpolate(offset, -45.0, -35.0, 0.62, 0.72);
+        if (offset <= -25.0) return interpolate(offset, -35.0, -25.0, 0.72, 0.84);
+        if (offset <= -15.0) return interpolate(offset, -25.0, -15.0, 0.84, 0.94);
+        if (offset <= -10.0) return interpolate(offset, -15.0, -10.0, 0.94, 0.98);
+        if (offset <= -5.0) return interpolate(offset, -10.0, -5.0, 0.98, 1.00);
+        if (offset <= 5.0) return 1.00;
+        if (offset <= 10.0) return interpolate(offset, 5.0, 10.0, 1.00, 0.985);
+        if (offset <= 15.0) return interpolate(offset, 10.0, 15.0, 0.985, 0.965);
+        if (offset <= 20.0) return interpolate(offset, 15.0, 20.0, 0.965, 0.94);
+        if (offset <= 25.0) return interpolate(offset, 20.0, 25.0, 0.94, 0.86);
+        if (offset <= 30.0) return interpolate(offset, 25.0, 30.0, 0.86, 0.80);
+        if (offset <= 35.0) return interpolate(offset, 30.0, 35.0, 0.80, 0.70);
+        if (offset <= 40.0) return interpolate(offset, 35.0, 40.0, 0.70, 0.65);
+        return interpolate(offset, 40.0, 45.0, 0.65, 0.60);
+    }
+
+    public static double tyreDirectionChangeSeverity(double previousLongitudinal, double previousLateral,
+            double currentLongitudinal, double currentLateral) {
+        double cross = previousLongitudinal * currentLateral - previousLateral * currentLongitudinal;
+        double dot = previousLongitudinal * currentLongitudinal + previousLateral * currentLateral;
+        double rotation = cross * cross * 4.0;
+        double loadedReversal = Math.max(0.0, -dot) * 2.0;
+        return clamp(rotation + loadedReversal, 0.0, 1.0);
+    }
+
     public static TyreThermalState nextTyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure,
             double frictionHeatPowerWatts, double brakeHeatPowerWatts, double compoundHeatGain, double speedMetersPerSecond,
             double surfaceCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier,
+            double exposureDemand, double slipAngleRadians, double dtSeconds, boolean groundContact) {
+        return nextTyreThermalState(surfaceTemperatureC, carcassTemperatureC, slipExposure, frictionHeatPowerWatts,
+            brakeHeatPowerWatts, compoundHeatGain, speedMetersPerSecond, surfaceCoolingMultiplier, 1.0,
+            stationaryCoolingMultiplier, windCoolingMultiplier, exposureDemand, slipAngleRadians, dtSeconds, groundContact);
+    }
+
+    public static TyreThermalState nextTyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure,
+            double frictionHeatPowerWatts, double brakeHeatPowerWatts, double compoundHeatGain, double speedMetersPerSecond,
+            double surfaceCoolingMultiplier, double carcassCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier,
             double exposureDemand, double slipAngleRadians, double dtSeconds, boolean groundContact) {
         double dt = Math.max(0.0, dtSeconds);
         double abuseTarget = clamp(Math.max(0.0, exposureDemand - 0.82) * 3.0 + Math.abs(slipAngleRadians) / 0.16, 0.0, 1.0);
@@ -175,7 +223,8 @@ public final class VehiclePhysics {
             * Math.max(0.0, surfaceCoolingMultiplier)
             * Math.max(0.0, stationaryCoolingMultiplier)
             * Math.max(0.0, windCoolingMultiplier);
-        double carcassCooling = tyreCoolingDeltaC(carcassTemperatureC, speedMetersPerSecond, dt) * TYRE_CARCASS_COOLING_FRACTION;
+        double carcassCooling = tyreCoolingDeltaC(carcassTemperatureC, speedMetersPerSecond, dt)
+            * TYRE_CARCASS_COOLING_FRACTION * Math.max(0.0, carcassCoolingMultiplier);
         double surface = clamp(surfaceTemperatureC + surfacePower * dt / TYRE_SURFACE_HEAT_CAPACITY_J_PER_C - surfaceCooling, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
         double carcass = clamp(carcassTemperatureC + carcassPower * dt / TYRE_CARCASS_HEAT_CAPACITY_J_PER_C - carcassCooling, TYRE_AMBIENT_TEMPERATURE_C, 145.0);
         return new TyreThermalState(surface, carcass, nextExposure);
@@ -184,6 +233,11 @@ public final class VehiclePhysics {
     private static double moveToward(double value, double target, double amount) {
         if (value < target) return Math.min(target, value + amount);
         return Math.max(target, value - amount);
+    }
+
+    private static double interpolate(double value, double from, double to, double fromValue, double toValue) {
+        double t = clamp((value - from) / Math.max(1.0E-9, to - from), 0.0, 1.0);
+        return fromValue + (toValue - fromValue) * t;
     }
 
     private static double clamp(double value, double min, double max) {

@@ -29,6 +29,7 @@ public final class LiveRaceTimingData extends SavedData {
         UUID_CODEC.optionalFieldOf("track_id", new UUID(0L, 0L)).forGetter(data -> data.trackId),
         UUID_CODEC.optionalFieldOf("route_id", new UUID(0L, 0L)).forGetter(data -> data.routeId),
         Codec.INT.optionalFieldOf("survey_revision", 0).forGetter(data -> data.surveyRevision),
+        Codec.INT.optionalFieldOf("lap_limit", 0).forGetter(data -> data.lapLimit),
         Codec.LONG.optionalFieldOf("snapshot_revision", 0L).forGetter(data -> data.snapshotRevision),
         PARTICIPANT_CODEC.listOf().optionalFieldOf("participants", List.of()).forGetter(data -> data.participants)
     ).apply(instance, LiveRaceTimingData::new));
@@ -47,6 +48,7 @@ public final class LiveRaceTimingData extends SavedData {
     private UUID trackId = new UUID(0L, 0L);
     private UUID routeId = new UUID(0L, 0L);
     private int surveyRevision;
+    private int lapLimit;
     private long snapshotRevision;
     private List<SavedParticipant> participants = List.of();
 
@@ -54,7 +56,7 @@ public final class LiveRaceTimingData extends SavedData {
     }
 
     private LiveRaceTimingData(boolean configured, boolean active, String suspensionReason, long sessionId, String sessionName,
-                               UUID trackId, UUID routeId, int surveyRevision, long snapshotRevision, List<SavedParticipant> participants) {
+                               UUID trackId, UUID routeId, int surveyRevision, int lapLimit, long snapshotRevision, List<SavedParticipant> participants) {
         this.configured = configured;
         this.active = false;
         this.suspensionReason = configured ? "SERVER_RECOVERY" : suspensionReason;
@@ -63,6 +65,7 @@ public final class LiveRaceTimingData extends SavedData {
         this.trackId = trackId;
         this.routeId = routeId;
         this.surveyRevision = surveyRevision;
+        this.lapLimit = Math.max(0, lapLimit);
         this.snapshotRevision = snapshotRevision;
         this.participants = List.copyOf(participants);
     }
@@ -72,7 +75,8 @@ public final class LiveRaceTimingData extends SavedData {
     }
 
     public Checkpoint checkpoint() {
-        return new Checkpoint(configured, active, suspensionReason, sessionId, sessionName, trackId, routeId, surveyRevision, snapshotRevision, participants);
+        return new Checkpoint(configured, active, suspensionReason, sessionId, sessionName, trackId, routeId, surveyRevision,
+            lapLimit, snapshotRevision, participants);
     }
 
     public void update(Checkpoint checkpoint) {
@@ -84,17 +88,20 @@ public final class LiveRaceTimingData extends SavedData {
         trackId = checkpoint.trackId();
         routeId = checkpoint.routeId();
         surveyRevision = checkpoint.surveyRevision();
+        lapLimit = checkpoint.lapLimit();
         snapshotRevision = checkpoint.snapshotRevision();
         participants = List.copyOf(checkpoint.participants());
         setDirty();
     }
 
     public record Checkpoint(boolean configured, boolean active, String suspensionReason, long sessionId, String sessionName,
-                             UUID trackId, UUID routeId, int surveyRevision, long snapshotRevision, List<SavedParticipant> participants) {
+                             UUID trackId, UUID routeId, int surveyRevision, int lapLimit, long snapshotRevision,
+                             List<SavedParticipant> participants) {
         public Checkpoint {
             suspensionReason = suspensionReason == null ? "" : suspensionReason;
             sessionName = sessionName == null ? "" : sessionName;
             participants = List.copyOf(participants);
+            lapLimit = Math.max(0, lapLimit);
         }
     }
 

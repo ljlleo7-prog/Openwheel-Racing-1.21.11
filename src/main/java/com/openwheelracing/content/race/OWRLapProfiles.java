@@ -130,6 +130,13 @@ public final class OWRLapProfiles extends SavedData {
                 new int[0], new int[0], createdGameTime);
         }
 
+        public BestLapProfile(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, long lapRecordId,
+                              int lapMillis, double routeLength, double spacing, int[] timeMillis, int[] speedCmps,
+                              int[] lateralOffsetCm, int[] headingResidualMilliRad, long createdGameTime) {
+            this(dimensionId, trackId, routeId, driverId, driverName, Origin.PLAYER, lapRecordId, lapMillis, routeLength, spacing,
+                timeMillis, speedCmps, lateralOffsetCm, headingResidualMilliRad, createdGameTime);
+        }
+
         private static BestLapProfile create(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, Origin origin, long lapRecordId,
                                              int lapMillis, double routeLength, double spacing, List<Integer> times, List<Integer> speeds,
                                              List<Integer> lateralOffsets, List<Integer> headingResiduals, long createdGameTime) {

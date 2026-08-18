@@ -116,6 +116,7 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Integer> LIVERY_ACCENT_2 = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<String> LIVERY_TEXTURE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<Integer> TYRE_COMPOUND = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> TYRE_TYPE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> DRS_ACTIVE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Integer> ERS_MODE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Float> ERS_ENERGY = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
@@ -324,6 +325,7 @@ public class OpenwheelCarEntity extends Entity {
     private static final double TYRE_WEAR_BASE_RATE = 0.000030;
     private static final double TYRE_WEAR_SLIP_RATE = 0.000185;
     private static final double TYRE_WEAR_EXCESS_RATE = 0.000620;
+    private static final double TYRE_WEAR_DIRECTION_CHANGE_RATE = 0.000300;
     private static final double TYRE_GRAIN_BUILD_RATE = 0.0048;
     private static final double TYRE_GRAIN_CLEAN_RATE = 0.0014;
     private static final double TYRE_PATCH_BUILD_RATE = 0.0065;
@@ -463,6 +465,15 @@ public class OpenwheelCarEntity extends Entity {
     private double tyreSlipExposureFr;
     private double tyreSlipExposureRl;
     private double tyreSlipExposureRr;
+    private float previousTyreForceLongFl;
+    private float previousTyreForceLatFl;
+    private float previousTyreForceLongFr;
+    private float previousTyreForceLatFr;
+    private float previousTyreForceLongRl;
+    private float previousTyreForceLatRl;
+    private float previousTyreForceLongRr;
+    private float previousTyreForceLatRr;
+    private boolean previousTyreForcesInitialized;
     private float lastSyncedTyreTemperatureFlC = (float) TYRE_INITIAL_TEMPERATURE_C;
     private float lastSyncedTyreTemperatureFrC = (float) TYRE_INITIAL_TEMPERATURE_C;
     private float lastSyncedTyreTemperatureRlC = (float) TYRE_INITIAL_TEMPERATURE_C;
@@ -700,6 +711,7 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(LIVERY_ACCENT_2, CarLiveryColors.DEFAULT.accent2());
         builder.define(LIVERY_TEXTURE, "");
         builder.define(TYRE_COMPOUND, PrototypeCarSetup.DEFAULT.grip());
+        builder.define(TYRE_TYPE, com.openwheelracing.content.car.TyreType.SLICK.id());
         builder.define(DRS_ACTIVE, false);
         builder.define(ERS_MODE, ERS_MODE_BALANCED);
         builder.define(ERS_ENERGY, (float) ERS_CAPACITY_DEFAULT_J);
@@ -736,6 +748,16 @@ public class OpenwheelCarEntity extends Entity {
     public void applyTyreCompound(int compound) {
         setSetup(new PrototypeCarSetup(setup.power(), compound, setup.aero(), setup.gearing()));
         resetTyreThermalState();
+    }
+
+    public void applyTyres(int compound, com.openwheelracing.content.car.TyreType type) {
+        com.openwheelracing.content.car.TyreType normalized = type == null ? com.openwheelracing.content.car.TyreType.SLICK : type;
+        applyTyreCompound(normalized == com.openwheelracing.content.car.TyreType.SLICK ? compound : PrototypeCarSetup.DEFAULT.grip());
+        entityData.set(TYRE_TYPE, normalized.id());
+    }
+
+    public com.openwheelracing.content.car.TyreType getTyreType() {
+        return com.openwheelracing.content.car.TyreType.fromId(entityData.get(TYRE_TYPE));
     }
 
     public int getTyreCompound() {
@@ -1022,11 +1044,13 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public float getTyreWorkingTemperatureMinCelsius() {
-        return (float) tyreWorkingTemperatureMin(getTyreCompound());
+        return getTyreType() == com.openwheelracing.content.car.TyreType.SLICK ? (float) tyreWorkingTemperatureMin(getTyreCompound())
+            : getTyreType() == com.openwheelracing.content.car.TyreType.INTERMEDIATE ? 70.0f : 40.0f;
     }
 
     public float getTyreWorkingTemperatureMaxCelsius() {
-        return (float) tyreWorkingTemperatureMax(getTyreCompound());
+        return getTyreType() == com.openwheelracing.content.car.TyreType.SLICK ? (float) tyreWorkingTemperatureMax(getTyreCompound())
+            : getTyreType() == com.openwheelracing.content.car.TyreType.INTERMEDIATE ? 80.0f : 50.0f;
     }
 
     @Override
@@ -1414,21 +1438,23 @@ public class OpenwheelCarEntity extends Entity {
         }
 
         int newCompound = TyreItem.getCompound(heldStack);
+        com.openwheelracing.content.car.TyreType newType = TyreItem.getType(heldStack);
         int newRemainingPercent = TyreItem.getRemainingPercent(heldStack);
         int oldCompound = getTyreCompound();
+        com.openwheelracing.content.car.TyreType oldType = getTyreType();
         int oldRemainingPercent = TyreItem.normalizeRemainingPercent(100.0 - getTyreWearPercent());
 
-        applyTyreCompound(newCompound);
+        applyTyres(newCompound, newType);
         setTyreWearPercentAndSync(100.0f - newRemainingPercent);
         player.getCooldowns().addCooldown(heldStack, 10);
         if (!player.getAbilities().instabuild) {
             heldStack.shrink(1);
         }
-        ItemStack oldTyres = TyreItem.create(oldCompound, 1, oldRemainingPercent);
+        ItemStack oldTyres = TyreItem.create(oldCompound, oldType, 1, oldRemainingPercent);
         if (!player.addItem(oldTyres)) {
             player.drop(oldTyres, false);
         }
-        messagePitCrew(player, Component.literal("Tyres changed to C" + (newCompound + 1) + " (" + newRemainingPercent + "%)"));
+        messagePitCrew(player, Component.literal("Tyres changed to " + (newType == com.openwheelracing.content.car.TyreType.SLICK ? "C" + (newCompound + 1) : newType.displayName()) + " (" + newRemainingPercent + "%)"));
         return true;
     }
 
@@ -1769,6 +1795,7 @@ public class OpenwheelCarEntity extends Entity {
 
     protected ItemStack createPickupItem() {
         ItemStack item = PrototypeCarItem.create(setup, getComponentDamage(), getTyreWearPercent(), getLivery(), getErsMode(), Math.round(getErsEnergyPercent()));
+        item.set(com.openwheelracing.registry.OWRDataComponents.TYRE_TYPE.get(), getTyreType().id());
         PrototypeCarItem.setLiveryColors(item, getLiveryColors());
         PrototypeCarItem.setLiveryTexture(item, getLiveryTexture());
         return item;
@@ -1824,6 +1851,7 @@ public class OpenwheelCarEntity extends Entity {
             input.getIntOr("Aero", PrototypeCarSetup.DEFAULT.aero()),
             input.getIntOr("Gearing", PrototypeCarSetup.DEFAULT.gearing())
         ));
+        entityData.set(TYRE_TYPE, com.openwheelracing.content.car.TyreType.fromId(input.getIntOr("TyreType", 0)).id());
         entityData.set(GEAR, clampGear(input.getIntOr("Gear", NEUTRAL_GEAR)));
         entityData.set(RPM, input.getIntOr("Rpm", 900));
         clutchReleaseTicks = input.getIntOr("ClutchReleaseTicks", 0);
@@ -1935,6 +1963,7 @@ public class OpenwheelCarEntity extends Entity {
         output.putInt("Grip", setup.grip());
         output.putInt("Aero", setup.aero());
         output.putInt("Gearing", setup.gearing());
+        output.putInt("TyreType", getTyreType().id());
         output.putInt("Gear", getGear());
         output.putInt("Rpm", getRpm());
         output.putInt("ClutchReleaseTicks", clutchReleaseTicks);
@@ -2134,6 +2163,11 @@ public class OpenwheelCarEntity extends Entity {
                 || block == Blocks.RED_SAND
                 || block == Blocks.SUSPICIOUS_SAND) return SurfaceProfile.SAND;
         return SurfaceProfile.DIRT;
+    }
+
+    private com.openwheelracing.content.block.TrackMoisture getMoistureAt(Vec3 pos) {
+        BlockPos basePos = BlockPos.containing(pos.x, getBoundingBox().minY - 0.05, pos.z);
+        return com.openwheelracing.content.block.WettableTrack.moisture(level().getBlockState(basePos));
     }
 
     private boolean isWaterAt(Vec3 pos) {
@@ -2826,10 +2860,28 @@ public class OpenwheelCarEntity extends Entity {
 
         // Wheel surface grip is position/heading-dependent only — identical every substep.
         // Query once here rather than 4x inside the loop.
-        double flSurfaceGrip = getSurfaceAt(position().add(right.scale(-halfTrackWidth)).add(forward.scale(frontAxleDistance))).grip;
-        double frSurfaceGrip = getSurfaceAt(position().add(right.scale(halfTrackWidth)).add(forward.scale(frontAxleDistance))).grip;
-        double rlSurfaceGrip = getSurfaceAt(position().add(right.scale(-halfTrackWidth)).add(forward.scale(-rearAxleDistance))).grip;
-        double rrSurfaceGrip = getSurfaceAt(position().add(right.scale(halfTrackWidth)).add(forward.scale(-rearAxleDistance))).grip;
+        Vec3 flContact = position().add(right.scale(-halfTrackWidth)).add(forward.scale(frontAxleDistance));
+        Vec3 frContact = position().add(right.scale(halfTrackWidth)).add(forward.scale(frontAxleDistance));
+        Vec3 rlContact = position().add(right.scale(-halfTrackWidth)).add(forward.scale(-rearAxleDistance));
+        Vec3 rrContact = position().add(right.scale(halfTrackWidth)).add(forward.scale(-rearAxleDistance));
+        com.openwheelracing.content.block.TrackMoisture flMoisture = getMoistureAt(flContact);
+        com.openwheelracing.content.block.TrackMoisture frMoisture = getMoistureAt(frContact);
+        com.openwheelracing.content.block.TrackMoisture rlMoisture = getMoistureAt(rlContact);
+        com.openwheelracing.content.block.TrackMoisture rrMoisture = getMoistureAt(rrContact);
+        double wetSpeedKmh = speedMetersPerSecond * 3.6;
+        double hydroLockup = brake * (isAbsEnabled() ? 0.25 : 1.0);
+        double flHydro = WetTyrePhysics.hydroplaningSeverity(getTyreType(), flMoisture, wetSpeedKmh, hydroLockup);
+        double frHydro = WetTyrePhysics.hydroplaningSeverity(getTyreType(), frMoisture, wetSpeedKmh, hydroLockup);
+        double rlHydro = WetTyrePhysics.hydroplaningSeverity(getTyreType(), rlMoisture, wetSpeedKmh, hydroLockup);
+        double rrHydro = WetTyrePhysics.hydroplaningSeverity(getTyreType(), rrMoisture, wetSpeedKmh, hydroLockup);
+        double flSurfaceGrip = getSurfaceAt(flContact).grip * WetTyrePhysics.wetGrip(getTyreType(), flMoisture);
+        double frSurfaceGrip = getSurfaceAt(frContact).grip * WetTyrePhysics.wetGrip(getTyreType(), frMoisture);
+        double rlSurfaceGrip = getSurfaceAt(rlContact).grip * WetTyrePhysics.wetGrip(getTyreType(), rlMoisture);
+        double rrSurfaceGrip = getSurfaceAt(rrContact).grip * WetTyrePhysics.wetGrip(getTyreType(), rrMoisture);
+        double wetResistance = (WetTyrePhysics.waterResistance(getTyreType(), flMoisture)
+            + WetTyrePhysics.waterResistance(getTyreType(), frMoisture)
+            + WetTyrePhysics.waterResistance(getTyreType(), rlMoisture)
+            + WetTyrePhysics.waterResistance(getTyreType(), rrMoisture)) * 0.25;
 
         for (int substep = 0; substep < PHYSICS_SUBSTEPS; substep++) {
             double subSpeedSquared = velocityLong * velocityLong + velocityLat * velocityLat;
@@ -2893,7 +2945,7 @@ public class OpenwheelCarEntity extends Entity {
             double subBrakeDirection = Math.abs(velocityLong) > 0.1 ? Math.signum(velocityLong) : 0.0;
             double tyreWearDragFactor = 1.0 + averageTyreWear * 0.0022;
             double subRollingForce = ROLLING_RESISTANCE * tyreWearDragFactor * componentDragFactor * (carMassKg * GRAVITY + subDownforce);
-            double subSinkDragForce = surface.sinkDrag * (carMassKg * GRAVITY + subDownforce);
+            double subSinkDragForce = (surface.sinkDrag + wetResistance) * (carMassKg * GRAVITY + subDownforce);
             double subPreliminaryAx = (subDriveForceRequest - subBrakeDirection * subBrakeForceEstimate - Math.signum(velocityLong) * (subAeroDrag + subRollingForce + subSinkDragForce)) / carMassKg;
             double subLateralAccelerationEstimate = substepLateralAccelerationEstimate;
             double subLongitudinalLoadTransfer = carMassKg * subPreliminaryAx * CG_HEIGHT / wheelbase;
@@ -2912,18 +2964,18 @@ public class OpenwheelCarEntity extends Entity {
             double frTyreWearGrip = Math.max(0.45, frTyreWearFactor);
             double rlTyreWearGrip = Math.max(0.45, rlTyreWearFactor);
             double rrTyreWearGrip = Math.max(0.45, rrTyreWearFactor);
-            double flTyreMuCoefficient = blendedTyreMuCoefficient(getTyreCompound(), tyreTemperatureFlC, tyreCarcassTemperatureFlC);
-            double frTyreMuCoefficient = blendedTyreMuCoefficient(getTyreCompound(), tyreTemperatureFrC, tyreCarcassTemperatureFrC);
-            double rlTyreMuCoefficient = blendedTyreMuCoefficient(getTyreCompound(), tyreTemperatureRlC, tyreCarcassTemperatureRlC);
-            double rrTyreMuCoefficient = blendedTyreMuCoefficient(getTyreCompound(), tyreTemperatureRrC, tyreCarcassTemperatureRrC);
-            double flSurfaceMuLat = asphaltMuLateral * flSurfaceGrip * flTyreMuCoefficient;
-            double frSurfaceMuLat = asphaltMuLateral * frSurfaceGrip * frTyreMuCoefficient;
-            double rlSurfaceMuLat = asphaltMuLateral * rlSurfaceGrip * rlTyreMuCoefficient;
-            double rrSurfaceMuLat = asphaltMuLateral * rrSurfaceGrip * rrTyreMuCoefficient;
-            double flSurfaceMuLong = asphaltMuLongitudinal * flSurfaceGrip * flTyreMuCoefficient;
-            double frSurfaceMuLong = asphaltMuLongitudinal * frSurfaceGrip * frTyreMuCoefficient;
-            double rlSurfaceMuLong = asphaltMuLongitudinal * rlSurfaceGrip * rlTyreMuCoefficient;
-            double rrSurfaceMuLong = asphaltMuLongitudinal * rrSurfaceGrip * rrTyreMuCoefficient;
+            double flTyreMuCoefficient = tyreMuAt(tyreTemperatureFlC, tyreCarcassTemperatureFlC);
+            double frTyreMuCoefficient = tyreMuAt(tyreTemperatureFrC, tyreCarcassTemperatureFrC);
+            double rlTyreMuCoefficient = tyreMuAt(tyreTemperatureRlC, tyreCarcassTemperatureRlC);
+            double rrTyreMuCoefficient = tyreMuAt(tyreTemperatureRrC, tyreCarcassTemperatureRrC);
+            double flSurfaceMuLat = asphaltMuLateral * flSurfaceGrip * flTyreMuCoefficient * WetTyrePhysics.lateralHydroGrip(flHydro);
+            double frSurfaceMuLat = asphaltMuLateral * frSurfaceGrip * frTyreMuCoefficient * WetTyrePhysics.lateralHydroGrip(frHydro);
+            double rlSurfaceMuLat = asphaltMuLateral * rlSurfaceGrip * rlTyreMuCoefficient * WetTyrePhysics.lateralHydroGrip(rlHydro);
+            double rrSurfaceMuLat = asphaltMuLateral * rrSurfaceGrip * rrTyreMuCoefficient * WetTyrePhysics.lateralHydroGrip(rrHydro);
+            double flSurfaceMuLong = asphaltMuLongitudinal * flSurfaceGrip * flTyreMuCoefficient * WetTyrePhysics.longitudinalHydroGrip(flHydro);
+            double frSurfaceMuLong = asphaltMuLongitudinal * frSurfaceGrip * frTyreMuCoefficient * WetTyrePhysics.longitudinalHydroGrip(frHydro);
+            double rlSurfaceMuLong = asphaltMuLongitudinal * rlSurfaceGrip * rlTyreMuCoefficient * WetTyrePhysics.longitudinalHydroGrip(rlHydro);
+            double rrSurfaceMuLong = asphaltMuLongitudinal * rrSurfaceGrip * rrTyreMuCoefficient * WetTyrePhysics.longitudinalHydroGrip(rrHydro);
             double flMuLat = loadSensitiveMu(flSurfaceMuLat * flTyreWearGrip * flGripDamageFactor, flNormal, subReferenceFrontWheelLoad);
             double frMuLat = loadSensitiveMu(frSurfaceMuLat * frTyreWearGrip * frGripDamageFactor, frNormal, subReferenceFrontWheelLoad);
             double rlMuLat = loadSensitiveMu(rlSurfaceMuLat * rlTyreWearGrip * rlGripDamageFactor, rlNormal, subReferenceRearWheelLoad);
@@ -3176,6 +3228,7 @@ public class OpenwheelCarEntity extends Entity {
             tickTyreCondition(
                 speedMetersPerSecond,
                 surface,
+                flMoisture, frMoisture, rlMoisture, rrMoisture,
                 steeringWear,
                 brake,
                 brakeFrontBias,
@@ -3184,6 +3237,7 @@ public class OpenwheelCarEntity extends Entity {
                 new WheelWearSample(finalRlDemand, finalRlSlipAngle, finalRlLongForce, finalRlLatForce, finalRlLoad),
                 new WheelWearSample(finalRrDemand, finalRrSlipAngle, finalRrLongForce, finalRrLatForce, finalRrLoad)
             );
+            evaporateWheelContactWater(flContact, frContact, rlContact, rrContact);
         }
 
         forward = Vec3.directionFromRotation(0.0f, getYRot());
@@ -3255,6 +3309,31 @@ public class OpenwheelCarEntity extends Entity {
         harvestErsFromBraking(horizontalSpeed, newSpeed, brake, surface);
         entityData.set(TYRE_SLIP, (float) Math.max(0.0, Math.min(1.0, tyreSlip)));
         previousHorizontalSpeed = horizontalSpeed;
+    }
+
+    private void evaporateWheelContactWater(Vec3 fl, Vec3 fr, Vec3 rl, Vec3 rr) {
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        Vec3[] contacts = {fl, fr, rl, rr};
+        double[] temperatures = {tyreTemperatureFlC, tyreTemperatureFrC, tyreTemperatureRlC, tyreTemperatureRrC};
+        long first = Long.MIN_VALUE;
+        long second = Long.MIN_VALUE;
+        int accepted = 0;
+        for (int i = 0; i < contacts.length && accepted < 2; i++) {
+            BlockPos pos = BlockPos.containing(contacts[i].x, getBoundingBox().minY - 0.05, contacts[i].z);
+            long packed = pos.asLong();
+            if (packed == first || packed == second) continue;
+            if (first == Long.MIN_VALUE) first = packed; else second = packed;
+            com.openwheelracing.content.block.TrackMoisture moisture = com.openwheelracing.content.block.WettableTrack.moisture(serverLevel.getBlockState(pos));
+            if (moisture == com.openwheelracing.content.block.TrackMoisture.DRY) continue;
+            double baseChance = switch (getTyreType()) {
+                case SLICK -> moisture == com.openwheelracing.content.block.TrackMoisture.DAMP ? 0.003 : moisture == com.openwheelracing.content.block.TrackMoisture.WET ? 0.005 : 0.003;
+                case INTERMEDIATE -> moisture == com.openwheelracing.content.block.TrackMoisture.DAMP ? 0.005 : moisture == com.openwheelracing.content.block.TrackMoisture.WET ? 0.012 : 0.008;
+                case WET -> moisture == com.openwheelracing.content.block.TrackMoisture.DAMP ? 0.007 : moisture == com.openwheelracing.content.block.TrackMoisture.WET ? 0.018 : 0.015;
+            };
+            double boiling = smoothstep((temperatures[i] - 95.0) / 10.0);
+            if (serverLevel.random.nextDouble() < baseChance + (1.0 - baseChance) * boiling
+                    && com.openwheelracing.content.block.TrackDryingBudget.dryOneStage(serverLevel, pos)) accepted++;
+        }
     }
 
     private void logMovementWarning(String reason, Vec3 before, Vec3 requested, Vec3 actual, double throttle, double brake, double steering, SurfaceProfile surface) {
@@ -4574,7 +4653,10 @@ public class OpenwheelCarEntity extends Entity {
         }
     }
 
-    private void tickTyreCondition(double speedMetersPerSecond, SurfaceProfile surface, double steeringWear, double brakeInput, double brakeFrontBias,
+    private void tickTyreCondition(double speedMetersPerSecond, SurfaceProfile surface,
+            com.openwheelracing.content.block.TrackMoisture flMoisture, com.openwheelracing.content.block.TrackMoisture frMoisture,
+            com.openwheelracing.content.block.TrackMoisture rlMoisture, com.openwheelracing.content.block.TrackMoisture rrMoisture,
+            double steeringWear, double brakeInput, double brakeFrontBias,
             WheelWearSample fl, WheelWearSample fr, WheelWearSample rl, WheelWearSample rr) {
         if (!usesTyreCondition()) {
             resetTyreThermalState();
@@ -4588,16 +4670,16 @@ public class OpenwheelCarEntity extends Entity {
         double workLoad = (wheelWorkLoad(fl, speedMetersPerSecond) + wheelWorkLoad(fr, speedMetersPerSecond) + wheelWorkLoad(rl, speedMetersPerSecond) + wheelWorkLoad(rr, speedMetersPerSecond)) * 0.25;
         double abuse = demand * 0.30 + excess * 1.70 + slipAngleLoad * 0.85 + workLoad * 0.20;
         double compoundRollingHeatGain = tyreRollingHeatGainMultiplier(getTyreCompound());
-        double compoundNearSaturationHeatGain = tyreNearSaturationHeatGainMultiplier(getTyreCompound());
+        double compoundNearSaturationHeatGain = tyreNearSaturationHeatGainMultiplier(getTyreCompound()) * getTyreType().deformationHeatMultiplier();
         double compoundCoolingGain = tyreCoolingMultiplier(getTyreCompound());
         double frontBrakeHeatPowerPerTyre = VehiclePhysics.tyreBrakeHeatPowerPerTyre(brakeInput, TYRE_BRAKE_HEAT_POWER_PER_INPUT, brakeFrontBias);
         double rearBrakeHeatPowerPerTyre = VehiclePhysics.tyreBrakeHeatPowerPerTyre(brakeInput, TYRE_BRAKE_HEAT_POWER_PER_INPUT, 1.0 - brakeFrontBias);
-        double workingMin = tyreWorkingTemperatureMin(getTyreCompound());
-        double workingMax = tyreWorkingTemperatureMax(getTyreCompound());
-        WheelThermalUpdate flThermal = nextWheelTyreThermalState(tyreTemperatureFlC, tyreCarcassTemperatureFlC, tyreSlipExposureFl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fl);
-        WheelThermalUpdate frThermal = nextWheelTyreThermalState(tyreTemperatureFrC, tyreCarcassTemperatureFrC, tyreSlipExposureFr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain, FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fr);
-        WheelThermalUpdate rlThermal = nextWheelTyreThermalState(tyreTemperatureRlC, tyreCarcassTemperatureRlC, tyreSlipExposureRl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rl);
-        WheelThermalUpdate rrThermal = nextWheelTyreThermalState(tyreTemperatureRrC, tyreCarcassTemperatureRrC, tyreSlipExposureRr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain, REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rr);
+        double workingMin = getTyreType() == com.openwheelracing.content.car.TyreType.SLICK ? tyreWorkingTemperatureMin(getTyreCompound()) : getTyreType() == com.openwheelracing.content.car.TyreType.INTERMEDIATE ? 70.0 : 40.0;
+        double workingMax = getTyreType() == com.openwheelracing.content.car.TyreType.SLICK ? tyreWorkingTemperatureMax(getTyreCompound()) : getTyreType() == com.openwheelracing.content.car.TyreType.INTERMEDIATE ? 80.0 : 50.0;
+        WheelThermalUpdate flThermal = nextWheelTyreThermalState(tyreTemperatureFlC, tyreCarcassTemperatureFlC, tyreSlipExposureFl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain * WetTyrePhysics.coolingMultiplier(flMoisture, tyreTemperatureFlC), WetTyrePhysics.carcassCoolingMultiplier(flMoisture, tyreTemperatureFlC), FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fl);
+        WheelThermalUpdate frThermal = nextWheelTyreThermalState(tyreTemperatureFrC, tyreCarcassTemperatureFrC, tyreSlipExposureFr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, frontBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain * WetTyrePhysics.coolingMultiplier(frMoisture, tyreTemperatureFrC), WetTyrePhysics.carcassCoolingMultiplier(frMoisture, tyreTemperatureFrC), FRONT_TYRE_STATIONARY_COOLING_MULTIPLIER, FRONT_TYRE_WIND_COOLING_MULTIPLIER, fr);
+        WheelThermalUpdate rlThermal = nextWheelTyreThermalState(tyreTemperatureRlC, tyreCarcassTemperatureRlC, tyreSlipExposureRl, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain * WetTyrePhysics.coolingMultiplier(rlMoisture, tyreTemperatureRlC), WetTyrePhysics.carcassCoolingMultiplier(rlMoisture, tyreTemperatureRlC), REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rl);
+        WheelThermalUpdate rrThermal = nextWheelTyreThermalState(tyreTemperatureRrC, tyreCarcassTemperatureRrC, tyreSlipExposureRr, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain, rearBrakeHeatPowerPerTyre, surface.coolingMult * compoundCoolingGain * WetTyrePhysics.coolingMultiplier(rrMoisture, tyreTemperatureRrC), WetTyrePhysics.carcassCoolingMultiplier(rrMoisture, tyreTemperatureRrC), REAR_TYRE_STATIONARY_COOLING_MULTIPLIER, REAR_TYRE_WIND_COOLING_MULTIPLIER, rr);
         tyreTemperatureFlC = flThermal.surfaceTemperatureC();
         tyreTemperatureFrC = frThermal.surfaceTemperatureC();
         tyreTemperatureRlC = rlThermal.surfaceTemperatureC();
@@ -4625,6 +4707,18 @@ public class OpenwheelCarEntity extends Entity {
         tyrePatching = clamp(tyrePatching + (dirtySurface * (0.25 + speedFactor) + excess * 0.30) * TYRE_PATCH_BUILD_RATE - cleanRunning * TYRE_PATCH_CLEAN_RATE, 0.0, 1.0);
 
         if (speedMetersPerSecond > 1.0) {
+            double flLong = normalizedTyreForce(fl.longitudinalForce, fl.normalLoad);
+            double flLat = normalizedTyreForce(fl.lateralForce, fl.normalLoad);
+            double frLong = normalizedTyreForce(fr.longitudinalForce, fr.normalLoad);
+            double frLat = normalizedTyreForce(fr.lateralForce, fr.normalLoad);
+            double rlLong = normalizedTyreForce(rl.longitudinalForce, rl.normalLoad);
+            double rlLat = normalizedTyreForce(rl.lateralForce, rl.normalLoad);
+            double rrLong = normalizedTyreForce(rr.longitudinalForce, rr.normalLoad);
+            double rrLat = normalizedTyreForce(rr.lateralForce, rr.normalLoad);
+            double flDirectionChange = previousTyreForcesInitialized ? VehiclePhysics.tyreDirectionChangeSeverity(previousTyreForceLongFl, previousTyreForceLatFl, flLong, flLat) : 0.0;
+            double frDirectionChange = previousTyreForcesInitialized ? VehiclePhysics.tyreDirectionChangeSeverity(previousTyreForceLongFr, previousTyreForceLatFr, frLong, frLat) : 0.0;
+            double rlDirectionChange = previousTyreForcesInitialized ? VehiclePhysics.tyreDirectionChangeSeverity(previousTyreForceLongRl, previousTyreForceLatRl, rlLong, rlLat) : 0.0;
+            double rrDirectionChange = previousTyreForcesInitialized ? VehiclePhysics.tyreDirectionChangeSeverity(previousTyreForceLongRr, previousTyreForceLatRr, rrLong, rrLat) : 0.0;
             double wearScale = speedMetersPerSecond
                 * setup.tyreWearMultiplier()
                 * vehicleProfile().tyreWearMultiplier()
@@ -4632,11 +4726,22 @@ public class OpenwheelCarEntity extends Entity {
                 * (1.0 + tyreGraining * 0.95 + tyrePatching * 0.45)
                 * raceControlTyreWearModifier();
             addWheelTyreWear(
-                wheelTyreWear(fl, steeringWear * 0.10, tyreCarcassTemperatureFlC, getTyreCompound()) * wearScale,
-                wheelTyreWear(fr, steeringWear * 0.10, tyreCarcassTemperatureFrC, getTyreCompound()) * wearScale,
-                wheelTyreWear(rl, 0.0, tyreCarcassTemperatureRlC, getTyreCompound()) * wearScale,
-                wheelTyreWear(rr, 0.0, tyreCarcassTemperatureRrC, getTyreCompound()) * wearScale
+                wheelTyreWear(fl, steeringWear * 0.10, flDirectionChange, tyreCarcassTemperatureFlC, getTyreCompound()) * wearScale,
+                wheelTyreWear(fr, steeringWear * 0.10, frDirectionChange, tyreCarcassTemperatureFrC, getTyreCompound()) * wearScale,
+                wheelTyreWear(rl, 0.0, rlDirectionChange, tyreCarcassTemperatureRlC, getTyreCompound()) * wearScale,
+                wheelTyreWear(rr, 0.0, rrDirectionChange, tyreCarcassTemperatureRrC, getTyreCompound()) * wearScale
             );
+            previousTyreForceLongFl = (float) flLong;
+            previousTyreForceLatFl = (float) flLat;
+            previousTyreForceLongFr = (float) frLong;
+            previousTyreForceLatFr = (float) frLat;
+            previousTyreForceLongRl = (float) rlLong;
+            previousTyreForceLatRl = (float) rlLat;
+            previousTyreForceLongRr = (float) rrLong;
+            previousTyreForceLatRr = (float) rrLat;
+            previousTyreForcesInitialized = true;
+        } else {
+            previousTyreForcesInitialized = false;
         }
         syncTyreTemperature();
     }
@@ -4651,7 +4756,7 @@ public class OpenwheelCarEntity extends Entity {
         return load * clamp(speedMetersPerSecond / 45.0, 0.0, 1.25);
     }
 
-    private WheelThermalUpdate nextWheelTyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure, double speedMetersPerSecond, double compoundRollingHeatGain, double compoundNearSaturationHeatGain, double brakeHeatPower, double surfaceCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier, WheelWearSample sample) {
+    private WheelThermalUpdate nextWheelTyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure, double speedMetersPerSecond, double compoundRollingHeatGain, double compoundNearSaturationHeatGain, double brakeHeatPower, double surfaceCoolingMultiplier, double carcassCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier, WheelWearSample sample) {
         double frictionHeatPower = wheelFrictionHeatPower(sample, speedMetersPerSecond, compoundRollingHeatGain, compoundNearSaturationHeatGain);
         VehiclePhysics.TyreThermalState state = VehiclePhysics.nextTyreThermalState(
             surfaceTemperatureC,
@@ -4662,6 +4767,7 @@ public class OpenwheelCarEntity extends Entity {
             1.0,
             speedMetersPerSecond,
             surfaceCoolingMultiplier,
+            carcassCoolingMultiplier,
             stationaryCoolingMultiplier,
             windCoolingMultiplier,
             sample.demand,
@@ -4724,6 +4830,7 @@ public class OpenwheelCarEntity extends Entity {
         tyreSlipExposureFr = 0.0;
         tyreSlipExposureRl = 0.0;
         tyreSlipExposureRr = 0.0;
+        previousTyreForcesInitialized = false;
         resetSyncedTyreTemperatureCache();
         tyreGraining = 0.0;
         tyrePatching = 0.0;
@@ -4789,43 +4896,32 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public static double tyreWorkingTemperatureMin(int compound) {
-        return switch (compound) {
-            case 0 -> 102.0;
-            case 1 -> 99.0;
-            case 2 -> 95.0;
-            case 3 -> 88.0;
-            default -> 82.0;
-        };
+        return VehiclePhysics.tyreOptimalTemperatureC(compound) - 5.0;
     }
 
     public static double tyreWorkingTemperatureMax(int compound) {
-        return switch (compound) {
-            case 0 -> 116.0;
-            case 1 -> 113.0;
-            case 2 -> 110.0;
-            case 3 -> 104.0;
-            default -> 99.0;
-        };
+        return VehiclePhysics.tyreOptimalTemperatureC(compound) + 5.0;
     }
 
     public static double tyreTemperatureMuMultiplier(int compound, double temperatureC) {
-        double workingMin = tyreWorkingTemperatureMin(compound);
-        double workingMax = tyreWorkingTemperatureMax(compound);
-        double coldSeverity = clamp((workingMin - temperatureC) / 24.0, 0.0, 1.0);
-        double hotSeverity = clamp((temperatureC - workingMax) / 22.0, 0.0, 1.0);
-        double warmup = 1.0 - coldSeverity * coldSeverity * 0.34;
-        double overheating = 1.0 - hotSeverity * hotSeverity * 0.26;
-        return clamp(warmup * overheating, 0.62, 1.03);
+        return VehiclePhysics.tyreTemperatureGripMultiplier(compound, temperatureC);
     }
 
     private static double blendedTyreMuCoefficient(int compound, double surfaceTemperatureC, double carcassTemperatureC) {
-        return 0.82 * tyreTemperatureMuMultiplier(compound, surfaceTemperatureC)
-            + 0.18 * tyreTemperatureMuMultiplier(compound, carcassTemperatureC);
+        return 0.25 * tyreTemperatureMuMultiplier(compound, surfaceTemperatureC)
+            + 0.75 * tyreTemperatureMuMultiplier(compound, carcassTemperatureC);
+    }
+
+    private double tyreMuAt(double surfaceTemperatureC, double carcassTemperatureC) {
+        if (getTyreType() == com.openwheelracing.content.car.TyreType.SLICK) {
+            return blendedTyreMuCoefficient(getTyreCompound(), surfaceTemperatureC, carcassTemperatureC);
+        }
+        return setup.tyreMuCoefficient() * (0.25 * WetTyrePhysics.temperatureGrip(getTyreType(), surfaceTemperatureC)
+            + 0.75 * WetTyrePhysics.temperatureGrip(getTyreType(), carcassTemperatureC));
     }
 
     public static double tyreTemperatureWearMultiplier(int compound, double temperatureC) {
-        double workingMax = tyreWorkingTemperatureMax(compound);
-        double hotSeverity = clamp((temperatureC - workingMax) / 22.0, 0.0, 1.0);
+        double hotSeverity = clamp((temperatureC - 125.0) / 20.0, 0.0, 1.0);
         return 1.0 + hotSeverity * 1.15;
     }
 
@@ -4859,13 +4955,19 @@ public class OpenwheelCarEntity extends Entity {
         };
     }
 
-    private static double wheelTyreWear(WheelWearSample sample, double steeringWear, double tyreTemperatureC, int compound) {
+    private static double normalizedTyreForce(double force, double normalLoad) {
+        return clamp(force / Math.max(1.0, normalLoad * ASPHALT_MU_LONGITUDINAL), -1.0, 1.0);
+    }
+
+    private double wheelTyreWear(WheelWearSample sample, double steeringWear, double directionChange, double tyreTemperatureC, int compound) {
         double wearLoad = wheelSlipAngleLoad(sample) + steeringWear;
         double excess = Math.max(0.0, sample.demand - 1.0);
         return (TYRE_WEAR_BASE_RATE * (0.25 + sample.demand)
             + TYRE_WEAR_SLIP_RATE * wearLoad
-            + TYRE_WEAR_EXCESS_RATE * excess)
-            * tyreTemperatureWearMultiplier(compound, tyreTemperatureC);
+            + TYRE_WEAR_EXCESS_RATE * excess
+            + TYRE_WEAR_DIRECTION_CHANGE_RATE * directionChange)
+            * tyreTemperatureWearMultiplier(compound, tyreTemperatureC)
+            * WetTyrePhysics.temperatureWear(getTyreType(), tyreTemperatureC);
     }
 
     private void addWheelTyreWear(double flWear, double frWear, double rlWear, double rrWear) {

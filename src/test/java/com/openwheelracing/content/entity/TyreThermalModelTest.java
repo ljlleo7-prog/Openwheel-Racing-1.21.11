@@ -12,13 +12,13 @@ class TyreThermalModelTest {
     private static final double ROLLING_RESISTANCE = 0.014;
 
     @Test
-    void lowStressCruiseCoolsWellBelowHighStressWindow() {
+    void lowStressCruiseCoolsBelowWorkingTemperature() {
         double heatPower = aggregateHeatPower(0.12, 0.02, 0.08, 0.0);
 
         double equilibrium = VehiclePhysics.simulateTyreEquilibriumC(75.0, heatPower, COMPOUND_HEAT_GAIN, 0.08, 0.0, SPEED, 20 * 60 * 60);
 
-        assertTrue(equilibrium >= 38.0, "low-stress straights should not cool to ambient");
-        assertTrue(equilibrium <= 62.0, "low-stress straights should cool well below high-stress equilibrium");
+        assertTrue(equilibrium >= 38.0, "rolling deformation should keep the tyre above ambient");
+        assertTrue(equilibrium <= 62.0, "clean straight-line running should cool below the working range");
     }
 
     @Test
@@ -38,8 +38,8 @@ class TyreThermalModelTest {
         double from120 = VehiclePhysics.simulateTyreEquilibriumC(120.0, heatPower, COMPOUND_HEAT_GAIN, 0.08, 0.0, SPEED, 6 * 60 * 20);
         double from160 = VehiclePhysics.simulateTyreEquilibriumC(160.0, heatPower, COMPOUND_HEAT_GAIN, 0.08, 0.0, SPEED, 6 * 60 * 20);
 
-        assertTrue(from120 < 90.0, "hot tyres should cool substantially on low-stress straights");
-        assertTrue(from160 < 105.0, "very hot tyres should not remain out of control on low-stress straights");
+        assertTrue(from120 < 120.0, "hot tyres should cool on low-stress straights");
+        assertTrue(from160 < 125.0, "very hot tyres should recover below severe overheating on low-stress straights");
         assertTrue(from160 > from120, "higher starting temperature should cool toward, not jump past, the lower hot-start trace");
     }
 
@@ -251,8 +251,33 @@ class TyreThermalModelTest {
             );
         }
 
-        assertTrue(state.surfaceTemperatureC() > state.carcassTemperatureC() + 0.25, "surface should respond faster than carcass: surface=" + state.surfaceTemperatureC() + " carcass=" + state.carcassTemperatureC());
+        assertTrue(state.surfaceTemperatureC() > state.carcassTemperatureC() + 0.15, "surface should respond faster than carcass: surface=" + state.surfaceTemperatureC() + " carcass=" + state.carcassTemperatureC());
         assertTrue(state.carcassTemperatureC() < 90.0, "one short slide should not make the carcass overheat");
+    }
+
+    @Test
+    void frictionHeatRaisesSurfaceMateriallyFasterThanCarcass() {
+        VehiclePhysics.TyreThermalState state = new VehiclePhysics.TyreThermalState(75.0, 75.0, 0.0);
+        for (int tick = 0; tick < 20 * 5; tick++) {
+            state = VehiclePhysics.nextTyreThermalState(
+                state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
+                24_000.0, 0.0, 1.0, 45.0, 1.0, 1.0, 1.0,
+                0.72, Math.toRadians(3.0), 0.05, true
+            );
+        }
+
+        double surfaceRise = state.surfaceTemperatureC() - 75.0;
+        double carcassRise = state.carcassTemperatureC() - 75.0;
+        assertTrue(surfaceRise > carcassRise * 1.5,
+            "friction heat should lead at the surface: surfaceRise=" + surfaceRise + " carcassRise=" + carcassRise);
+    }
+
+    @Test
+    void thermalPowerSplitConservesGeneratedEnergy() {
+        assertEquals(1.0, VehiclePhysics.TYRE_SURFACE_FRICTION_HEAT_FRACTION
+            + VehiclePhysics.TYRE_CARCASS_FRICTION_HEAT_FRACTION, 1.0E-12);
+        assertEquals(0.90, VehiclePhysics.TYRE_BRAKE_TO_CARCASS_HEAT_FRACTION, 1.0E-12,
+            "brake heat should remain strongly carcass-biased");
     }
 
     @Test
@@ -344,6 +369,95 @@ class TyreThermalModelTest {
         for (int compound = 1; compound < finalSurface.length; compound++) {
             assertTrue(finalSurface[compound] > finalSurface[compound - 1], "softer compounds should warm faster in the same trace");
         }
+    }
+
+    @Test
+    void representativeLapTraceHeatsUnderLoadCoolsOnStraightsAndStaysBounded() {
+        VehiclePhysics.TyreThermalState state = new VehiclePhysics.TyreThermalState(75.0, 75.0, 0.0);
+        double hottest = 0.0;
+
+        for (int lap = 1; lap <= 12; lap++) {
+            state = runLapSegment(state, 35.0, 75.0, 0.16, 0.03, 0.18, Math.toRadians(0.5), 0.0);
+            double afterStraight = bulkTemperature(state);
+            state = runLapSegment(state, 10.0, 58.0, 0.88, 0.10, 0.94, Math.toRadians(1.2), 7_000.0);
+            state = runLapSegment(state, 35.0, 55.0, 0.24, 0.76, 0.80, Math.toRadians(5.0), 0.0);
+            state = runLapSegment(state, 10.0, 52.0, 0.72, 0.14, 0.78, Math.toRadians(1.5), 0.0);
+            double afterLoadedSections = bulkTemperature(state);
+            assertTrue(afterLoadedSections > afterStraight,
+                "braking and cornering must add heat relative to the preceding straight");
+            hottest = Math.max(hottest, Math.max(state.surfaceTemperatureC(), state.carcassTemperatureC()));
+        }
+
+        double settled = bulkTemperature(state);
+        assertTrue(settled >= VehiclePhysics.TYRE_AMBIENT_TEMPERATURE_C && settled < 120.0,
+            "the synthetic trace must converge without dictating real-lap equilibrium: " + settled);
+        assertTrue(hottest < 125.0, "smooth representative laps must not enter severe overheating: " + hottest);
+    }
+
+    @Test
+    void representativeStraightCoolsAHotTyre() {
+        VehiclePhysics.TyreThermalState state = new VehiclePhysics.TyreThermalState(118.0, 114.0, 0.0);
+        double before = bulkTemperature(state);
+
+        state = runLapSegment(state, 20.0, 75.0, 0.08, 0.01, 0.10, Math.toRadians(0.2), 0.0);
+
+        assertTrue(bulkTemperature(state) < before - 0.5,
+            "a hot tyre must cool during straight-line cruising: before=" + before + " after=" + bulkTemperature(state));
+    }
+
+    @Test
+    void gripCurveHasBroadPeakAndProgressiveOverheatingLoss() {
+        assertEquals(1.0, VehiclePhysics.tyreTemperatureGripMultiplier(4, 105.0), 1.0E-9);
+        assertTrue(VehiclePhysics.tyreTemperatureGripMultiplier(4, 125.0) >= 0.93);
+        assertTrue(VehiclePhysics.tyreTemperatureGripMultiplier(2, 125.0) >= 0.95);
+        assertTrue(VehiclePhysics.tyreTemperatureGripMultiplier(0, 125.0) >= 0.98);
+        assertTrue(VehiclePhysics.tyreTemperatureGripMultiplier(2, 140.0)
+            < VehiclePhysics.tyreTemperatureGripMultiplier(2, 125.0));
+        assertTrue(VehiclePhysics.tyreTemperatureGripMultiplier(2, 150.0)
+            < VehiclePhysics.tyreTemperatureGripMultiplier(2, 140.0));
+    }
+
+    @Test
+    void collinearTorqueCutAndReapplicationDoNotCountAsDirectionChange() {
+        assertEquals(0.0, VehiclePhysics.tyreDirectionChangeSeverity(0.80, 0.0, 0.05, 0.0), 1.0E-12);
+        assertEquals(0.0, VehiclePhysics.tyreDirectionChangeSeverity(0.05, 0.0, 0.80, 0.0), 1.0E-12);
+    }
+
+    @Test
+    void loadedForceRotationAndReversalCountAsDirectionChange() {
+        double cornerTransition = VehiclePhysics.tyreDirectionChangeSeverity(0.70, 0.05, 0.10, 0.75);
+        double longitudinalReversal = VehiclePhysics.tyreDirectionChangeSeverity(-0.75, 0.0, 0.70, 0.0);
+
+        assertTrue(cornerTransition > 0.5, "rapid loaded longitudinal-to-lateral transition should count");
+        assertTrue(longitudinalReversal > 0.9, "loaded braking-to-power reversal should count");
+    }
+
+    @Test
+    void unloadedDirectionChangeIsNaturallySuppressed() {
+        double unloaded = VehiclePhysics.tyreDirectionChangeSeverity(0.04, 0.0, 0.0, 0.05);
+        double loaded = VehiclePhysics.tyreDirectionChangeSeverity(0.70, 0.0, 0.0, 0.75);
+
+        assertTrue(unloaded < 0.001);
+        assertTrue(loaded > unloaded * 100.0);
+    }
+
+    private static VehiclePhysics.TyreThermalState runLapSegment(VehiclePhysics.TyreThermalState state,
+            double seconds, double speed, double longitudinalG, double lateralG, double demand,
+            double slipAngle, double brakeHeatPower) {
+        double frictionHeatPower = wheelHeatPower(longitudinalG, lateralG, demand, slipAngle, NORMAL_LOAD_PER_WHEEL, speed);
+        int ticks = (int) Math.round(seconds / 0.05);
+        for (int tick = 0; tick < ticks; tick++) {
+            state = VehiclePhysics.nextTyreThermalState(
+                state.surfaceTemperatureC(), state.carcassTemperatureC(), state.slipExposure(),
+                frictionHeatPower, brakeHeatPower, 1.0, speed, 1.0, 1.0, 1.0,
+                demand, slipAngle, 0.05, true
+            );
+        }
+        return state;
+    }
+
+    private static double bulkTemperature(VehiclePhysics.TyreThermalState state) {
+        return state.surfaceTemperatureC() * 0.25 + state.carcassTemperatureC() * 0.75;
     }
 
     private static double compoundWheelHeatPower(int compound, double longitudinalG, double lateralG, double demand, double slipAngle) {

@@ -754,6 +754,14 @@ public final class BasicAiFleetManager {
     }
 
     public static void prepareAiCarDefaults(OpenwheelCarEntity car) {
+        net.minecraft.core.BlockPos surfacePos = net.minecraft.core.BlockPos.containing(car.getX(), car.getBoundingBox().minY - 0.05, car.getZ());
+        com.openwheelracing.content.block.TrackMoisture moisture = com.openwheelracing.content.block.WettableTrack.moisture(car.level().getBlockState(surfacePos));
+        com.openwheelracing.content.car.TyreType tyreType = switch (moisture) {
+            case DRY -> com.openwheelracing.content.car.TyreType.SLICK;
+            case DAMP -> com.openwheelracing.content.car.TyreType.INTERMEDIATE;
+            case WET, SOAKING -> com.openwheelracing.content.car.TyreType.WET;
+        };
+        car.applyTyres(car.getTyreCompound(), tyreType);
         car.setAbsEnabled(true);
         car.setTractionControlEnabled(true);
         car.setDrsActive(false);

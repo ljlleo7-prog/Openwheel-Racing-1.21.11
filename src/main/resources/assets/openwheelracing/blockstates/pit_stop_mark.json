@@ -1,7 +1,8 @@
 {
   "variants": {
-    "": {
-      "model": "openwheelracing:block/pit_stop_mark"
-    }
+    "moisture=dry": {"model":"openwheelracing:block/pit_stop_mark"},
+    "moisture=damp": {"model":"openwheelracing:block/pit_stop_mark"},
+    "moisture=wet": {"model":"openwheelracing:block/pit_stop_mark"},
+    "moisture=soaking": {"model":"openwheelracing:block/pit_stop_mark"}
   }
 }

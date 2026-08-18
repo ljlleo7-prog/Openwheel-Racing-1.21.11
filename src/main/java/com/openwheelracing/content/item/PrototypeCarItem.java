@@ -5,6 +5,7 @@ import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.PrototypeCarSetup;
+import com.openwheelracing.content.car.TyreType;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.registry.OWRDataComponents;
 import com.openwheelracing.registry.OWREntities;
@@ -92,6 +93,11 @@ public class PrototypeCarItem extends Item {
         return tyreWear == null ? 0 : tyreWear;
     }
 
+    public static TyreType getTyreType(ItemStack stack) {
+        Integer type = stack.get(OWRDataComponents.TYRE_TYPE.get());
+        return type == null ? TyreType.SLICK : TyreType.fromId(type);
+    }
+
     public static int getErsMode(ItemStack stack) {
         Integer mode = stack.get(OWRDataComponents.ERS_MODE.get());
         return mode == null ? OpenwheelCarEntity.ERS_MODE_BALANCED : Math.max(OpenwheelCarEntity.ERS_MODE_HARVEST, Math.min(OpenwheelCarEntity.ERS_MODE_ATTACK, mode));
@@ -145,6 +151,7 @@ public class PrototypeCarItem extends Item {
             car.setPos(spawnPos.x, spawnPos.y, spawnPos.z);
             car.setYRot(player.getYRot());
             car.setSetup(getSetup(stack));
+            car.applyTyres(getSetup(stack).grip(), getTyreType(stack));
             car.setComponentDamage(getComponentDamage(stack));
             car.setTyreWearPercent(getTyreWear(stack));
             car.setLivery(getLivery(stack));

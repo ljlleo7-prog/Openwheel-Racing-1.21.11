@@ -8,6 +8,8 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
 public class OWRRaceControlState extends SavedData {
+    public static final int DEFAULT_RACE_LAP_LIMIT = 12;
+    public static final int MAX_RACE_LAP_LIMIT = 999;
     private static final double[] CONDITION_MODIFIERS = {0.0, 0.5, 1.0, 2.0, 5.0, 10.0};
 
     private static final Codec<OWRRaceControlState> CODEC = RecordCodecBuilder.create(instance -> instance.group(
@@ -21,7 +23,8 @@ public class OWRRaceControlState extends SavedData {
         Codec.INT.optionalFieldOf("max_harvest_negative_kw", 350).forGetter(OWRRaceControlState::getMaxHarvestNegativeKw),
         Codec.INT.optionalFieldOf("global_flag", RaceFlagMode.DEFAULT.ordinal()).forGetter(state -> state.getGlobalFlag().ordinal()),
         Codec.DOUBLE.optionalFieldOf("car_damage_modifier", 1.0).forGetter(OWRRaceControlState::getCarDamageModifier),
-        Codec.DOUBLE.optionalFieldOf("tyre_wear_modifier", 1.0).forGetter(OWRRaceControlState::getTyreWearModifier)
+        Codec.DOUBLE.optionalFieldOf("tyre_wear_modifier", 1.0).forGetter(OWRRaceControlState::getTyreWearModifier),
+        Codec.INT.optionalFieldOf("race_lap_limit", DEFAULT_RACE_LAP_LIMIT).forGetter(OWRRaceControlState::getRaceLapLimit)
     ).apply(instance, OWRRaceControlState::new));
 
     private static final SavedDataType<OWRRaceControlState> TYPE = new SavedDataType<>(
@@ -42,14 +45,17 @@ public class OWRRaceControlState extends SavedData {
     private RaceFlagMode globalFlag;
     private double carDamageModifier;
     private double tyreWearModifier;
+    private int raceLapLimit;
     private int revision;
 
     public OWRRaceControlState() {
-        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true, 4, 200, 350, 350, RaceFlagMode.DEFAULT.ordinal(), 1.0, 1.0);
+        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true, 4, 200, 350, 350,
+            RaceFlagMode.DEFAULT.ordinal(), 1.0, 1.0, DEFAULT_RACE_LAP_LIMIT);
     }
 
     private OWRRaceControlState(boolean checkpointCheckEnabled, boolean offTrackCheckEnabled, int minimumValidLapTicks, boolean wheelInputAllowed,
-            int maxErsCapacityMj, int maxBalancedDeployKw, int maxAttackDeployKw, int maxHarvestNegativeKw, int globalFlag, double carDamageModifier, double tyreWearModifier) {
+            int maxErsCapacityMj, int maxBalancedDeployKw, int maxAttackDeployKw, int maxHarvestNegativeKw, int globalFlag,
+            double carDamageModifier, double tyreWearModifier, int raceLapLimit) {
         this.checkpointCheckEnabled = checkpointCheckEnabled;
         this.offTrackCheckEnabled = offTrackCheckEnabled;
         this.minimumValidLapTicks = Math.max(1, minimumValidLapTicks);
@@ -61,6 +67,7 @@ public class OWRRaceControlState extends SavedData {
         this.globalFlag = RaceFlagMode.fromOrdinal(globalFlag);
         this.carDamageModifier = snapConditionModifier(carDamageModifier);
         this.tyreWearModifier = snapConditionModifier(tyreWearModifier);
+        this.raceLapLimit = clamp(raceLapLimit, 0, MAX_RACE_LAP_LIMIT);
     }
 
     public static OWRRaceControlState get(ServerLevel level) {
@@ -86,7 +93,8 @@ public class OWRRaceControlState extends SavedData {
             legacy.maxHarvestNegativeKw,
             legacy.globalFlag.ordinal(),
             legacy.carDamageModifier,
-            legacy.tyreWearModifier
+            legacy.tyreWearModifier,
+            legacy.raceLapLimit
         );
         copy.markChanged();
         level.getDataStorage().set(TYPE, copy);
@@ -140,6 +148,10 @@ public class OWRRaceControlState extends SavedData {
         return tyreWearModifier;
     }
 
+    public int getRaceLapLimit() {
+        return raceLapLimit;
+    }
+
     public boolean toggleCheckpointCheck() {
         checkpointCheckEnabled = !checkpointCheckEnabled;
         markChanged();
@@ -158,6 +170,15 @@ public class OWRRaceControlState extends SavedData {
             return;
         }
         minimumValidLapTicks = clamped;
+        markChanged();
+    }
+
+    public void setRaceLapLimit(int laps) {
+        int clamped = clamp(laps, 0, MAX_RACE_LAP_LIMIT);
+        if (raceLapLimit == clamped) {
+            return;
+        }
+        raceLapLimit = clamped;
         markChanged();
     }
 

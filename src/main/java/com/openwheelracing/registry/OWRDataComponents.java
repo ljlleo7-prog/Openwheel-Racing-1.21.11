@@ -85,6 +85,13 @@ public final class OWRDataComponents {
             .build()
     );
 
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<Integer>> TYRE_TYPE = DATA_COMPONENTS.register("tyre_type",
+        () -> DataComponentType.<Integer>builder()
+            .persistent(Codec.intRange(0, 2))
+            .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.VAR_INT)
+            .build()
+    );
+
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<Integer>> TYRE_REMAINING_PERCENT = DATA_COMPONENTS.register("tyre_remaining_percent",
         () -> DataComponentType.<Integer>builder()
             .persistent(Codec.intRange(0, 100))

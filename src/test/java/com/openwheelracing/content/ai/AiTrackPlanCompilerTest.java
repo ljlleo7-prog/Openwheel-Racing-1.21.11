@@ -53,7 +53,7 @@ class AiTrackPlanCompilerTest {
         Arrays.fill(speeds, 1500);
         Arrays.fill(offsets, offsetCm);
         return new OWRLapProfiles.BestLapProfile("test", route.trackId(), route.routeId(), UUID.randomUUID(), "driver",
-            OWRLapProfiles.Origin.PLAYER, 1, millis, route.length(), route.length() / count, times, speeds, offsets, headings, 1);
+            1, millis, route.length(), route.length() / count, times, speeds, offsets, headings, 1);
     }
 
     private static BasicAiGripModel.State nominalGrip() {

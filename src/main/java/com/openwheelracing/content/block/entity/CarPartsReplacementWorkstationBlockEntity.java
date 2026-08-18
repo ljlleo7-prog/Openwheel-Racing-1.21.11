@@ -127,6 +127,7 @@ public class CarPartsReplacementWorkstationBlockEntity extends BlockEntity imple
             car.set(com.openwheelracing.registry.OWRDataComponents.CAR_SETUP.get(),
                 new com.openwheelracing.content.car.PrototypeCarSetup(PrototypeCarItem.getSetup(car).power(), compound, PrototypeCarItem.getSetup(car).aero(), PrototypeCarItem.getSetup(car).gearing()));
             car.set(com.openwheelracing.registry.OWRDataComponents.TYRE_WEAR.get(), 100 - remaining);
+            car.set(com.openwheelracing.registry.OWRDataComponents.TYRE_TYPE.get(), TyreItem.getType(newPart).id());
         }
         newPart.shrink(1);
         setItem(SLOT_REMOVED_PART, removed);
@@ -141,7 +142,7 @@ public class CarPartsReplacementWorkstationBlockEntity extends BlockEntity imple
             case ENGINE -> new ItemStack(OWRItems.ENGINE.get());
             case FRONT_WING -> new ItemStack(OWRItems.FRONT_WING.get());
             case REAR_WING -> new ItemStack(OWRItems.REAR_WING.get());
-            case TIRES -> TyreItem.create(PrototypeCarItem.getSetup(car).grip(), 1, Math.max(0, 100 - PrototypeCarItem.getTyreWear(car)));
+            case TIRES -> TyreItem.create(PrototypeCarItem.getSetup(car).grip(), PrototypeCarItem.getTyreType(car), 1, Math.max(0, 100 - PrototypeCarItem.getTyreWear(car)));
             case GEARBOX -> new ItemStack(OWRItems.GEARBOX.get());
             case STEERING_CONTROLS -> new ItemStack(OWRItems.STEERING_CONTROLS.get());
             case NONE -> ItemStack.EMPTY;

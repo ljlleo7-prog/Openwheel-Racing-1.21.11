@@ -53,6 +53,8 @@ public final class OWRCreativeTabs {
             for (int compound = 0; compound <= 4; compound++) {
                 output.accept(TyreItem.create(compound));
             }
+            output.accept(TyreItem.create(PrototypeCarSetup.DEFAULT.grip(), com.openwheelracing.content.car.TyreType.INTERMEDIATE, 1, 100));
+            output.accept(TyreItem.create(PrototypeCarSetup.DEFAULT.grip(), com.openwheelracing.content.car.TyreType.WET, 1, 100));
             output.accept(OWRItems.AERO_KIT.get());
             output.accept(OWRItems.FRONT_WING.get());
             output.accept(OWRItems.REAR_WING.get());
