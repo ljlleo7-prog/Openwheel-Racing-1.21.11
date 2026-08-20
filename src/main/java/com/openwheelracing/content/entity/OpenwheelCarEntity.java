@@ -2167,7 +2167,12 @@ public class OpenwheelCarEntity extends Entity {
 
     private com.openwheelracing.content.block.TrackMoisture getMoistureAt(Vec3 pos) {
         BlockPos basePos = BlockPos.containing(pos.x, getBoundingBox().minY - 0.05, pos.z);
-        return com.openwheelracing.content.block.WettableTrack.moisture(level().getBlockState(basePos));
+        BlockState state = level().getBlockState(basePos);
+        com.openwheelracing.content.block.TrackMoisture moisture = com.openwheelracing.content.block.WettableTrack.moisture(state);
+        if (state.hasProperty(com.openwheelracing.content.block.WettableTrack.MOISTURE) && level() instanceof ServerLevel serverLevel) {
+            com.openwheelracing.content.block.TrackMoistureTelemetryService.observe(serverLevel, basePos, moisture);
+        }
+        return moisture;
     }
 
     private boolean isWaterAt(Vec3 pos) {
@@ -3237,7 +3242,7 @@ public class OpenwheelCarEntity extends Entity {
                 new WheelWearSample(finalRlDemand, finalRlSlipAngle, finalRlLongForce, finalRlLatForce, finalRlLoad),
                 new WheelWearSample(finalRrDemand, finalRrSlipAngle, finalRrLongForce, finalRrLatForce, finalRrLoad)
             );
-            evaporateWheelContactWater(flContact, frContact, rlContact, rrContact);
+            evaporateWheelContactWater(flContact, frContact, rlContact, rrContact, speedMetersPerSecond, tyreSlip);
         }
 
         forward = Vec3.directionFromRotation(0.0f, getYRot());
@@ -3311,7 +3316,8 @@ public class OpenwheelCarEntity extends Entity {
         previousHorizontalSpeed = horizontalSpeed;
     }
 
-    private void evaporateWheelContactWater(Vec3 fl, Vec3 fr, Vec3 rl, Vec3 rr) {
+    private void evaporateWheelContactWater(Vec3 fl, Vec3 fr, Vec3 rl, Vec3 rr,
+                                            double speedMetersPerSecond, double slip) {
         if (!(level() instanceof ServerLevel serverLevel)) return;
         Vec3[] contacts = {fl, fr, rl, rr};
         double[] temperatures = {tyreTemperatureFlC, tyreTemperatureFrC, tyreTemperatureRlC, tyreTemperatureRrC};
@@ -3325,13 +3331,9 @@ public class OpenwheelCarEntity extends Entity {
             if (first == Long.MIN_VALUE) first = packed; else second = packed;
             com.openwheelracing.content.block.TrackMoisture moisture = com.openwheelracing.content.block.WettableTrack.moisture(serverLevel.getBlockState(pos));
             if (moisture == com.openwheelracing.content.block.TrackMoisture.DRY) continue;
-            double baseChance = switch (getTyreType()) {
-                case SLICK -> moisture == com.openwheelracing.content.block.TrackMoisture.DAMP ? 0.003 : moisture == com.openwheelracing.content.block.TrackMoisture.WET ? 0.005 : 0.003;
-                case INTERMEDIATE -> moisture == com.openwheelracing.content.block.TrackMoisture.DAMP ? 0.005 : moisture == com.openwheelracing.content.block.TrackMoisture.WET ? 0.012 : 0.008;
-                case WET -> moisture == com.openwheelracing.content.block.TrackMoisture.DAMP ? 0.007 : moisture == com.openwheelracing.content.block.TrackMoisture.WET ? 0.018 : 0.015;
-            };
-            double boiling = smoothstep((temperatures[i] - 95.0) / 10.0);
-            if (serverLevel.random.nextDouble() < baseChance + (1.0 - baseChance) * boiling
+            double dryingChance = com.openwheelracing.content.block.TrackVehicleDryingModel.dryingChance(
+                moisture.level(), getTyreType(), temperatures[i], speedMetersPerSecond * 3.6, slip);
+            if (serverLevel.random.nextDouble() < dryingChance
                     && com.openwheelracing.content.block.TrackDryingBudget.dryOneStage(serverLevel, pos)) accepted++;
         }
     }

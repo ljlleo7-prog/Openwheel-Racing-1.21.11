@@ -3,6 +3,8 @@ package com.openwheelracing;
 import com.mojang.logging.LogUtils;
 import com.openwheelracing.content.ai.BasicAiFleetChunkTickets;
 import com.openwheelracing.content.ai.BasicAiFleetManager;
+import com.openwheelracing.content.block.TrackWeatherChunkProgression;
+import com.openwheelracing.content.block.TrackMoistureTelemetryService;
 import com.openwheelracing.content.command.OWRCommands;
 import com.openwheelracing.content.race.OWRLegacyDimensionDataImporter;
 import com.openwheelracing.content.race.timing.LiveRaceTimingService;
@@ -60,6 +62,9 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(this::onServerStarted);
         NeoForge.EVENT_BUS.addListener(this::onServerStopped);
         NeoForge.EVENT_BUS.addListener(TrackMapAutoDetector::onServerTick);
+        NeoForge.EVENT_BUS.addListener(TrackWeatherChunkProgression::onChunkLoad);
+        NeoForge.EVENT_BUS.addListener(TrackWeatherChunkProgression::onChunkUnload);
+        NeoForge.EVENT_BUS.addListener(TrackWeatherChunkProgression::onServerTick);
         NeoForge.EVENT_BUS.addListener(BasicAiFleetManager::onServerTick);
         NeoForge.EVENT_BUS.addListener(LiveRaceTimingService::onServerTick);
     }
@@ -88,6 +93,8 @@ public final class OpenwheelRacing {
 
     private void onServerStarted(ServerStartedEvent event) {
         TrackMapAutoDetector.clearJobs();
+        TrackWeatherChunkProgression.clearAll();
+        TrackMoistureTelemetryService.clearAll();
         OWRLegacyDimensionDataImporter.importOnServerStarted(event.getServer());
     }
 

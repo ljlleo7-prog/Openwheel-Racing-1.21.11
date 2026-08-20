@@ -26,6 +26,7 @@ public final class TrackDryingBudget {
         if (moisture == TrackMoisture.DRY || !state.hasProperty(WettableTrack.MOISTURE)) return false;
         counter.updates++;
         level.setBlock(pos, state.setValue(WettableTrack.MOISTURE, moisture.drier()), 2);
+        TrackMoistureTelemetryService.observe(level, pos, moisture.drier());
         return true;
     }
 

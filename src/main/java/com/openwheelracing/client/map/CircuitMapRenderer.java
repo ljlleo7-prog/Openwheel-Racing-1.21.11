@@ -3,6 +3,7 @@ package com.openwheelracing.client.map;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.race.TeamCarRow;
+import com.openwheelracing.content.race.TrackMoistureSnapshot;
 import com.openwheelracing.content.track.TrackMapSnapshot;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -20,11 +21,12 @@ public final class CircuitMapRenderer {
     private static final int BORDER_COLOR = 0xFF56616C;
     private static final int MIN_SURFACE_PIXELS = 2;
     private static final Map<String, SurfaceTexture> SURFACE_TEXTURES = new HashMap<>();
+    private static final Map<String, SurfaceTexture> MOISTURE_TEXTURES = new HashMap<>();
 
     private CircuitMapRenderer() {
     }
 
-    public static void render(GuiGraphics graphics, TrackMapSnapshot map, List<TeamCarRow> cars, int x, int y, int width, int height, int selectedCarId, int leftCarId, int rightCarId) {
+    public static void render(GuiGraphics graphics, TrackMapSnapshot map, TrackMoistureSnapshot moisture, List<TeamCarRow> cars, int x, int y, int width, int height, int selectedCarId, int leftCarId, int rightCarId) {
         graphics.fill(x, y, x + width, y + height, 0xCC050608);
         graphics.renderOutline(x, y, width, height, BORDER_COLOR);
         if (map == null || !map.present()) {
@@ -32,10 +34,66 @@ public final class CircuitMapRenderer {
         }
         Projection projection = new Projection(map, x + 4, y + 4, Math.max(1, width - 8), Math.max(1, height - 8));
         drawSurface(graphics, map, projection);
+        drawMoisture(graphics, map, projection, moisture);
         drawMapMarkers(graphics, map, projection);
         for (TeamCarRow car : cars) {
             drawCar(graphics, projection, car, carColor(car, selectedCarId, leftCarId, rightCarId));
         }
+    }
+
+    private static void drawMoisture(GuiGraphics graphics, TrackMapSnapshot map, Projection projection, TrackMoistureSnapshot moisture) {
+        SurfaceTexture texture = moistureTexture(map, projection, moisture);
+        if (texture == null || texture.location == null) return;
+        graphics.blit(RenderPipelines.GUI_TEXTURED, texture.location, projection.x, projection.y, 0.0f, 0.0f,
+            projection.width, projection.height, texture.width, texture.height, texture.width, texture.height);
+    }
+
+    private static SurfaceTexture moistureTexture(TrackMapSnapshot map, Projection projection, TrackMoistureSnapshot moisture) {
+        if (moisture == null || moisture.tiles().isEmpty() || projection.width <= 0 || projection.height <= 0) return null;
+        String key = map.dimensionId() + ":" + map.revision() + ":" + moisture.surfaceRevision() + ":" + projection.width + "x" + projection.height;
+        SurfaceTexture cached = MOISTURE_TEXTURES.get(key);
+        if (cached != null) return cached;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null) return null;
+        pruneTextureCache(minecraft, MOISTURE_TEXTURES, key);
+        NativeImage image = new NativeImage(projection.width, projection.height, true);
+        Projection local = projection.withOrigin(0, 0);
+        for (TrackMoistureSnapshot.Tile tile : moisture.tiles()) {
+            int baseX = tile.chunkX() * 16;
+            int baseZ = tile.chunkZ() * 16;
+            for (int localZ = 0; localZ < 16; localZ++) {
+                for (int localX = 0; localX < 16; localX++) {
+                    if (!tile.observed(localX, localZ)) continue;
+                    rasterizeMoistureCell(image, local, baseX + localX, baseZ + localZ, moistureColor(tile.level(localX, localZ)));
+                }
+            }
+        }
+        Identifier location = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "dynamic/circuit_moisture/" + sanitizeKey(key));
+        DynamicTexture texture = new DynamicTexture(() -> "openwheelracing-circuit-moisture-" + sanitizeKey(key), image);
+        minecraft.getTextureManager().register(location, texture);
+        texture.upload();
+        SurfaceTexture result = new SurfaceTexture(location, texture, image, projection.width, projection.height);
+        MOISTURE_TEXTURES.put(key, result);
+        return result;
+    }
+
+    private static void rasterizeMoistureCell(NativeImage image, Projection projection, int worldX, int worldZ, int color) {
+        int left = Math.max(0, Math.min(image.getWidth(), projection.screenX(worldX)));
+        int right = Math.max(0, Math.min(image.getWidth(), projection.screenX(worldX + 1)));
+        int top = Math.max(0, Math.min(image.getHeight(), projection.screenY(worldZ)));
+        int bottom = Math.max(0, Math.min(image.getHeight(), projection.screenY(worldZ + 1)));
+        if (right <= left) right = Math.min(image.getWidth(), left + 1);
+        if (bottom <= top) bottom = Math.min(image.getHeight(), top + 1);
+        for (int y = top; y < bottom; y++) for (int x = left; x < right; x++) image.setPixel(x, y, color);
+    }
+
+    private static int moistureColor(int level) {
+        return switch (Math.max(0, Math.min(3, level))) {
+            case 0 -> 0x99B8BEC7;
+            case 1 -> 0xFF6FD5DF;
+            case 2 -> 0xFF398DDE;
+            default -> 0xFF244FA3;
+        };
     }
 
     public static void renderLocal(GuiGraphics graphics, TrackMapSnapshot map, double carX, double carZ, float headingDegrees, int color, int x, int y, int width, int height) {
@@ -53,6 +111,8 @@ public final class CircuitMapRenderer {
             texture.close(minecraft);
         }
         SURFACE_TEXTURES.clear();
+        for (SurfaceTexture texture : MOISTURE_TEXTURES.values()) texture.close(minecraft);
+        MOISTURE_TEXTURES.clear();
     }
 
     private static void drawSurface(GuiGraphics graphics, TrackMapSnapshot map, Projection projection) {
@@ -92,8 +152,12 @@ public final class CircuitMapRenderer {
     }
 
     private static void pruneCache(Minecraft minecraft, String keepKey) {
-        SURFACE_TEXTURES.entrySet().removeIf(entry -> {
-            boolean remove = !entry.getKey().equals(keepKey) && SURFACE_TEXTURES.size() > 4;
+        pruneTextureCache(minecraft, SURFACE_TEXTURES, keepKey);
+    }
+
+    private static void pruneTextureCache(Minecraft minecraft, Map<String, SurfaceTexture> cache, String keepKey) {
+        cache.entrySet().removeIf(entry -> {
+            boolean remove = !entry.getKey().equals(keepKey) && cache.size() > 4;
             if (remove) {
                 entry.getValue().close(minecraft);
             }

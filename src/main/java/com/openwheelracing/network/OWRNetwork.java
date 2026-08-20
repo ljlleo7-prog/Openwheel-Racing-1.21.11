@@ -105,6 +105,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceMonitorAutoDetectMapMessage.TYPE, codec(RaceMonitorAutoDetectMapMessage::encode, RaceMonitorAutoDetectMapMessage::decode), RaceMonitorAutoDetectMapMessage::handle);
         registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
         registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
+        registrar.playToClient(TrackMoistureSnapshotMessage.TYPE, codec(TrackMoistureSnapshotMessage::encode, TrackMoistureSnapshotMessage::decode), TrackMoistureSnapshotMessage::handle);
         registrar.playToClient(LiveryTextureCacheMessage.TYPE, codec(LiveryTextureCacheMessage::encode, LiveryTextureCacheMessage::decode), LiveryTextureCacheMessage::handle);
         registrar.playToClient(RaceFlagUpdateMessage.TYPE, codec(RaceFlagUpdateMessage::encode, RaceFlagUpdateMessage::decode), RaceFlagUpdateMessage::handle);
         registrar.playToClient(DriveInputAckMessage.TYPE, codec(DriveInputAckMessage::encode, DriveInputAckMessage::decode), DriveInputAckMessage::handle);
@@ -913,6 +914,10 @@ public final class OWRNetwork {
         PacketDistributor.sendToPlayer(player, new RaceDirectorSnapshotMessage(snapshot));
     }
 
+    public static void sendTrackMoistureSnapshot(ServerPlayer player, com.openwheelracing.content.race.TrackMoistureSnapshot snapshot) {
+        PacketDistributor.sendToPlayer(player, new TrackMoistureSnapshotMessage(snapshot));
+    }
+
     public static void sendCommandFeedback(ServerPlayer player, String message) {
         PacketDistributor.sendToPlayer(player, new CommandFeedbackMessage(message));
     }
@@ -1159,6 +1164,7 @@ public final class OWRNetwork {
             buffer.writeVarInt(snapshot.trackMapScanScannedChunks());
             buffer.writeVarInt(snapshot.trackMapScanTotalChunks());
             buffer.writeVarInt(snapshot.trackMapScanDetectedCells());
+            com.openwheelracing.content.race.TrackMoistureSnapshot.encode(snapshot.trackMoisture(), buffer);
             buffer.writeVarInt(snapshot.laps().size());
             for (RaceDirectorLapRow row : snapshot.laps()) {
                 RaceDirectorLapRow.encode(row, buffer);
@@ -1195,6 +1201,7 @@ public final class OWRNetwork {
             int trackMapScanScannedChunks = buffer.readVarInt();
             int trackMapScanTotalChunks = buffer.readVarInt();
             int trackMapScanDetectedCells = buffer.readVarInt();
+            com.openwheelracing.content.race.TrackMoistureSnapshot trackMoisture = com.openwheelracing.content.race.TrackMoistureSnapshot.decode(buffer);
             int lapCount = buffer.readVarInt();
             java.util.ArrayList<RaceDirectorLapRow> laps = new java.util.ArrayList<>(lapCount);
             for (int index = 0; index < lapCount; index++) {
@@ -1209,11 +1216,32 @@ public final class OWRNetwork {
                 minimumValidLapTicks, raceLapLimit, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj,
                 maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier,
                 activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, trackMap, trackMapScanRunning,
-                trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, laps, teamCars));
+                trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, trackMoisture, laps, teamCars));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {
             context.enqueueWork(() -> applyRaceDirectorSnapshot(message.snapshot));
+        }
+    }
+
+    public record TrackMoistureSnapshotMessage(com.openwheelracing.content.race.TrackMoistureSnapshot snapshot) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<TrackMoistureSnapshotMessage> TYPE = payloadType("track_moisture_snapshot_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(TrackMoistureSnapshotMessage message, FriendlyByteBuf buffer) {
+            com.openwheelracing.content.race.TrackMoistureSnapshot.encode(message.snapshot, buffer);
+        }
+
+        private static TrackMoistureSnapshotMessage decode(FriendlyByteBuf buffer) {
+            return new TrackMoistureSnapshotMessage(com.openwheelracing.content.race.TrackMoistureSnapshot.decode(buffer));
+        }
+
+        private static void handle(TrackMoistureSnapshotMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> applyTrackMoistureSnapshot(message.snapshot));
         }
     }
 
@@ -2194,6 +2222,15 @@ public final class OWRNetwork {
             set.invoke(null, snapshot.trackMap());
             Class<?> receiver = Class.forName("com.openwheelracing.client.screen.RaceDirectorScreen");
             Method method = receiver.getMethod("applySnapshot", RaceDirectorSnapshot.class);
+            method.invoke(null, snapshot);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applyTrackMoistureSnapshot(com.openwheelracing.content.race.TrackMoistureSnapshot snapshot) {
+        try {
+            Class<?> receiver = Class.forName("com.openwheelracing.client.screen.RaceDirectorScreen");
+            Method method = receiver.getMethod("applyMoistureSnapshot", com.openwheelracing.content.race.TrackMoistureSnapshot.class);
             method.invoke(null, snapshot);
         } catch (ReflectiveOperationException ignored) {
         }

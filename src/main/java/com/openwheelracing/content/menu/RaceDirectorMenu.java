@@ -1,5 +1,6 @@
 package com.openwheelracing.content.menu;
 
+import com.openwheelracing.content.block.TrackMoistureTelemetryService;
 import com.openwheelracing.content.block.entity.RaceDirectorBlockEntity;
 import com.openwheelracing.content.block.entity.RaceMonitorType;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
@@ -41,11 +42,14 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private int lastMapRevision = Integer.MIN_VALUE;
     private int lastMapScanScannedChunks = -1;
     private int lastMapScanDetectedCells = -1;
+    private int lastMoistureRevision = Integer.MIN_VALUE;
+    private long lastMoistureSurfaceSendTick = Long.MIN_VALUE;
     private int telemetryCarId = -1;
     private long lastTelemetrySendTick = Long.MIN_VALUE;
     private UUID lastTelemetryDriverId = new UUID(0L, 0L);
     private long lastTelemetryProfileLapId = -1L;
     private RaceDirectorSnapshot snapshot = RaceDirectorSnapshot.empty();
+    private com.openwheelracing.content.race.TrackMoistureSnapshot moistureSnapshot = com.openwheelracing.content.race.TrackMoistureSnapshot.EMPTY;
 
     public RaceDirectorMenu(int containerId, Inventory playerInventory, FriendlyByteBuf extraData) {
         this(containerId, playerInventory, RaceMonitorType.DIRECTOR);
@@ -110,8 +114,24 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
 
     public void applySnapshot(RaceDirectorSnapshot snapshot) {
         this.snapshot = snapshot;
+        applyMoistureSnapshot(snapshot.trackMoisture());
         this.page = snapshot.page();
         this.archiveMode = snapshot.archiveMode();
+    }
+
+    public com.openwheelracing.content.race.TrackMoistureSnapshot getMoistureSnapshot() {
+        return moistureSnapshot;
+    }
+
+    public void applyMoistureSnapshot(com.openwheelracing.content.race.TrackMoistureSnapshot moistureSnapshot) {
+        if (moistureSnapshot.tiles().isEmpty() && !this.moistureSnapshot.tiles().isEmpty()) {
+            this.moistureSnapshot = new com.openwheelracing.content.race.TrackMoistureSnapshot(
+                moistureSnapshot.revision(), moistureSnapshot.drySamples(), moistureSnapshot.dampSamples(), moistureSnapshot.wetSamples(),
+                moistureSnapshot.soakingSamples(), moistureSnapshot.loadedSamples(), moistureSnapshot.estimatedSamples(),
+                this.moistureSnapshot.surfaceRevision(), moistureSnapshot.sectors(), this.moistureSnapshot.tiles());
+        } else {
+            this.moistureSnapshot = moistureSnapshot;
+        }
     }
 
     @Override
@@ -124,6 +144,15 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         OWRRaceControlState controlState = OWRRaceControlState.get(serverLevel);
         OWRLapRecords records = OWRLapRecords.get(serverLevel);
         TrackMapSnapshot map = trackMap(serverLevel);
+        var moisture = TrackMoistureTelemetryService.snapshot(serverLevel);
+        boolean surfaceDue = lastMoistureSurfaceSendTick == Long.MIN_VALUE
+            || serverLevel.getGameTime() - lastMoistureSurfaceSendTick >= 600L;
+        if (moisture.revision() != lastMoistureRevision || surfaceDue) {
+            lastMoistureRevision = moisture.revision();
+            if (surfaceDue) lastMoistureSurfaceSendTick = serverLevel.getGameTime();
+            OWRNetwork.sendTrackMoistureSnapshot(serverPlayer,
+                surfaceDue ? TrackMoistureTelemetryService.surfaceSnapshot(serverLevel) : moisture);
+        }
         TrackMapAutoDetector.Progress scanProgress = TrackMapAutoDetector.progress(serverLevel);
         boolean mapChanged = map.revision() != lastMapRevision;
         boolean scanUpdate = scanProgress.running()
@@ -182,6 +211,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             mapScan.scannedChunks(),
             mapScan.totalChunks(),
             mapScan.detectedCells(),
+            TrackMoistureTelemetryService.snapshot(level),
             laps,
             senseTeamCars(level)
         );

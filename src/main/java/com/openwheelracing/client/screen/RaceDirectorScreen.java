@@ -68,6 +68,12 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         }
     }
 
+    public static void applyMoistureSnapshot(com.openwheelracing.content.race.TrackMoistureSnapshot snapshot) {
+        if (Minecraft.getInstance().screen instanceof RaceDirectorScreen screen) {
+            screen.menu.applyMoistureSnapshot(snapshot);
+        }
+    }
+
     @Override
     protected void init() {
         super.init();
@@ -310,7 +316,8 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.race_laps", lapLimit), 12, 108, 0xFFC9D1D9, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.lap_counter_placeholder", snapshot.laps().size()), 12, 120, 0xFFC9D1D9, false);
         drawLapRows(graphics, snapshot);
-        CircuitMapRenderer.render(graphics, snapshot.trackMap(), snapshot.teamCars(), MAP_X, MAP_Y, MAP_WIDTH, MAP_HEIGHT, selectedTeamCarId, snapshot.leftTeamCarId(), snapshot.rightTeamCarId());
+        CircuitMapRenderer.render(graphics, snapshot.trackMap(), menu.getMoistureSnapshot(), snapshot.teamCars(), MAP_X, MAP_Y, MAP_WIDTH, MAP_HEIGHT, selectedTeamCarId, snapshot.leftTeamCarId(), snapshot.rightTeamCarId());
+        drawWeatherTelemetry(graphics, snapshot);
         drawMapState(graphics, snapshot);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rule_setup"), RIGHT_X, 88, 0xFFE8EDF2, false);
         graphics.drawString(font, fit(Component.translatable("screen.openwheelracing.race_director.rule_status", state(snapshot.checkpointCheckEnabled()), state(snapshot.offTrackCheckEnabled()), formatSeconds(snapshot.minimumValidLapTicks())).getString(), COLUMN_WIDTH - 8), RIGHT_X, 100, 0xFFC9D1D9, false);
@@ -329,7 +336,8 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     private void drawTeamTerminal(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
         List<TeamCarRow> cars = snapshot.teamCars();
-        CircuitMapRenderer.render(graphics, snapshot.trackMap(), cars, MAP_X, MAP_Y, MAP_WIDTH, MAP_HEIGHT, selectedTeamCarId, snapshot.leftTeamCarId(), snapshot.rightTeamCarId());
+        CircuitMapRenderer.render(graphics, snapshot.trackMap(), menu.getMoistureSnapshot(), cars, MAP_X, MAP_Y, MAP_WIDTH, MAP_HEIGHT, selectedTeamCarId, snapshot.leftTeamCarId(), snapshot.rightTeamCarId());
+        drawWeatherTelemetry(graphics, snapshot);
         drawMapState(graphics, snapshot);
         drawTeamCarPanel(graphics, findTeamCar(snapshot.leftTeamCarId()), LEFT_X, 90, COLUMN_WIDTH, true);
         drawTeamCarPanel(graphics, findTeamCar(snapshot.rightTeamCarId()), RIGHT_X, 90, COLUMN_WIDTH, false);
@@ -507,6 +515,37 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         } else if (!snapshot.trackMap().present()) {
             graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.no_track_map"), MAP_X + 34, MAP_Y + MAP_HEIGHT / 2 - 4, 0xFF888888, false);
         }
+    }
+
+    private void drawWeatherTelemetry(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
+        var moisture = menu.getMoistureSnapshot();
+        if (moisture.totalSamples() <= 0) return;
+        int x = MAP_X;
+        int y = 42;
+        graphics.fill(x - 2, y - 2, x + MAP_WIDTH + 2, y + 11, 0xD0101418);
+        String estimate = moisture.estimatedSamples() > 0 ? " E" + moisture.estimatedSamples() : "";
+        String summary = String.format(java.util.Locale.ROOT, "%s D%d M%d W%d S%d%s",
+            moistureName(moisture.conditionLevel()), moisture.percent(0), moisture.percent(1),
+            moisture.percent(2), moisture.percent(3), estimate);
+        graphics.drawString(font, fit(summary, MAP_WIDTH), x, y, moistureTextColor(moisture.conditionLevel()), false);
+    }
+
+    private static String moistureName(int level) {
+        return switch (level) {
+            case 0 -> "DRY";
+            case 1 -> "DAMP";
+            case 2 -> "WET";
+            default -> "SOAK";
+        };
+    }
+
+    private static int moistureTextColor(int level) {
+        return switch (level) {
+            case 0 -> 0xFFE8EDF2;
+            case 1 -> 0xFF6FD5DF;
+            case 2 -> 0xFF79B8FF;
+            default -> 0xFF7897E8;
+        };
     }
 
     private static String modifier(double value) {

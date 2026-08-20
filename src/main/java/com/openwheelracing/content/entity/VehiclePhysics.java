@@ -17,13 +17,13 @@ public final class VehiclePhysics {
     public static final double TYRE_SURFACE_HEAT_CAPACITY_J_PER_C = 20_000.0;
     public static final double TYRE_CARCASS_HEAT_CAPACITY_J_PER_C = TYRE_HEAT_CAPACITY_J_PER_C - TYRE_SURFACE_HEAT_CAPACITY_J_PER_C;
     public static final double TYRE_ROLLING_RESISTANCE_HEAT_FRACTION = 0.80;
-    public static final double TYRE_SLIP_HEAT_FRACTION = 1.43;
+    public static final double TYRE_SLIP_HEAT_FRACTION = 1.45;
     public static final double TYRE_STATIONARY_COOLING_PER_SECOND = 0.00240;
     public static final double TYRE_WIND_COOLING_PER_MPS_SECOND = 0.0000210;
     public static final double TYRE_HOT_COOLING_PER_SECOND = 0.000030;
     public static final double TYRE_HOT_COOLING_START_C = 110.0;
     public static final double TYRE_G_FORCE_HEAT_FACTOR = 0.61;
-    public static final double TYRE_SURFACE_FRICTION_HEAT_FRACTION = 0.72;
+    public static final double TYRE_SURFACE_FRICTION_HEAT_FRACTION = 0.80;
     public static final double TYRE_CARCASS_FRICTION_HEAT_FRACTION = 1.0 - TYRE_SURFACE_FRICTION_HEAT_FRACTION;
     public static final double TYRE_BRAKE_TO_CARCASS_HEAT_FRACTION = 0.90;
     public static final double TYRE_CARCASS_TRANSFER_WATTS_PER_C = 600.0;
