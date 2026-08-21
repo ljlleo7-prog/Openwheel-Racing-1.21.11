@@ -31,6 +31,21 @@ public final class WetTyrePhysics {
         return coolingMultiplier(moisture.level(), surfaceTemperatureC);
     }
 
+    public static double coolingMultiplier(TyreType type, TrackMoisture moisture, double temperatureC) {
+        return coolingMultiplier(type, moisture.level(), temperatureC);
+    }
+
+    public static double coolingMultiplier(TyreType type, int moistureLevel, double temperatureC) {
+        if (type == TyreType.SLICK) return coolingMultiplier(moistureLevel, temperatureC);
+        int level = Math.max(0, Math.min(3, moistureLevel));
+        double hotStart = type == TyreType.INTERMEDIATE ? 80.0 : 52.0;
+        double hotSpan = type == TyreType.INTERMEDIATE ? 15.0 : 16.0;
+        double hot = smoothstep((temperatureC - hotStart) / hotSpan);
+        double waterCooling = lerp(BASE_COOLING[level], HOT_COOLING[level], hot);
+        double treadCoupling = type == TyreType.INTERMEDIATE ? 1.25 : 1.50;
+        return 1.0 + (waterCooling - 1.0) * treadCoupling;
+    }
+
     public static double coolingMultiplier(int moistureLevel, double surfaceTemperatureC) {
         int level = Math.max(0, Math.min(3, moistureLevel));
         double hot = smoothstep((surfaceTemperatureC - 95.0) / 10.0);
@@ -43,6 +58,19 @@ public final class WetTyrePhysics {
 
     public static double carcassCoolingMultiplier(int moistureLevel, double surfaceTemperatureC) {
         return 1.0 + (coolingMultiplier(moistureLevel, surfaceTemperatureC) - 1.0) * 0.35;
+    }
+
+    public static double carcassCoolingMultiplier(TyreType type, TrackMoisture moisture, double carcassTemperatureC) {
+        return carcassCoolingMultiplier(type, moisture.level(), carcassTemperatureC);
+    }
+
+    public static double carcassCoolingMultiplier(TyreType type, int moistureLevel, double carcassTemperatureC) {
+        double coupling = switch (type) {
+            case SLICK -> 0.35;
+            case INTERMEDIATE -> 0.45;
+            case WET -> 0.55;
+        };
+        return 1.0 + (coolingMultiplier(type, moistureLevel, carcassTemperatureC) - 1.0) * coupling;
     }
 
     public static double waterResistance(TyreType type, TrackMoisture moisture) {

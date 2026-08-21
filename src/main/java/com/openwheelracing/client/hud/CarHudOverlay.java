@@ -662,15 +662,25 @@ public final class CarHudOverlay {
     private static int tyreTemperatureColor(float temperature, float min, float max) {
         float coldStart = min - 18.0f;
         float hotEnd = max + 18.0f;
-        if (temperature <= min) {
-            return interpolateColor(0xFF66CCFF, 0xFFB7FFB7, clamp((temperature - coldStart) / Math.max(1.0f, min - coldStart), 0.0f, 1.0f));
+        int coolOptimalColor = 0xFF72DFA0;
+        int centerOptimalColor = 0xFF69E27D;
+        int warmOptimalColor = 0xFFA8E36E;
+        if (temperature < min) {
+            return interpolateColor(0xFF66CCFF, coolOptimalColor,
+                clamp((temperature - coldStart) / Math.max(1.0f, min - coldStart), 0.0f, 1.0f));
         }
         if (temperature <= max) {
-            float mid = (min + max) * 0.5f;
-            float blend = 1.0f - Math.abs(temperature - mid) / Math.max(1.0f, (max - min) * 0.5f);
-            return interpolateColor(0xFF9EF7A5, 0xFFD6FFD0, clamp(blend, 0.0f, 1.0f));
+            float optimal = clamp((temperature - min) / Math.max(1.0f, max - min), 0.0f, 1.0f);
+            if (optimal < 0.5f) {
+                return interpolateColor(coolOptimalColor, centerOptimalColor, optimal * 2.0f);
+            }
+            return interpolateColor(centerOptimalColor, warmOptimalColor, (optimal - 0.5f) * 2.0f);
         }
-        return interpolateColor(0xFFFFD044, 0xFFFF5555, clamp((temperature - max) / Math.max(1.0f, hotEnd - max), 0.0f, 1.0f));
+        float hot = clamp((temperature - max) / Math.max(1.0f, hotEnd - max), 0.0f, 1.0f);
+        if (hot < 0.5f) {
+            return interpolateColor(warmOptimalColor, 0xFFFFD044, hot * 2.0f);
+        }
+        return interpolateColor(0xFFFFD044, 0xFFFF5555, (hot - 0.5f) * 2.0f);
     }
 
     private static int tyreWearColor(float wearPercent) {

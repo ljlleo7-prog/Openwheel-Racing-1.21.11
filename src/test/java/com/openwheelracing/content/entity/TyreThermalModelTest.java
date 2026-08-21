@@ -276,6 +276,8 @@ class TyreThermalModelTest {
     void thermalPowerSplitConservesGeneratedEnergy() {
         assertEquals(1.0, VehiclePhysics.TYRE_SURFACE_FRICTION_HEAT_FRACTION
             + VehiclePhysics.TYRE_CARCASS_FRICTION_HEAT_FRACTION, 1.0E-12);
+        assertEquals(0.90, VehiclePhysics.TYRE_SURFACE_FRICTION_HEAT_FRACTION, 1.0E-12,
+            "scrub heat should remain strongly surface-biased");
         assertEquals(0.90, VehiclePhysics.TYRE_BRAKE_TO_CARCASS_HEAT_FRACTION, 1.0E-12,
             "brake heat should remain strongly carcass-biased");
     }
@@ -335,6 +337,24 @@ class TyreThermalModelTest {
 
         assertEquals(7_000.0, frontPerTyre * 2.0 + rearPerTyre * 2.0, 1.0E-9);
         assertTrue(frontPerTyre > rearPerTyre, "front-biased braking must heat each front tyre more than each rear tyre");
+    }
+
+    @Test
+    void rearBrakeHeatSubtractsMguKPowerWithoutChangingFrontHeat() {
+        double brakeInput = 0.8;
+        double maxBrakeForce = 18_000.0;
+        double speed = 50.0;
+        double frontBias = 0.58;
+        double rearRequestedPower = brakeInput * maxBrakeForce * speed * (1.0 - frontBias);
+        double frontHeat = VehiclePhysics.tyreBrakeHeatPowerPerTyre(brakeInput, 7_000.0, frontBias);
+        double rearHeat = VehiclePhysics.tyreBrakeHeatPowerPerTyre(brakeInput, 7_000.0, 1.0 - frontBias);
+
+        assertEquals(1.0, VehiclePhysics.rearFrictionBrakeFraction(brakeInput, maxBrakeForce, speed, frontBias, 0.0), 1.0E-12);
+        assertEquals(0.5, VehiclePhysics.rearFrictionBrakeFraction(brakeInput, maxBrakeForce, speed, frontBias, rearRequestedPower * 0.5), 1.0E-12);
+        assertEquals(0.0, VehiclePhysics.rearFrictionBrakeFraction(brakeInput, maxBrakeForce, speed, frontBias, rearRequestedPower), 1.0E-12);
+        assertEquals(frontHeat, VehiclePhysics.tyreBrakeHeatPowerPerTyre(brakeInput, 7_000.0, frontBias), 1.0E-12);
+        assertEquals(rearHeat * 0.5, rearHeat * VehiclePhysics.rearFrictionBrakeFraction(
+            brakeInput, maxBrakeForce, speed, frontBias, rearRequestedPower * 0.5), 1.0E-12);
     }
 
     @Test

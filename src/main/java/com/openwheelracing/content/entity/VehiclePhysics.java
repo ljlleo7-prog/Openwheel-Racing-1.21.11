@@ -23,7 +23,7 @@ public final class VehiclePhysics {
     public static final double TYRE_HOT_COOLING_PER_SECOND = 0.000030;
     public static final double TYRE_HOT_COOLING_START_C = 110.0;
     public static final double TYRE_G_FORCE_HEAT_FACTOR = 0.61;
-    public static final double TYRE_SURFACE_FRICTION_HEAT_FRACTION = 0.80;
+    public static final double TYRE_SURFACE_FRICTION_HEAT_FRACTION = 0.90;
     public static final double TYRE_CARCASS_FRICTION_HEAT_FRACTION = 1.0 - TYRE_SURFACE_FRICTION_HEAT_FRACTION;
     public static final double TYRE_BRAKE_TO_CARCASS_HEAT_FRACTION = 0.90;
     public static final double TYRE_CARCASS_TRANSFER_WATTS_PER_C = 600.0;
@@ -81,6 +81,16 @@ public final class VehiclePhysics {
 
     public static double tyreBrakeHeatPowerPerTyre(double brakeInput, double totalBrakeHeatPower, double axleBias) {
         return Math.max(0.0, brakeInput) * Math.max(0.0, totalBrakeHeatPower) * clamp(axleBias, 0.0, 1.0) * 0.5;
+    }
+
+    public static double rearFrictionBrakeFraction(double brakeInput, double maxBrakeForce, double speedMetersPerSecond,
+                                                   double frontBrakeBias, double mguKRegenPowerWatts) {
+        double rearRequestedPower = Math.max(0.0, brakeInput)
+            * Math.max(0.0, maxBrakeForce)
+            * Math.max(0.0, speedMetersPerSecond)
+            * (1.0 - clamp(frontBrakeBias, 0.0, 1.0));
+        if (rearRequestedPower <= 1.0E-9) return 1.0;
+        return clamp((rearRequestedPower - Math.max(0.0, mguKRegenPowerWatts)) / rearRequestedPower, 0.0, 1.0);
     }
 
     public static double tyreRollingHeatPowerWatts(double normalLoad, double speedMetersPerSecond, double rollingResistance) {
