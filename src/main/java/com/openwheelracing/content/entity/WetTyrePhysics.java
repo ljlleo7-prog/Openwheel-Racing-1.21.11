@@ -9,8 +9,13 @@ public final class WetTyrePhysics {
         {1.00, 0.93, 0.74, 0.45},
         {1.00, 0.89, 0.82, 0.58}
     };
-    private static final double[] BASE_COOLING = {1.0, 1.35, 2.2, 3.5};
-    private static final double[] HOT_COOLING = {1.0, 3.5, 8.0, 15.0};
+    private static final double[] BASE_COOLING = {1.0, 1.5, 2.0, 2.5};
+    private static final double[] VAPORIZATION_COOLING = {1.0, 5.0, 12.0, 20.0};
+    private static final double[] DRY_ROLLING_HEAT = {1.0, 0.65, 0.48};
+    private static final double[] ROLLING_RESISTANCE_FORCE = {1.0, 1.30, 1.50};
+    private static final double[] WATER_HEAT = {1.0, 0.72, 0.48, 0.32};
+    private static final double[] WATER_SCRUB_HEAT = {1.0, 0.78, 0.50, 0.32};
+    private static final double[] DRY_SCRUB_WEAR = {1.0, 2.2, 3.0};
     private static final double[] RESISTANCE = {0.0, 0.001, 0.004, 0.012};
     private static final double[] RESISTANCE_TYPE = {1.0, 0.80, 0.62};
     private static final double[] SOAKING_ONSET_KMH = {65.0, 115.0, 190.0};
@@ -36,20 +41,60 @@ public final class WetTyrePhysics {
     }
 
     public static double coolingMultiplier(TyreType type, int moistureLevel, double temperatureC) {
-        if (type == TyreType.SLICK) return coolingMultiplier(moistureLevel, temperatureC);
-        int level = Math.max(0, Math.min(3, moistureLevel));
-        double hotStart = type == TyreType.INTERMEDIATE ? 80.0 : 52.0;
-        double hotSpan = type == TyreType.INTERMEDIATE ? 15.0 : 16.0;
-        double hot = smoothstep((temperatureC - hotStart) / hotSpan);
-        double waterCooling = lerp(BASE_COOLING[level], HOT_COOLING[level], hot);
+        int level = clampLevel(moistureLevel);
+        double vaporization = smoothstep((temperatureC - 90.0) / 10.0);
+        double waterCooling = lerp(BASE_COOLING[level], VAPORIZATION_COOLING[level], vaporization);
         double treadCoupling = type == TyreType.INTERMEDIATE ? 1.25 : 1.50;
+        if (type == TyreType.SLICK) treadCoupling = 1.0;
         return 1.0 + (waterCooling - 1.0) * treadCoupling;
     }
 
     public static double coolingMultiplier(int moistureLevel, double surfaceTemperatureC) {
-        int level = Math.max(0, Math.min(3, moistureLevel));
-        double hot = smoothstep((surfaceTemperatureC - 95.0) / 10.0);
-        return lerp(BASE_COOLING[level], HOT_COOLING[level], hot);
+        int level = clampLevel(moistureLevel);
+        double vaporization = smoothstep((surfaceTemperatureC - 90.0) / 10.0);
+        return lerp(BASE_COOLING[level], VAPORIZATION_COOLING[level], vaporization);
+    }
+
+    public static double rollingHeatMultiplier(TyreType type, TrackMoisture moisture) {
+        return rollingHeatMultiplier(type, moisture.level());
+    }
+
+    public static double rollingResistanceForceMultiplier(TyreType type) {
+        return ROLLING_RESISTANCE_FORCE[type.id()];
+    }
+
+    public static double rollingHeatMultiplier(TyreType type, int moistureLevel) {
+        return DRY_ROLLING_HEAT[type.id()] * WATER_HEAT[clampLevel(moistureLevel)];
+    }
+
+    public static double loadHeatMultiplier(TrackMoisture moisture) {
+        return loadHeatMultiplier(moisture.level());
+    }
+
+    public static double loadHeatMultiplier(int moistureLevel) {
+        return WATER_HEAT[clampLevel(moistureLevel)];
+    }
+
+    public static double scrubHeatMultiplier(TrackMoisture moisture) {
+        return scrubHeatMultiplier(moisture.level());
+    }
+
+    public static double scrubHeatMultiplier(int moistureLevel) {
+        return WATER_SCRUB_HEAT[clampLevel(moistureLevel)];
+    }
+
+    public static double scrubWearMultiplier(TyreType type, TrackMoisture moisture) {
+        return scrubWearMultiplier(type, moisture.level());
+    }
+
+    public static double scrubWearMultiplier(TyreType type, int moistureLevel) {
+        double depth = switch (clampLevel(moistureLevel)) {
+            case 1 -> 0.15;
+            case 2 -> 0.55;
+            case 3 -> 1.0;
+            default -> 0.0;
+        };
+        return lerp(DRY_SCRUB_WEAR[type.id()], 1.0, depth);
     }
 
     public static double carcassCoolingMultiplier(TrackMoisture moisture, double surfaceTemperatureC) {
@@ -115,5 +160,6 @@ public final class WetTyrePhysics {
     }
 
     private static double lerp(double a, double b, double t) { return a + (b - a) * t; }
+    private static int clampLevel(int level) { return Math.max(0, Math.min(3, level)); }
     private static double clamp(double value, double min, double max) { return Math.max(min, Math.min(max, value)); }
 }

@@ -12,6 +12,19 @@ class TyreThermalModelTest {
     private static final double ROLLING_RESISTANCE = 0.014;
 
     @Test
+    void dynamicAmbientControlsCoolingFloor() {
+        double rainyCooling = VehiclePhysics.tyreCoolingDeltaC(40.0, 30.0, 1.0, 20.0);
+        double sunnyCooling = VehiclePhysics.tyreCoolingDeltaC(40.0, 30.0, 1.0, 36.0);
+        assertTrue(rainyCooling > sunnyCooling * 4.0);
+
+        VehiclePhysics.TyreThermalState state = VehiclePhysics.nextTyreThermalState(
+            21.0, 21.0, 0.0, 0.0, 0.0, 1.0, 50.0,
+            20.0, 20.0, 1.0, 1.0, 0.0, 0.0, 60.0, true, 20.0);
+        assertTrue(state.surfaceTemperatureC() >= 20.0);
+        assertTrue(state.carcassTemperatureC() >= 20.0);
+    }
+
+    @Test
     void lowStressCruiseCoolsBelowWorkingTemperature() {
         double heatPower = aggregateHeatPower(0.12, 0.02, 0.08, 0.0);
 

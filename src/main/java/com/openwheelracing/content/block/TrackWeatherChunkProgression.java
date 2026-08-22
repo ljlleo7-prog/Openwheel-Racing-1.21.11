@@ -54,11 +54,15 @@ public final class TrackWeatherChunkProgression {
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
-        for (ServerLevel level : event.getServer().getAllLevels()) process(level);
+        for (ServerLevel level : event.getServer().getAllLevels()) {
+            TrackAmbientTemperature.tick(level);
+            process(level);
+        }
     }
 
     public static void clearAll() {
         QUEUES.clear();
+        TrackAmbientTemperature.clearAll();
     }
 
     private static boolean outsideKnownTrackBounds(ServerLevel level, ChunkPos chunk) {

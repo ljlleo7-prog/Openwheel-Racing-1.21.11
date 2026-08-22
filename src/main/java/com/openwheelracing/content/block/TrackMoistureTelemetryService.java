@@ -40,7 +40,8 @@ public final class TrackMoistureTelemetryService {
             tiles.add(new TrackMoistureSnapshot.Tile(ChunkPos.getX(entry.getLongKey()), ChunkPos.getZ(entry.getLongKey()), tile.observed, tile.levels));
         });
         return new TrackMoistureSnapshot(live.revision(), live.drySamples(), live.dampSamples(), live.wetSamples(),
-            live.soakingSamples(), live.loadedSamples(), live.estimatedSamples(), surface.revision, live.sectors(), tiles);
+            live.soakingSamples(), live.loadedSamples(), live.estimatedSamples(), surface.revision,
+            live.ambientTemperatureC(), live.sectors(), tiles);
     }
 
     public static void observe(ServerLevel level, BlockPos pos, TrackMoisture moisture) {
@@ -85,7 +86,8 @@ public final class TrackMoistureTelemetryService {
                 (int) Math.floor(node.position().z()), center.level, center.estimated));
         }
         int surfaceRevision = SURFACES.containsKey(level) ? SURFACES.get(level).revision : 0;
-        return new TrackMoistureSnapshot(revision, counts[0], counts[1], counts[2], counts[3], loaded, estimated, surfaceRevision, rows, java.util.List.of());
+        return new TrackMoistureSnapshot(revision, counts[0], counts[1], counts[2], counts[3], loaded, estimated,
+            surfaceRevision, (float) TrackAmbientTemperature.get(level), rows, java.util.List.of());
     }
 
     private static Sample moistureAt(ServerLevel level, double x, double y, double z) {

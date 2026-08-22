@@ -524,8 +524,9 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         int y = 42;
         graphics.fill(x - 2, y - 2, x + MAP_WIDTH + 2, y + 11, 0xD0101418);
         String estimate = moisture.estimatedSamples() > 0 ? " E" + moisture.estimatedSamples() : "";
-        String summary = String.format(java.util.Locale.ROOT, "%s D%d M%d W%d S%d%s",
-            moistureName(moisture.conditionLevel()), moisture.percent(0), moisture.percent(1),
+        String summary = String.format(java.util.Locale.ROOT, "%s %dC D%d M%d W%d S%d%s",
+            moistureName(moisture.conditionLevel()), Math.round(moisture.ambientTemperatureC()),
+            moisture.percent(0), moisture.percent(1),
             moisture.percent(2), moisture.percent(3), estimate);
         graphics.drawString(font, fit(summary, MAP_WIDTH), x, y, moistureTextColor(moisture.conditionLevel()), false);
     }

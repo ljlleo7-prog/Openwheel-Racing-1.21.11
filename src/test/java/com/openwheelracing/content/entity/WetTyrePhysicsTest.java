@@ -41,8 +41,42 @@ class WetTyrePhysicsTest {
     void hotWaterCoolingBoostsSurfaceMuchMoreThanCarcass() {
         double surface = WetTyrePhysics.coolingMultiplier(2, 105.0);
         double carcass = WetTyrePhysics.carcassCoolingMultiplier(2, 105.0);
-        assertEquals(8.0, surface, 1.0E-9);
+        assertEquals(12.0, surface, 1.0E-9);
         assertEquals(1.0 + (surface - 1.0) * 0.35, carcass, 1.0E-9);
+    }
+
+    @Test
+    void waterCoolingSeparatesConductionFromVaporization() {
+        assertEquals(2.5, WetTyrePhysics.coolingMultiplier(3, 89.0), 1.0E-9);
+        assertTrue(WetTyrePhysics.coolingMultiplier(3, 95.0) > 2.5);
+        assertEquals(20.0, WetTyrePhysics.coolingMultiplier(3, 100.0), 1.0E-9);
+    }
+
+    @Test
+    void groovedTyresGenerateLessDryRollingAndLoadHeat() {
+        assertTrue(WetTyrePhysics.rollingHeatMultiplier(TyreType.INTERMEDIATE, 0) < 1.0);
+        assertTrue(WetTyrePhysics.rollingHeatMultiplier(TyreType.WET, 0)
+            < WetTyrePhysics.rollingHeatMultiplier(TyreType.INTERMEDIATE, 0));
+        assertTrue(TyreType.INTERMEDIATE.deformationHeatMultiplier() < TyreType.SLICK.deformationHeatMultiplier());
+        assertTrue(TyreType.WET.deformationHeatMultiplier() < TyreType.INTERMEDIATE.deformationHeatMultiplier());
+    }
+
+    @Test
+    void groovedTyresHaveHigherRollingResistanceDespiteLowerRetainedHeat() {
+        assertEquals(1.0, WetTyrePhysics.rollingResistanceForceMultiplier(TyreType.SLICK), 1.0E-12);
+        assertEquals(1.30, WetTyrePhysics.rollingResistanceForceMultiplier(TyreType.INTERMEDIATE), 1.0E-12);
+        assertEquals(1.50, WetTyrePhysics.rollingResistanceForceMultiplier(TyreType.WET), 1.0E-12);
+        assertTrue(WetTyrePhysics.rollingHeatMultiplier(TyreType.WET, 0)
+            < WetTyrePhysics.rollingHeatMultiplier(TyreType.SLICK, 0));
+    }
+
+    @Test
+    void waterSuppressesHeatWhileDryGroovedScrubRaisesWear() {
+        assertTrue(WetTyrePhysics.loadHeatMultiplier(2) < WetTyrePhysics.loadHeatMultiplier(0));
+        assertTrue(WetTyrePhysics.scrubHeatMultiplier(2) < WetTyrePhysics.scrubHeatMultiplier(0));
+        assertTrue(WetTyrePhysics.scrubWearMultiplier(TyreType.INTERMEDIATE, 0) > 2.0);
+        assertTrue(WetTyrePhysics.scrubWearMultiplier(TyreType.WET, 0)
+            > WetTyrePhysics.scrubWearMultiplier(TyreType.INTERMEDIATE, 0));
     }
 
     @Test
@@ -60,7 +94,7 @@ class WetTyrePhysicsTest {
         double intermediateSurface = WetTyrePhysics.coolingMultiplier(TyreType.INTERMEDIATE, 2, 75.0);
         double intermediateCarcass = WetTyrePhysics.carcassCoolingMultiplier(TyreType.INTERMEDIATE, 2, 105.0);
         double wetSurface = WetTyrePhysics.coolingMultiplier(TyreType.WET, 2, 50.0);
-        double wetCarcass = WetTyrePhysics.carcassCoolingMultiplier(TyreType.WET, 2, 90.0);
+        double wetCarcass = WetTyrePhysics.carcassCoolingMultiplier(TyreType.WET, 2, 100.0);
         assertTrue(intermediateCarcass > intermediateSurface);
         assertTrue(wetCarcass > wetSurface);
     }
@@ -81,7 +115,7 @@ class WetTyrePhysicsTest {
                 * WetTyrePhysics.coolingMultiplier(2, temperature);
             temperature += heat - cooling;
         }
-        assertTrue(temperature > 40.0 && temperature < 82.0, "wet tyre trace ended at " + temperature);
+        assertTrue(temperature > 35.0 && temperature < 75.0, "wet tyre trace ended at " + temperature);
     }
 
     @Test
@@ -95,7 +129,8 @@ class WetTyrePhysicsTest {
         VehiclePhysics.TyreThermalState state = new VehiclePhysics.TyreThermalState(75.0, 75.0, 0.0);
         for (int tick = 0; tick < 3 * 1800; tick++) {
             boolean loaded = tick % 300 >= 150;
-            double frictionPower = loaded ? 28_000.0 * type.deformationHeatMultiplier() : 7_000.0;
+            double frictionPower = (loaded ? 28_000.0 * type.deformationHeatMultiplier() : 7_000.0)
+                * WetTyrePhysics.scrubHeatMultiplier(moisture);
             double brakePower = tick % 300 >= 150 && tick % 300 < 190 ? 3_500.0 : 0.0;
             double surfaceCooling = WetTyrePhysics.coolingMultiplier(type, moisture, state.surfaceTemperatureC());
             double carcassCooling = WetTyrePhysics.carcassCoolingMultiplier(type, moisture, state.carcassTemperatureC());

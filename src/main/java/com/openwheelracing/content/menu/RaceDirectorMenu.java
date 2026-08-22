@@ -128,7 +128,8 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             this.moistureSnapshot = new com.openwheelracing.content.race.TrackMoistureSnapshot(
                 moistureSnapshot.revision(), moistureSnapshot.drySamples(), moistureSnapshot.dampSamples(), moistureSnapshot.wetSamples(),
                 moistureSnapshot.soakingSamples(), moistureSnapshot.loadedSamples(), moistureSnapshot.estimatedSamples(),
-                this.moistureSnapshot.surfaceRevision(), moistureSnapshot.sectors(), this.moistureSnapshot.tiles());
+                this.moistureSnapshot.surfaceRevision(), moistureSnapshot.ambientTemperatureC(),
+                moistureSnapshot.sectors(), this.moistureSnapshot.tiles());
         } else {
             this.moistureSnapshot = moistureSnapshot;
         }

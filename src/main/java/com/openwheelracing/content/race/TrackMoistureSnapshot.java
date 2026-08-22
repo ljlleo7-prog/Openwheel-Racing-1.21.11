@@ -7,10 +7,17 @@ import java.util.List;
 
 public record TrackMoistureSnapshot(int revision, int drySamples, int dampSamples, int wetSamples,
                                     int soakingSamples, int loadedSamples, int estimatedSamples,
-                                    int surfaceRevision, List<Sector> sectors, List<Tile> tiles) {
+                                    int surfaceRevision, float ambientTemperatureC, List<Sector> sectors, List<Tile> tiles) {
     public static final int MAX_SECTORS = 48;
     public static final int MAX_TILES = 4_096;
-    public static final TrackMoistureSnapshot EMPTY = new TrackMoistureSnapshot(0, 0, 0, 0, 0, 0, 0, 0, List.of(), List.of());
+    public static final TrackMoistureSnapshot EMPTY = new TrackMoistureSnapshot(0, 0, 0, 0, 0, 0, 0, 0, 33.0f, List.of(), List.of());
+
+    public TrackMoistureSnapshot(int revision, int drySamples, int dampSamples, int wetSamples,
+                                 int soakingSamples, int loadedSamples, int estimatedSamples,
+                                 int surfaceRevision, List<Sector> sectors, List<Tile> tiles) {
+        this(revision, drySamples, dampSamples, wetSamples, soakingSamples, loadedSamples, estimatedSamples,
+            surfaceRevision, 33.0f, sectors, tiles);
+    }
 
     public TrackMoistureSnapshot {
         sectors = List.copyOf(sectors == null ? List.of() : sectors.subList(0, Math.min(MAX_SECTORS, sectors.size())));
@@ -51,6 +58,7 @@ public record TrackMoistureSnapshot(int revision, int drySamples, int dampSample
         buffer.writeVarInt(snapshot.loadedSamples);
         buffer.writeVarInt(snapshot.estimatedSamples);
         buffer.writeVarInt(snapshot.surfaceRevision);
+        buffer.writeFloat(snapshot.ambientTemperatureC);
         buffer.writeVarInt(snapshot.sectors.size());
         for (Sector sector : snapshot.sectors) {
             buffer.writeInt(sector.x);
@@ -76,6 +84,7 @@ public record TrackMoistureSnapshot(int revision, int drySamples, int dampSample
         int loaded = buffer.readVarInt();
         int estimated = buffer.readVarInt();
         int surfaceRevision = buffer.readVarInt();
+        float ambientTemperatureC = buffer.readFloat();
         int count = Math.min(MAX_SECTORS, buffer.readVarInt());
         ArrayList<Sector> sectors = new ArrayList<>(count);
         for (int i = 0; i < count; i++) sectors.add(new Sector(buffer.readInt(), buffer.readInt(), buffer.readUnsignedByte(), buffer.readBoolean()));
@@ -90,7 +99,7 @@ public record TrackMoistureSnapshot(int revision, int drySamples, int dampSample
             buffer.readBytes(levels);
             tiles.add(new Tile(chunkX, chunkZ, observed, levels));
         }
-        return new TrackMoistureSnapshot(revision, dry, damp, wet, soaking, loaded, estimated, surfaceRevision, sectors, tiles);
+        return new TrackMoistureSnapshot(revision, dry, damp, wet, soaking, loaded, estimated, surfaceRevision, ambientTemperatureC, sectors, tiles);
     }
 
     public record Sector(int x, int z, int moistureLevel, boolean estimated) {

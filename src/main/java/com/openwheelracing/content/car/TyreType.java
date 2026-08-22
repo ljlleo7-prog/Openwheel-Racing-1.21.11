@@ -2,8 +2,8 @@ package com.openwheelracing.content.car;
 
 public enum TyreType {
     SLICK("Slick", 1.0),
-    INTERMEDIATE("Intermediate", 1.18),
-    WET("Wet", 1.38);
+    INTERMEDIATE("Intermediate", 0.78),
+    WET("Wet", 0.62);
 
     private final String displayName;
     private final double deformationHeatMultiplier;
