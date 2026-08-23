@@ -2,6 +2,7 @@ package com.openwheelracing.client.screen;
 
 import com.openwheelracing.client.input.WheelInputManager;
 import com.openwheelracing.client.input.WheelInputSettings;
+import com.openwheelracing.content.entity.VehiclePhysics;
 import java.util.List;
 import java.util.Locale;
 import net.minecraft.client.Minecraft;
@@ -326,18 +327,26 @@ public class WheelSetupScreen extends Screen {
 
     private void drawPreview(GuiGraphics graphics, int x, int y) {
         WheelInputManager.Output output = WheelInputManager.poll(settings);
-        drawBar(graphics, x, y, 140, output.steering(), -1.0f, 1.0f, 0xFF58A6FF, Component.translatable("screen.openwheelracing.wheel_setup.preview_steering"));
-        drawBar(graphics, x, y + 12, 140, output.throttle(), 0.0f, 1.0f, 0xFF7EE787, Component.translatable("screen.openwheelracing.wheel_setup.preview_throttle"));
-        drawBar(graphics, x, y + 24, 140, output.brake(), 0.0f, 1.0f, 0xFFFF7B72, Component.translatable("screen.openwheelracing.wheel_setup.preview_brake"));
+        double steeringDegrees = VehiclePhysics.steeringCommandDegrees(output.steering(),
+            Math.toRadians(VehiclePhysics.PROTOTYPE_MECHANICAL_STEERING_LOCK_DEGREES));
+        drawBar(graphics, x, y, 140, output.steering(), -1.0f, 1.0f, 0xFF58A6FF,
+            Component.translatable("screen.openwheelracing.wheel_setup.preview_steering"),
+            String.format(Locale.ROOT, "%+.1f°", steeringDegrees));
+        drawBar(graphics, x, y + 12, 140, output.throttle(), 0.0f, 1.0f, 0xFF7EE787,
+            Component.translatable("screen.openwheelracing.wheel_setup.preview_throttle"), null);
+        drawBar(graphics, x, y + 24, 140, output.brake(), 0.0f, 1.0f, 0xFFFF7B72,
+            Component.translatable("screen.openwheelracing.wheel_setup.preview_brake"), null);
     }
 
-    private void drawBar(GuiGraphics graphics, int x, int y, int width, float value, float min, float max, int color, Component label) {
+    private void drawBar(GuiGraphics graphics, int x, int y, int width, float value, float min, float max,
+                         int color, Component label, String displayedValue) {
         graphics.drawString(font, label, x - 76, y, 0xFFC9D1D9, false);
         graphics.fill(x, y + 2, x + width, y + 8, 0xFF15191F);
         float normalized = (value - min) / (max - min);
         int filled = Math.round(WheelInputSettings.clamp(normalized, 0.0f, 1.0f) * width);
         graphics.fill(x, y + 2, x + filled, y + 8, color);
-        graphics.drawString(font, String.format(Locale.ROOT, "%.2f", value), x + width + 6, y, 0xFFE8EDF2, false);
+        graphics.drawString(font, displayedValue == null ? String.format(Locale.ROOT, "%.2f", value) : displayedValue,
+            x + width + 6, y, 0xFFE8EDF2, false);
     }
 
     private enum CalibrationPoint {

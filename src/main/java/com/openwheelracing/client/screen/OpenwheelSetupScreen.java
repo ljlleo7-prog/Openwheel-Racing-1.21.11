@@ -20,7 +20,7 @@ import org.lwjgl.glfw.GLFW;
 
 public class OpenwheelSetupScreen extends Screen {
     private static final int PANEL_WIDTH = 380;
-    private static final int CONTENT_HEIGHT = 816;
+    private static final int CONTENT_HEIGHT = 902;
     private static final int GRAPH_WIDTH = 156;
     private static final int GRAPH_HEIGHT = 74;
     private static final int GRAPH_TEMP_MIN = 50;
@@ -66,7 +66,11 @@ public class OpenwheelSetupScreen extends Screen {
             settings.showDrivingHud = !settings.showDrivingHud;
             button.setMessage(hudToggleLabel("driving", settings.showDrivingHud));
         }).bounds(right, y + 58, buttonWidth, 20).build());
-        addRenderableWidget(new ShiftLightRangeSlider(x + 24, y + 94, PANEL_WIDTH - 48, 18));
+        addRenderableWidget(Button.builder(timingScopeLabel(), button -> {
+            settings.allTimeLapTiming = !settings.allTimeLapTiming;
+            button.setMessage(timingScopeLabel());
+        }).bounds(right, y + 82, buttonWidth, 20).build());
+        addRenderableWidget(new ShiftLightRangeSlider(x + 24, y + 118, PANEL_WIDTH - 48, 18));
 
         int ersY = y + 156;
         addRenderableWidget(new ErsRangeSlider(x + 24, ersY + 28, PANEL_WIDTH - 48, 18, ErsRange.BALANCED));
@@ -84,21 +88,24 @@ public class OpenwheelSetupScreen extends Screen {
         addRenderableWidget(new BatterySlider(left, ersY + 364, PANEL_WIDTH - 32, 20));
 
         int controlsY = y + 702;
+        addRenderableWidget(new TractionControlStrengthSlider(left, controlsY + 18, PANEL_WIDTH - 32, 20));
+        addRenderableWidget(new AssistEnvelopeSlider(left, controlsY + 44, PANEL_WIDTH - 32, 20, AssistEnvelope.TC));
+        addRenderableWidget(new AssistEnvelopeSlider(left, controlsY + 70, PANEL_WIDTH - 32, 20, AssistEnvelope.ABS));
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.keyboard_setup"), button -> Minecraft.getInstance().setScreen(new KeyboardSetupScreen(this)))
-            .bounds(left, controlsY + 24, PANEL_WIDTH - 32, 20)
+            .bounds(left, controlsY + 98, PANEL_WIDTH - 32, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.wheel_setup"), button -> Minecraft.getInstance().setScreen(new WheelSetupScreen(this)))
-            .bounds(left, controlsY + 48, PANEL_WIDTH - 32, 20)
+            .bounds(left, controlsY + 122, PANEL_WIDTH - 32, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.keybind_setup"), button -> Minecraft.getInstance().setScreen(new KeyBindsScreen(this, Minecraft.getInstance().options)))
-            .bounds(left, controlsY + 72, PANEL_WIDTH - 32, 20)
+            .bounds(left, controlsY + 146, PANEL_WIDTH - 32, 20)
             .build());
 
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.done"), button -> saveAndClose())
-            .bounds(x + 106, y + 788, 76, 20)
+            .bounds(x + 106, y + 874, 76, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.cancel"), button -> closeToParent())
-            .bounds(x + 198, y + 788, 76, 20)
+            .bounds(x + 198, y + 874, 76, 20)
             .build());
         updateWidgetVisibility();
     }
@@ -118,13 +125,13 @@ public class OpenwheelSetupScreen extends Screen {
         int x = (width - PANEL_WIDTH) / 2;
         int y = 42 - scrollOffset;
         graphics.fill(x, Math.max(8, y), x + PANEL_WIDTH, Math.min(height - 8, y + CONTENT_HEIGHT), 0xDD1F2328);
-        fillPanel(graphics, x + 6, y + 22, y + 124, 0xFF2A3038);
+        fillPanel(graphics, x + 6, y + 22, y + 148, 0xFF2A3038);
         fillPanel(graphics, x + 6, y + 140, y + 478, 0xFF293443);
         fillPanel(graphics, x + 6, y + 494, y + 672, 0xFF242D38);
-        fillPanel(graphics, x + 6, y + 688, y + 776, 0xFF2F3640);
+        fillPanel(graphics, x + 6, y + 688, y + 856, 0xFF2F3640);
         drawIfVisible(graphics, title, x + 10, y + 8, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.visual"), x + 12, y + 24, 0xFFC9D1D9);
-        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.shift_lights"), x + 24, y + 82, 0xFFE8EDF2);
+        drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.shift_lights"), x + 24, y + 106, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers"), x + 12, y + 142, 0xFFC9D1D9);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.balanced_range"), x + 24, y + 160, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.ers.harvest_range"), x + 24, y + 234, 0xFFE8EDF2);
@@ -300,10 +307,17 @@ public class OpenwheelSetupScreen extends Screen {
         );
     }
 
+    private Component timingScopeLabel() {
+        return Component.translatable(settings.allTimeLapTiming
+            ? "screen.openwheelracing.setup.timing_scope.all_time"
+            : "screen.openwheelracing.setup.timing_scope.session");
+    }
+
     private void saveAndClose() {
         WheelInputSettings.set(settings);
         WheelInputSettings.save(Minecraft.getInstance());
         OWRClientInputHandler.resetErsSync();
+        OWRClientInputHandler.resetTimingScopeSync();
         closeToParent();
     }
 
@@ -327,6 +341,57 @@ public class OpenwheelSetupScreen extends Screen {
         ErsRange(int min, int max) {
             this.min = min;
             this.max = max;
+        }
+    }
+
+    private class TractionControlStrengthSlider extends AbstractSliderButton {
+        private TractionControlStrengthSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, Component.empty(), settings.tractionControlStrength);
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.translatable("screen.openwheelracing.setup.tc_strength", Math.round(settings.tractionControlStrength * 100.0f)));
+        }
+
+        @Override
+        protected void applyValue() {
+            settings.tractionControlStrength = (float) value;
+        }
+    }
+
+    private enum AssistEnvelope {
+        TC,
+        ABS
+    }
+
+    private class AssistEnvelopeSlider extends AbstractSliderButton {
+        private final AssistEnvelope envelope;
+
+        private AssistEnvelopeSlider(int x, int y, int width, int height, AssistEnvelope envelope) {
+            super(x, y, width, height, Component.empty(),
+                ((envelope == AssistEnvelope.TC ? settings.tractionControlEnvelope : settings.absEnvelope) - 0.90f) / 0.20f);
+            this.envelope = envelope;
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            float setting = envelope == AssistEnvelope.TC ? settings.tractionControlEnvelope : settings.absEnvelope;
+            setMessage(Component.translatable(envelope == AssistEnvelope.TC
+                ? "screen.openwheelracing.setup.tc_envelope"
+                : "screen.openwheelracing.setup.abs_envelope", Math.round(setting * 100.0f)));
+        }
+
+        @Override
+        protected void applyValue() {
+            float setting = 0.90f + (float) value * 0.20f;
+            if (envelope == AssistEnvelope.TC) {
+                settings.tractionControlEnvelope = setting;
+            } else {
+                settings.absEnvelope = setting;
+            }
         }
     }
 

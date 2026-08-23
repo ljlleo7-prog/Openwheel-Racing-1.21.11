@@ -29,6 +29,7 @@ public final class OWRLapProfiles extends SavedData {
         Codec.STRING.fieldOf("driver_name").forGetter(BestLapProfile::driverName),
         ORIGIN_CODEC.optionalFieldOf("origin", Origin.PLAYER).forGetter(BestLapProfile::origin),
         Codec.LONG.fieldOf("lap_record_id").forGetter(BestLapProfile::lapRecordId),
+        Codec.LONG.optionalFieldOf("session_id", 0L).forGetter(BestLapProfile::sessionId),
         Codec.INT.fieldOf("lap_millis").forGetter(BestLapProfile::lapMillis),
         Codec.DOUBLE.fieldOf("route_length").forGetter(BestLapProfile::routeLength),
         Codec.DOUBLE.fieldOf("spacing").forGetter(BestLapProfile::spacing),
@@ -73,14 +74,22 @@ public final class OWRLapProfiles extends SavedData {
     }
 
     public Optional<BestLapProfile> get(UUID trackId, UUID routeId, UUID driverId) {
-        return profiles.stream().filter(profile -> profile.trackId().equals(trackId) && profile.routeId().equals(routeId) && profile.driverId().equals(driverId)).findFirst();
+        return get(trackId, routeId, driverId, LapTimingScope.ALL_TIME, 0L);
+    }
+
+    public Optional<BestLapProfile> get(UUID trackId, UUID routeId, UUID driverId, LapTimingScope scope, long sessionId) {
+        return profiles.stream()
+            .filter(profile -> profile.trackId().equals(trackId) && profile.routeId().equals(routeId) && profile.driverId().equals(driverId))
+            .filter(profile -> scope == LapTimingScope.ALL_TIME || profile.sessionId() == sessionId)
+            .min(Comparator.comparingInt(BestLapProfile::lapMillis));
     }
 
     public boolean putIfFaster(BestLapProfile profile) {
-        Optional<BestLapProfile> previous = get(profile.trackId(), profile.routeId(), profile.driverId());
+        Optional<BestLapProfile> previous = get(profile.trackId(), profile.routeId(), profile.driverId(), LapTimingScope.SESSION, profile.sessionId());
         if (previous.isPresent() && previous.get().lapMillis() <= profile.lapMillis()
             && (previous.get().hasRecordedLine() || !profile.hasRecordedLine())) return false;
-        profiles.removeIf(existing -> existing.trackId().equals(profile.trackId()) && existing.routeId().equals(profile.routeId()) && existing.driverId().equals(profile.driverId()));
+        profiles.removeIf(existing -> existing.trackId().equals(profile.trackId()) && existing.routeId().equals(profile.routeId())
+            && existing.driverId().equals(profile.driverId()) && existing.sessionId() == profile.sessionId());
         profiles.add(profile);
         trim(profile.trackId(), profile.routeId());
         revision++;
@@ -113,7 +122,8 @@ public final class OWRLapProfiles extends SavedData {
         AI
     }
 
-    public record BestLapProfile(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, Origin origin, long lapRecordId,
+    public record BestLapProfile(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, Origin origin,
+                                 long lapRecordId, long sessionId,
                                  int lapMillis, double routeLength, double spacing, int[] timeMillis, int[] speedCmps,
                                  int[] lateralOffsetCm, int[] headingResidualMilliRad, long createdGameTime) {
         public BestLapProfile {
@@ -126,21 +136,36 @@ public final class OWRLapProfiles extends SavedData {
 
         public BestLapProfile(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, long lapRecordId,
                               int lapMillis, double routeLength, double spacing, int[] timeMillis, int[] speedCmps, long createdGameTime) {
-            this(dimensionId, trackId, routeId, driverId, driverName, Origin.PLAYER, lapRecordId, lapMillis, routeLength, spacing, timeMillis, speedCmps,
+            this(dimensionId, trackId, routeId, driverId, driverName, Origin.PLAYER, lapRecordId, 0L, lapMillis, routeLength, spacing, timeMillis, speedCmps,
                 new int[0], new int[0], createdGameTime);
         }
 
         public BestLapProfile(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, long lapRecordId,
                               int lapMillis, double routeLength, double spacing, int[] timeMillis, int[] speedCmps,
                               int[] lateralOffsetCm, int[] headingResidualMilliRad, long createdGameTime) {
-            this(dimensionId, trackId, routeId, driverId, driverName, Origin.PLAYER, lapRecordId, lapMillis, routeLength, spacing,
+            this(dimensionId, trackId, routeId, driverId, driverName, Origin.PLAYER, lapRecordId, 0L, lapMillis, routeLength, spacing,
                 timeMillis, speedCmps, lateralOffsetCm, headingResidualMilliRad, createdGameTime);
         }
 
-        private static BestLapProfile create(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, Origin origin, long lapRecordId,
+        public BestLapProfile(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, long lapRecordId,
+                              long sessionId, int lapMillis, double routeLength, double spacing, int[] timeMillis, int[] speedCmps,
+                              int[] lateralOffsetCm, int[] headingResidualMilliRad, long createdGameTime) {
+            this(dimensionId, trackId, routeId, driverId, driverName, Origin.PLAYER, lapRecordId, sessionId, lapMillis, routeLength,
+                spacing, timeMillis, speedCmps, lateralOffsetCm, headingResidualMilliRad, createdGameTime);
+        }
+
+        public BestLapProfile(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, Origin origin,
+                              long lapRecordId, int lapMillis, double routeLength, double spacing, int[] timeMillis, int[] speedCmps,
+                              int[] lateralOffsetCm, int[] headingResidualMilliRad, long createdGameTime) {
+            this(dimensionId, trackId, routeId, driverId, driverName, origin, lapRecordId, 0L, lapMillis, routeLength, spacing,
+                timeMillis, speedCmps, lateralOffsetCm, headingResidualMilliRad, createdGameTime);
+        }
+
+        private static BestLapProfile create(String dimensionId, UUID trackId, UUID routeId, UUID driverId, String driverName, Origin origin,
+                                             long lapRecordId, long sessionId,
                                              int lapMillis, double routeLength, double spacing, List<Integer> times, List<Integer> speeds,
                                              List<Integer> lateralOffsets, List<Integer> headingResiduals, long createdGameTime) {
-            return new BestLapProfile(dimensionId, trackId, routeId, driverId, driverName, origin, lapRecordId, lapMillis, routeLength, spacing,
+            return new BestLapProfile(dimensionId, trackId, routeId, driverId, driverName, origin, lapRecordId, sessionId, lapMillis, routeLength, spacing,
                 times.stream().mapToInt(Integer::intValue).toArray(), speeds.stream().mapToInt(Integer::intValue).toArray(),
                 lateralOffsets.stream().mapToInt(Integer::intValue).toArray(), headingResiduals.stream().mapToInt(Integer::intValue).toArray(), createdGameTime);
         }

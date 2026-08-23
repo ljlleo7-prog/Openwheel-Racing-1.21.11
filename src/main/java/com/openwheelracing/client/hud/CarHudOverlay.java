@@ -4,6 +4,7 @@ import com.openwheelracing.client.input.WheelInputSettings;
 import com.openwheelracing.client.map.CircuitMapRenderer;
 import com.openwheelracing.client.map.ClientTrackMapCache;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
+import com.openwheelracing.content.entity.VehiclePhysics;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.RaceFlagMode;
 import com.openwheelracing.content.race.timing.RaceGap;
@@ -591,7 +592,7 @@ public final class CarHudOverlay {
 
     private static void renderPhysicsDebug(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {
         int x = 8;
-        int y = graphics.guiHeight() - 94;
+        int y = graphics.guiHeight() - 132;
         int width = 170;
         drawHorizontalMeter(graphics, x + 8, y + 13, 66, normalizedAbs(car.getDebugVelocityLat(), 1.4), signedDemandColor(car.getDebugVelocityLat()));
         drawHorizontalMeter(graphics, x + 96, y + 13, 66, normalizedAbs(car.getDebugYawRate(), 0.55), signedDemandColor(car.getDebugYawRate()));
@@ -604,6 +605,53 @@ public final class CarHudOverlay {
         drawCornerDemand(graphics, x + 116, y + 67, car.getDebugRrDemand(), car.getDebugRrSlipAngleDegrees());
         graphics.drawString(font, String.format("%.0fkm/h", car.getSpeedKmh()), x + 63, y + 45, 0xFFE8E8E8, false);
         graphics.drawString(font, String.format("%.1f°", car.getFrontWheelSteerDegrees()), x + 68, y + 56, 0xFFFFDD88, false);
+
+        double referenceSpeed = Math.max(8.0, Math.abs(car.getDebugVelocityLong()) * 1.30);
+        drawWheelSpeedSync(graphics, font, "FL", x + 8, y + 88, 66, referenceSpeed,
+            car.getWheelAngularSpeedFl(), car.getDebugFlPatchLongitudinalSpeed());
+        drawWheelSpeedSync(graphics, font, "FR", x + 96, y + 88, 66, referenceSpeed,
+            car.getWheelAngularSpeedFr(), car.getDebugFrPatchLongitudinalSpeed());
+        drawWheelSpeedSync(graphics, font, "RL", x + 8, y + 108, 66, referenceSpeed,
+            car.getWheelAngularSpeedRl(), car.getDebugRlPatchLongitudinalSpeed());
+        drawWheelSpeedSync(graphics, font, "RR", x + 96, y + 108, 66, referenceSpeed,
+            car.getWheelAngularSpeedRr(), car.getDebugRrPatchLongitudinalSpeed());
+    }
+
+    private static void drawWheelSpeedSync(GuiGraphics graphics, Font font, String wheel,
+                                           int x, int y, int width, double referenceSpeed,
+                                           double angularSpeed, double patchSpeed) {
+        VehiclePhysics.WheelSpeedSynchronization sync = VehiclePhysics.wheelSpeedSynchronization(
+            angularSpeed, VehiclePhysics.NOMINAL_WHEEL_RADIUS_METERS, patchSpeed);
+        int barX = x + 16;
+        int barWidth = width - 16;
+        int roadFill = (int) Math.round(barWidth * Math.min(1.0, Math.abs(sync.patchSpeed()) / referenceSpeed));
+        int wheelFill = (int) Math.round(barWidth * Math.min(1.0, Math.abs(sync.surfaceSpeed()) / referenceSpeed));
+        int color = wheelSyncColor(sync);
+        graphics.drawString(font, wheel, x, y + 3, color, false);
+        graphics.fill(barX, y, barX + barWidth, y + 3, 0xFF1B2026);
+        graphics.fill(barX, y, barX + roadFill, y + 3, 0xFF7D8590);
+        graphics.fill(barX, y + 5, barX + barWidth, y + 8, 0xFF1B2026);
+        graphics.fill(barX, y + 5, barX + wheelFill, y + 8, color);
+        int percent = (int) Math.round(sync.relativeDifference() * 100.0);
+        String delta = sync.directionMismatch() ? "REV" : (percent > 0 ? "+" : "") + percent + "%";
+        graphics.drawString(font, delta, barX + barWidth - font.width(delta), y + 10, color, false);
+    }
+
+    private static int wheelSyncColor(VehiclePhysics.WheelSpeedSynchronization sync) {
+        if (sync.directionMismatch()) {
+            return 0xFFD65CFF;
+        }
+        double difference = sync.relativeDifference();
+        if (difference < -0.18) {
+            return 0xFF66CCFF;
+        }
+        if (difference > 0.18) {
+            return 0xFFFF7777;
+        }
+        if (Math.abs(difference) > 0.08) {
+            return 0xFFFFD044;
+        }
+        return 0xFF7EE787;
     }
 
     private static void drawHorizontalMeter(GuiGraphics graphics, int x, int y, int width, float progress, int color) {
@@ -618,7 +666,7 @@ public final class CarHudOverlay {
         graphics.fill(cx - radius, cy - radius, cx + radius, cy + radius, 0xFF101418);
         int fill = Math.max(1, Math.min(radius, (int) Math.round(radius * Math.min(1.4, Math.abs(demand)) / 1.4)));
         graphics.fill(cx - fill, cy - fill, cx + fill, cy + fill, color);
-        graphics.renderOutline(cx - radius, cy - radius, radius * 2, radius * 2, slipDegrees > 12.0 ? 0xFFFF7777 : 0xFF3A414A);
+        graphics.renderOutline(cx - radius, cy - radius, radius * 2, radius * 2, Math.abs(slipDegrees) > 12.0 ? 0xFFFF7777 : 0xFF3A414A);
     }
 
     private static float normalizedAbs(double value, double max) {
@@ -651,6 +699,9 @@ public final class CarHudOverlay {
         }
         if (demand > 1.0) {
             return 0xFFFFD044;
+        }
+        if (demand > 0.85) {
+            return 0xFFFFFF88;
         }
         return 0xFFB7FFB7;
     }

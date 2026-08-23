@@ -33,6 +33,9 @@ public final class OWRClientInputHandler {
     private static int sentLicoBalancedPower = Integer.MIN_VALUE;
     private static int sentLicoAttackPower = Integer.MIN_VALUE;
     private static double sentCapacityMj = Double.NaN;
+    private static int sentTimingScope = Integer.MIN_VALUE;
+    private static float mappedKeyboardThrottle;
+    private static float mappedKeyboardBrake;
 
     private OWRClientInputHandler() {
     }
@@ -41,10 +44,20 @@ public final class OWRClientInputHandler {
         lastSyncedCarId = Integer.MIN_VALUE;
     }
 
+    public static void resetTimingScopeSync() {
+        sentTimingScope = Integer.MIN_VALUE;
+    }
+
     public static void onClientTick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.screen != null) {
             return;
+        }
+
+        int timingScope = Boolean.TRUE.equals(WheelInputSettings.get().allTimeLapTiming) ? 1 : 0;
+        if (sentTimingScope != timingScope) {
+            OWRNetwork.sendToServer(new OWRNetwork.SetLapTimingScopeMessage(timingScope));
+            sentTimingScope = timingScope;
         }
 
         TrackEditorScreen.preloadAroundPlayer(mc);
@@ -65,6 +78,8 @@ public final class OWRClientInputHandler {
         if (!(mc.player.getVehicle() instanceof OpenwheelCarEntity)) {
             lastSyncedCarId = Integer.MIN_VALUE;
             keyboardSteeringSource = true;
+            mappedKeyboardThrottle = 0.0f;
+            mappedKeyboardBrake = 0.0f;
             return;
         }
 
@@ -74,21 +89,39 @@ public final class OWRClientInputHandler {
         KeyboardInputSettings keyboard = settings.keyboard.sanitized();
         car.setKeyboardSteeringTuning(keyboard.lowSpeedSteeringRate, keyboard.highSpeedSteeringRate, keyboard.lowSpeedCenteringRate, keyboard.highSpeedCenteringRate,
             keyboard.lowSpeedSteeringGain, keyboard.highSpeedSteeringGain, keyboard.speedResponseCurve);
-        float keyboardThrottle = isDown(OWRKeyMappings.THROTTLE) ? 1.0f : 0.0f;
-        float keyboardBrake = isDown(OWRKeyMappings.BRAKE) ? 1.0f : 0.0f;
-        float keyboardSteering = (isDown(OWRKeyMappings.STEER_RIGHT) ? 1.0f : 0.0f)
-            - (isDown(OWRKeyMappings.STEER_LEFT) ? 1.0f : 0.0f);
-        float throttle = Math.max(keyboardThrottle, wheel.throttle());
-        float brake = Math.max(keyboardBrake, wheel.brake());
-        float steering = keyboardSteering;
-        if (Math.abs(wheel.steering()) > 0.0f) {
-            steering = wheel.steering();
-            keyboardSteeringSource = false;
-        } else if (keyboardSteering != 0.0f) {
-            keyboardSteeringSource = true;
+        boolean keyboardThrottlePressed = isDown(OWRKeyMappings.THROTTLE);
+        boolean keyboardBrakePressed = isDown(OWRKeyMappings.BRAKE);
+        boolean assistedKeyboard = settings.drivingMode.usesKeyboardAssistance();
+        if (assistedKeyboard) {
+            mappedKeyboardThrottle = KeyboardPedalResponse.next(mappedKeyboardThrottle, keyboardThrottlePressed, 0.30f,
+                keyboard.throttleRiseSeconds(), keyboard.throttleReleaseSeconds(), KeyboardPedalResponse.TICK_SECONDS);
+            mappedKeyboardBrake = KeyboardPedalResponse.next(mappedKeyboardBrake, keyboardBrakePressed, 0.65f,
+                keyboard.brakeRiseSeconds(), keyboard.brakeReleaseSeconds(), KeyboardPedalResponse.TICK_SECONDS);
+        } else {
+            mappedKeyboardThrottle = 0.0f;
+            mappedKeyboardBrake = 0.0f;
         }
+        float keyboardThrottle = assistedKeyboard ? mappedKeyboardThrottle : 0.0f;
+        float keyboardBrake = assistedKeyboard ? mappedKeyboardBrake : 0.0f;
+        float keyboardSteering = assistedKeyboard
+            ? (isDown(OWRKeyMappings.STEER_RIGHT) ? 1.0f : 0.0f) - (isDown(OWRKeyMappings.STEER_LEFT) ? 1.0f : 0.0f)
+            : 0.0f;
+        float wheelThrottle = assistedKeyboard ? 0.0f : wheel.throttle();
+        float wheelBrake = assistedKeyboard ? 0.0f : wheel.brake();
+        float wheelSteering = assistedKeyboard ? 0.0f : wheel.steering();
+        float throttle = assistedKeyboard ? keyboardThrottle : wheelThrottle;
+        float brake = assistedKeyboard ? keyboardBrake : wheelBrake;
+        float steering = assistedKeyboard ? keyboardSteering : wheelSteering;
+        keyboardSteeringSource = assistedKeyboard;
+        float stabilityAssistStrength = assistedKeyboard ? 1.0f : 0.0f;
+        car.setTractionControlStrength(settings.tractionControlStrength);
+        car.setAssistGripEnvelopes(settings.tractionControlEnvelope, settings.absEnvelope);
+        car.setKeyboardStabilityAssistStrength(stabilityAssistStrength);
         car.tickLocalClientMovement(driveInputSequence + 1, throttle, brake, steering, keyboardSteeringSource);
-        sendDriveInputIfNeeded(keyboardThrottle, keyboardBrake, keyboardSteering, wheel.throttle(), wheel.brake(), wheel.steering(), keyboard, keyboardSteeringSource);
+        sendDriveInputIfNeeded(keyboardThrottle, keyboardBrake, wheelThrottle, wheelBrake,
+            (float) car.getSteeringAngleRadians(), keyboard,
+            settings.tractionControlStrength, settings.tractionControlEnvelope, settings.absEnvelope,
+            stabilityAssistStrength, keyboardSteeringSource);
 
         boolean shiftUpDown = isDown(OWRKeyMappings.SHIFT_UP) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_UP);
         boolean shiftDownDown = isDown(OWRKeyMappings.SHIFT_DOWN) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_DOWN);
@@ -278,16 +311,21 @@ public final class OWRClientInputHandler {
         ));
     }
 
-    private static void sendDriveInputIfNeeded(float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering,
-            KeyboardInputSettings keyboard, boolean keyboardSteeringSource) {
-        boolean idle = keyboardThrottle == 0.0f && keyboardBrake == 0.0f && keyboardSteering == 0.0f && wheelThrottle == 0.0f && wheelBrake == 0.0f && wheelSteering == 0.0f;
+    private static void sendDriveInputIfNeeded(float keyboardThrottle, float keyboardBrake, float wheelThrottle, float wheelBrake,
+            float steeringAngleRadians,
+            KeyboardInputSettings keyboard, float tractionControlStrength, float tractionControlEnvelope,
+            float absEnvelope, float stabilityAssistStrength, boolean keyboardSteeringSource) {
+        boolean idle = keyboardThrottle == 0.0f && keyboardBrake == 0.0f
+            && wheelThrottle == 0.0f && wheelBrake == 0.0f && Math.abs(steeringAngleRadians) < 1.0E-5f;
         if (idle && sentIdleDriveInput) {
             return;
         }
         sentIdleDriveInput = idle;
-        OWRNetwork.sendToServer(new OWRNetwork.DriveInputMessage(++driveInputSequence, keyboardThrottle, keyboardBrake, keyboardSteering, wheelThrottle, wheelBrake, wheelSteering,
+        OWRNetwork.sendToServer(new OWRNetwork.DriveInputMessage(++driveInputSequence,
+            keyboardThrottle, keyboardBrake, wheelThrottle, wheelBrake, steeringAngleRadians,
             keyboard.lowSpeedSteeringRate, keyboard.highSpeedSteeringRate, keyboard.lowSpeedCenteringRate, keyboard.highSpeedCenteringRate,
-            keyboard.lowSpeedSteeringGain, keyboard.highSpeedSteeringGain, keyboard.speedResponseCurve, keyboardSteeringSource));
+            keyboard.lowSpeedSteeringGain, keyboard.highSpeedSteeringGain, keyboard.speedResponseCurve,
+            tractionControlStrength, tractionControlEnvelope, absEnvelope, stabilityAssistStrength, keyboardSteeringSource));
     }
 
     /** Poll the raw GLFW key state regardless of Minecraft conflict context. */

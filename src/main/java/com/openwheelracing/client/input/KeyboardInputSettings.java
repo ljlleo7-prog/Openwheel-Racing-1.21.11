@@ -11,6 +11,9 @@ public class KeyboardInputSettings {
     public float lowSpeedSteeringGain = 1.0f;
     public float highSpeedSteeringGain = 1.0f;
     public float speedResponseCurve = 1.0f;
+    public float throttleResponse = 1.0f;
+    public float brakeResponse = 1.0f;
+    public Float stabilityAssistStrength = 0.65f;
 
     public static KeyboardInputSettings defaults() {
         return new KeyboardInputSettings();
@@ -25,6 +28,9 @@ public class KeyboardInputSettings {
         copy.lowSpeedSteeringGain = lowSpeedSteeringGain;
         copy.highSpeedSteeringGain = highSpeedSteeringGain;
         copy.speedResponseCurve = speedResponseCurve;
+        copy.throttleResponse = throttleResponse;
+        copy.brakeResponse = brakeResponse;
+        copy.stabilityAssistStrength = stabilityAssistStrength;
         return copy.sanitized();
     }
 
@@ -36,10 +42,39 @@ public class KeyboardInputSettings {
         lowSpeedSteeringGain = clampFinite(lowSpeedSteeringGain, 0.7f, 1.3f);
         highSpeedSteeringGain = clampFinite(highSpeedSteeringGain, 0.5f, 1.3f);
         speedResponseCurve = clampFinite(speedResponseCurve, 0.6f, 1.4f);
+        throttleResponse = clampPositive(throttleResponse, 0.5f, 2.0f);
+        brakeResponse = clampPositive(brakeResponse, 0.5f, 2.0f);
+        stabilityAssistStrength = stabilityAssistStrength == null
+            ? 0.65f
+            : clampNonNegative(stabilityAssistStrength, 0.0f, 1.0f, 0.65f);
         return this;
+    }
+
+    public float throttleRiseSeconds() {
+        return 0.30f / throttleResponse;
+    }
+
+    public float throttleReleaseSeconds() {
+        return 0.08f / throttleResponse;
+    }
+
+    public float brakeRiseSeconds() {
+        return 0.15f / brakeResponse;
+    }
+
+    public float brakeReleaseSeconds() {
+        return 0.08f / brakeResponse;
     }
 
     private static float clampFinite(float value, float min, float max) {
         return WheelInputSettings.clamp(Float.isFinite(value) ? value : 1.0f, min, max);
+    }
+
+    private static float clampPositive(float value, float min, float max) {
+        return WheelInputSettings.clamp(Float.isFinite(value) && value > 0.0f ? value : 1.0f, min, max);
+    }
+
+    private static float clampNonNegative(float value, float min, float max, float fallback) {
+        return WheelInputSettings.clamp(Float.isFinite(value) && value >= 0.0f ? value : fallback, min, max);
     }
 }

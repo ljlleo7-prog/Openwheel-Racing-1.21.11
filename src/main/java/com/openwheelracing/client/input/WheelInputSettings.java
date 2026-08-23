@@ -22,10 +22,12 @@ public class WheelInputSettings {
     public int selectedJoystickId = -1;
     public String selectedJoystickName = "";
     public boolean combinedPedals;
+    public KeyboardDrivingMode drivingMode = KeyboardDrivingMode.ASSISTED_KEYBOARD;
     public Boolean showDrivingHud;
     public Boolean showSetupHud;
     public Boolean showRankingHud;
     public Boolean showPhysicsDebugHud;
+    public Boolean allTimeLapTiming;
     public Integer ersBalancedClipStartKmh;
     public Integer ersBalancedClipEndKmh;
     public Integer ersHarvestNegativeStartKmh;
@@ -43,6 +45,9 @@ public class WheelInputSettings {
     public Double ersCapacityMj;
     public Integer shiftLightStartRpm;
     public Integer shiftLightFullRpm;
+    public Float tractionControlStrength;
+    public Float tractionControlEnvelope;
+    public Float absEnvelope;
     public KeyboardInputSettings keyboard = KeyboardInputSettings.defaults();
     public AxisBinding steering = new AxisBinding(-1, false, -1.0f, 1.0f, 0.0f, 0.08f, 1.0f, 1.0f);
     public AxisBinding throttle = new AxisBinding(-1, true, -1.0f, 1.0f, 1.0f, 0.03f, 1.0f, 1.0f);
@@ -124,6 +129,9 @@ public class WheelInputSettings {
 
     public WheelInputSettings sanitized() {
         version = CURRENT_VERSION;
+        if (drivingMode == null) {
+            drivingMode = KeyboardDrivingMode.ASSISTED_KEYBOARD;
+        }
         if (selectedJoystickName == null) {
             selectedJoystickName = "";
         }
@@ -155,6 +163,9 @@ public class WheelInputSettings {
         if (showPhysicsDebugHud == null) {
             showPhysicsDebugHud = true;
         }
+        if (allTimeLapTiming == null) {
+            allTimeLapTiming = false;
+        }
         ersBalancedClipStartKmh = clampInt(ersBalancedClipStartKmh == null ? 260 : ersBalancedClipStartKmh, 220, 350);
         ersBalancedClipEndKmh = clampInt(ersBalancedClipEndKmh == null ? 315 : ersBalancedClipEndKmh, 230, 360);
         if (ersBalancedClipEndKmh < ersBalancedClipStartKmh + 10) {
@@ -178,6 +189,9 @@ public class WheelInputSettings {
         ersCapacityMj = clampDouble(ersCapacityMj == null ? 4.0 : ersCapacityMj, 2.0, 12.0);
         shiftLightStartRpm = clampInt(shiftLightStartRpm == null ? 9_000 : shiftLightStartRpm, 5_000, 12_500);
         shiftLightFullRpm = clampInt(shiftLightFullRpm == null ? 13_000 : shiftLightFullRpm, 6_000, 15_000);
+        tractionControlStrength = clamp(tractionControlStrength == null ? 0.35f : tractionControlStrength, 0.0f, 1.0f);
+        tractionControlEnvelope = clamp(tractionControlEnvelope == null ? 1.02f : tractionControlEnvelope, 0.90f, 1.10f);
+        absEnvelope = clamp(absEnvelope == null ? 0.98f : absEnvelope, 0.90f, 1.10f);
         if (shiftLightFullRpm < shiftLightStartRpm + 500) {
             shiftLightFullRpm = Math.min(15_000, shiftLightStartRpm + 500);
         }
@@ -205,6 +219,8 @@ public class WheelInputSettings {
         settings.showSetupHud = true;
         settings.showRankingHud = true;
         settings.showPhysicsDebugHud = true;
+        settings.allTimeLapTiming = false;
+        settings.drivingMode = KeyboardDrivingMode.ASSISTED_KEYBOARD;
         settings.ersBalancedClipStartKmh = 260;
         settings.ersBalancedClipEndKmh = 315;
         settings.ersHarvestNegativeStartKmh = 260;
@@ -222,6 +238,9 @@ public class WheelInputSettings {
         settings.ersCapacityMj = 4.0;
         settings.shiftLightStartRpm = 9_000;
         settings.shiftLightFullRpm = 13_000;
+        settings.tractionControlStrength = 0.35f;
+        settings.tractionControlEnvelope = 1.02f;
+        settings.absEnvelope = 0.98f;
         settings.buttons = new EnumMap<>(ButtonRole.class);
         return settings;
     }

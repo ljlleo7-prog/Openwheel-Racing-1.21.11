@@ -3,6 +3,7 @@ package com.openwheelracing.content.entity;
 import com.openwheelracing.content.car.PrototypeCarSetup;
 
 public final class VehiclePhysics {
+    static final double BASE_GRIP_ENVELOPE = 1.06;
     public static final double KMH_PER_BLOCK_PER_TICK = 72.0;
     public static final double SPEED_TO_BLOCKS_PER_TICK = 1.0 / KMH_PER_BLOCK_PER_TICK;
     public static final double PIT_SPEED_LIMIT_KMH = 79.0;
@@ -11,6 +12,8 @@ public final class VehiclePhysics {
     public static final double ASPHALT_DRAG = 0.997;
     public static final double PIT_LANE_GRIP = ASPHALT_GRIP;
     public static final double PIT_LANE_DRAG = ASPHALT_DRAG;
+    public static final double NOMINAL_WHEEL_RADIUS_METERS = 0.33;
+    public static final double PROTOTYPE_MECHANICAL_STEERING_LOCK_DEGREES = 34.0;
 
     public static final double TYRE_AMBIENT_TEMPERATURE_C = 33.0;
     public static final double TYRE_HEAT_CAPACITY_J_PER_C = 43_500.0;
@@ -77,6 +80,318 @@ public final class VehiclePhysics {
         double availableBrakeForce = ASPHALT_MU_LONGITUDINAL * surfaceGrip * normalLoad;
         double brakeAcceleration = Math.min(MAX_BRAKE_FORCE, availableBrakeForce) / CAR_MASS_KG;
         return initialSpeedMetersPerSecond * initialSpeedMetersPerSecond / (2.0 * brakeAcceleration);
+    }
+
+    static double combinedSlipScale(double normalizedDemand) {
+        if (normalizedDemand <= 1.0) {
+            return 1.0;
+        }
+        double excess = normalizedDemand - 1.0;
+        double slidingRetention = 1.0 - 0.12 * (1.0 - Math.exp(-square(excess / 0.45)));
+        return slidingRetention / normalizedDemand;
+    }
+
+    static PlanarForce opposingPlanarForce(double velocityLongitudinal, double velocityLateral, double magnitude) {
+        double speed = Math.hypot(velocityLongitudinal, velocityLateral);
+        if (speed <= 1.0E-9 || magnitude <= 0.0) {
+            return new PlanarForce(0.0, 0.0);
+        }
+        double scale = -magnitude / speed;
+        return new PlanarForce(velocityLongitudinal * scale, velocityLateral * scale);
+    }
+
+    static double tyreRelaxationGainForPatch(double wheelLongitudinalSpeed, double wheelLateralSpeed,
+                                              double relaxationLength, double dtSeconds) {
+        double patchSpeed = Math.hypot(wheelLongitudinalSpeed, wheelLateralSpeed);
+        double timeConstant = relaxationLength / Math.max(1.0, patchSpeed);
+        return 1.0 - Math.exp(-dtSeconds / timeConstant);
+    }
+
+    static WheelPatchVelocity wheelPatchVelocity(double velocityLongitudinal, double velocityLateral,
+                                                  double yawRate, double localX, double localZ,
+                                                  double steeringAngle) {
+        double patchLateral = velocityLateral - yawRate * localZ;
+        double patchLongitudinal = velocityLongitudinal + yawRate * localX;
+        double cos = Math.cos(steeringAngle);
+        double sin = Math.sin(steeringAngle);
+        double wheelLongitudinal = patchLongitudinal * cos - patchLateral * sin;
+        double wheelLateral = patchLongitudinal * sin + patchLateral * cos;
+        return new WheelPatchVelocity(wheelLongitudinal, wheelLateral);
+    }
+
+    static PlanarForce wheelForceToBody(double wheelLongitudinalForce, double wheelLateralForce,
+                                         double steeringAngle) {
+        double cos = Math.cos(steeringAngle);
+        double sin = Math.sin(steeringAngle);
+        return new PlanarForce(
+            wheelLongitudinalForce * cos + wheelLateralForce * sin,
+            -wheelLongitudinalForce * sin + wheelLateralForce * cos);
+    }
+
+    static double minecraftYawMoment(double localX, double localZ,
+                                     double bodyLongitudinalForce, double bodyLateralForce) {
+        return localX * bodyLongitudinalForce - localZ * bodyLateralForce;
+    }
+
+    static BodyAcceleration minecraftBodyAcceleration(double velocityLongitudinal, double velocityLateral,
+                                                       double yawRate, double forceLongitudinal,
+                                                       double forceLateral, double massKg) {
+        return new BodyAcceleration(
+            forceLongitudinal / massKg - yawRate * velocityLateral,
+            forceLateral / massKg + yawRate * velocityLongitudinal);
+    }
+
+    static double kinematicLongitudinalSlip(double wheelAngularSpeed, double wheelRadius,
+                                            double patchLongitudinalSpeed) {
+        double wheelSurfaceSpeed = wheelAngularSpeed * wheelRadius;
+        return clamp((wheelSurfaceSpeed - patchLongitudinalSpeed)
+            / Math.max(3.0, Math.abs(patchLongitudinalSpeed)), -1.8, 1.8);
+    }
+
+    public static WheelSpeedSynchronization wheelSpeedSynchronization(double wheelAngularSpeed,
+                                                                       double wheelRadius,
+                                                                       double patchLongitudinalSpeed) {
+        double surfaceSpeed = wheelAngularSpeed * Math.max(0.0, wheelRadius);
+        double reference = Math.max(3.0, Math.abs(patchLongitudinalSpeed));
+        double relativeDifference = (Math.abs(surfaceSpeed) - Math.abs(patchLongitudinalSpeed)) / reference;
+        boolean directionMismatch = Math.abs(surfaceSpeed) > 0.5
+            && Math.abs(patchLongitudinalSpeed) > 0.5
+            && Math.signum(surfaceSpeed) != Math.signum(patchLongitudinalSpeed);
+        return new WheelSpeedSynchronization(surfaceSpeed, patchLongitudinalSpeed,
+            clamp(relativeDifference, -2.0, 2.0), directionMismatch);
+    }
+
+    static double drivenAxleSpeedMetersPerSecond(double leftWheelAngularSpeed,
+                                                  double rightWheelAngularSpeed,
+                                                  double wheelRadius,
+                                                  double fallbackChassisSpeed,
+                                                  boolean wheelSpeedsInitialized) {
+        if (!wheelSpeedsInitialized
+                || !Double.isFinite(leftWheelAngularSpeed)
+                || !Double.isFinite(rightWheelAngularSpeed)) {
+            return Math.max(0.0, Math.abs(fallbackChassisSpeed));
+        }
+        double differentialCarrierAngularSpeed = (leftWheelAngularSpeed + rightWheelAngularSpeed) * 0.5;
+        return Math.abs(differentialCarrierAngularSpeed) * Math.max(0.0, wheelRadius);
+    }
+
+    static double brakingWheelAngularTarget(double wheelLongitudinalSpeed, double wheelRadius,
+                                             double slipReferenceSpeed, double brakingSlipMagnitude) {
+        double rollingDirection = Math.signum(wheelLongitudinalSpeed);
+        if (rollingDirection == 0.0 || wheelRadius <= 0.0) {
+            return 0.0;
+        }
+        double targetSurfaceSpeed = Math.max(0.0, Math.abs(wheelLongitudinalSpeed)
+            - Math.max(0.0, brakingSlipMagnitude) * Math.max(0.0, slipReferenceSpeed));
+        return rollingDirection * targetSurfaceSpeed / wheelRadius;
+    }
+
+    static double tractionControlledDriveRequest(double request, double limit, double strength) {
+        if (request <= 0.0) return request;
+        double limited = Math.min(request, Math.max(0.0, limit));
+        return request + (limited - request) * clamp(strength, 0.0, 1.0);
+    }
+
+    static double offAxisDriveAuthority(double longitudinalSpeed, double totalSpeed) {
+        double forwardFraction = Math.abs(longitudinalSpeed) / Math.max(1.0, Math.abs(totalSpeed));
+        return 0.30 + 0.70 * clamp(forwardFraction / 0.45, 0.0, 1.0);
+    }
+
+    static double brakeTravelDirection(double longitudinalSpeed, double driveDirection) {
+        if (Math.abs(driveDirection) > 0.5) {
+            return Math.signum(driveDirection);
+        }
+        return Math.abs(longitudinalSpeed) > 0.1 ? Math.signum(longitudinalSpeed) : 0.0;
+    }
+
+    static double understeerFeedbackRelief(double frontSaturation, double rearSaturation,
+                                           double frontSlipAngle, double rearSlipAngle,
+                                           double steeringAngle, double longitudinalSpeed,
+                                           double yawRate, double wheelbase) {
+        if (Math.abs(steeringAngle) < Math.toRadians(0.25) || Math.abs(longitudinalSpeed) < 5.0) {
+            return 0.0;
+        }
+        if (yawRate * steeringAngle < -0.01) {
+            return 0.0;
+        }
+        double frontSlipExcess = Math.abs(frontSlipAngle) - Math.abs(rearSlipAngle) - Math.toRadians(0.5);
+        if (frontSlipExcess <= 0.0) {
+            return 0.0;
+        }
+        double frontDominance = Math.max(0.0, frontSaturation - rearSaturation * 0.85);
+        double saturationEvidence = clamp((Math.max(frontSaturation, frontDominance) - 0.92) / 0.36, 0.0, 1.0);
+        double slipEvidence = smoothstep(frontSlipExcess / Math.toRadians(4.0));
+        double desiredYawRate = Math.abs(longitudinalSpeed * Math.tan(steeringAngle) / Math.max(0.5, wheelbase));
+        double yawProgress = Math.abs(yawRate);
+        double yawDeficit = clamp((desiredYawRate - yawProgress) / Math.max(0.05, desiredYawRate * 0.45), 0.0, 1.0);
+        return saturationEvidence * slipEvidence * yawDeficit;
+    }
+
+    static double keyboardGripSteeringLimit(double speedMetersPerSecond, double wheelbase,
+                                            double massKg, double gravity, double downforce,
+                                            double baseLateralMu, double gripCoefficient) {
+        double speedSquared = speedMetersPerSecond * speedMetersPerSecond;
+        if (speedSquared < 4.0) {
+            return Math.PI * 0.5;
+        }
+        double normalAcceleration = Math.max(0.0, gravity)
+            + Math.max(0.0, downforce) / Math.max(1.0, massKg);
+        double availableLateralAcceleration = Math.max(0.0, baseLateralMu)
+            * Math.max(0.0, gripCoefficient) * normalAcceleration * 1.08;
+        return Math.atan(Math.max(0.0, wheelbase) * availableLateralAcceleration / speedSquared);
+    }
+
+    static double softCombinedLongitudinalLimit(double request, double lateralForce,
+                                                 double longitudinalLimit, double lateralLimit,
+                                                 double strength, double envelope) {
+        double lateralUse = Math.abs(lateralForce) / Math.max(1.0, lateralLimit);
+        double permitted = Math.max(0.0, envelope);
+        double available = Math.max(0.0, longitudinalLimit)
+            * Math.sqrt(Math.max(0.0, permitted * permitted - lateralUse * lateralUse));
+        double bounded = clamp(request, -available, available);
+        return request + (bounded - request) * clamp(strength, 0.0, 1.0);
+    }
+
+    static double activeGripEnvelope(boolean assistEnabled, double configuredEnvelope) {
+        return assistEnabled ? clamp(configuredEnvelope, 0.90, 1.10) : BASE_GRIP_ENVELOPE;
+    }
+
+    static double tractionControlForceEnvelope(boolean assistEnabled, double configuredEnvelope,
+                                                double strength) {
+        if (!assistEnabled) {
+            return BASE_GRIP_ENVELOPE;
+        }
+        double blend = clamp(strength, 0.0, 1.0);
+        double target = clamp(configuredEnvelope, 0.90, 1.10);
+        return BASE_GRIP_ENVELOPE + (target - BASE_GRIP_ENVELOPE) * blend;
+    }
+
+    static double gripEnvelopeForInputSource(boolean keyboardInput, double assistedEnvelope) {
+        return keyboardInput ? assistedEnvelope : Double.POSITIVE_INFINITY;
+    }
+
+    static double dynamicFrontBrakeShare(double frontNormalLoad, double rearNormalLoad,
+                                         double steeringUse, double baseFrontBias) {
+        double loadShare = Math.max(0.0, frontNormalLoad)
+            / Math.max(1.0, Math.max(0.0, frontNormalLoad) + Math.max(0.0, rearNormalLoad));
+        return clamp(Math.max(baseFrontBias, loadShare + 0.04 * clamp(steeringUse, 0.0, 1.0)),
+            baseFrontBias, 0.70);
+    }
+
+    static BrakeAxleRequests balanceBrakeRequests(double serviceBrakeDemand, double rearPowertrainBrake,
+                                                   double targetFrontShare) {
+        double requested = Math.max(0.0, serviceBrakeDemand);
+        double powertrain = Math.max(0.0, rearPowertrainBrake);
+        if (requested <= 1.0E-9) {
+            return new BrakeAxleRequests(0.0, powertrain, powertrain);
+        }
+        double front = requested * clamp(targetFrontShare, 0.0, 1.0);
+        double rear = requested - front;
+        double blendedPowertrain = Math.min(powertrain, rear);
+        return new BrakeAxleRequests(front, rear, blendedPowertrain);
+    }
+
+    static AxleWheelLoads lateralAxleLoads(double axleNormalLoad, double lateralLoadTransfer) {
+        double halfLoad = axleNormalLoad * 0.5;
+        double halfTransfer = lateralLoadTransfer * 0.5;
+        return new AxleWheelLoads(
+            Math.max(75.0, halfLoad + halfTransfer),
+            Math.max(75.0, halfLoad - halfTransfer));
+    }
+
+    static double absLimitedBrakeForce(double brakeForce, double lateralForce,
+                                       double longitudinalLimit, double lateralLimit, double envelope) {
+        return softCombinedLongitudinalLimit(
+            brakeForce, lateralForce, longitudinalLimit, lateralLimit, 1.0, envelope);
+    }
+
+    static double absLimitedRearRequest(double totalRequest, double driveRequest,
+                                        double lateralForce, double longitudinalLimit,
+                                        double lateralLimit, double envelope) {
+        double positiveDrive = Math.max(0.0, driveRequest);
+        double totalDecelerationRequest = Math.min(0.0, totalRequest - positiveDrive);
+        return positiveDrive + absLimitedBrakeForce(
+            totalDecelerationRequest, lateralForce, longitudinalLimit, lateralLimit, envelope);
+    }
+
+    static double tractionLimitedDriveForceForLoadTransfer(double requestedDriveForce,
+                                                           double availableDrivenAxleForce) {
+        double limit = Math.max(0.0, availableDrivenAxleForce);
+        return clamp(requestedDriveForce, -limit, limit);
+    }
+
+    static ErsWheelPower ersWheelPower(double icePowerWatts, double ersPowerWatts) {
+        double netPower = Math.max(0.0, icePowerWatts) + ersPowerWatts;
+        return new ErsWheelPower(Math.max(0.0, netPower), Math.max(0.0, -netPower));
+    }
+
+    static ErsEnergyFlow reconcileErsEnergy(double requestedIceEnergyJoules,
+                                            double requestedPositiveErsEnergyJoules,
+                                            double requestedNegativeErsEnergyJoules,
+                                            double actualPositiveWheelEnergyJoules,
+                                            double additionalHarvestLimitJoules) {
+        double ice = Math.max(0.0, requestedIceEnergyJoules);
+        double positiveErs = Math.max(0.0, requestedPositiveErsEnergyJoules);
+        double scheduledRegen = Math.max(0.0, requestedNegativeErsEnergyJoules);
+        double wheelEnergy = Math.max(0.0, actualPositiveWheelEnergyJoules);
+        double iceAvailableToWheels = Math.max(0.0, ice - scheduledRegen);
+        double iceUsedAtWheels = Math.min(iceAvailableToWheels, wheelEnergy);
+        double positiveErsUsed = Math.min(positiveErs, Math.max(0.0, wheelEnergy - iceUsedAtWheels));
+        double positiveErsRefund = positiveErs - positiveErsUsed;
+        double unusedIce = Math.max(0.0, iceAvailableToWheels - iceUsedAtWheels);
+        double additionalHarvest = Math.min(Math.max(0.0, additionalHarvestLimitJoules), unusedIce);
+        return new ErsEnergyFlow(positiveErsUsed, positiveErsRefund, additionalHarvest);
+    }
+
+    static boolean isSurfaceWithinReferenceDistance(double tyreBottomY, double surfaceTopY,
+                                                     double maximumGap, double tolerance) {
+        double gap = tyreBottomY - surfaceTopY;
+        double allowedTolerance = Math.max(0.0, tolerance);
+        return gap >= -allowedTolerance - 1.0E-9
+            && gap <= Math.max(0.0, maximumGap) + allowedTolerance + 1.0E-9;
+    }
+
+    static double steeringLockForInputSource(boolean keyboardInput, double mechanicalLock,
+                                             double keyboardSpeedLock) {
+        return keyboardInput ? Math.max(0.0, keyboardSpeedLock) : Math.max(0.0, mechanicalLock);
+    }
+
+    public static double steeringCommandDegrees(double normalizedInput, double steeringLockRadians) {
+        return Math.toDegrees(clamp(normalizedInput, -1.0, 1.0) * Math.max(0.0, steeringLockRadians));
+    }
+
+    static double clampSteeringAngleCommand(double steeringAngleRadians, double mechanicalLockRadians) {
+        double finiteAngle = Double.isFinite(steeringAngleRadians) ? steeringAngleRadians : 0.0;
+        double lock = Math.max(0.0, mechanicalLockRadians);
+        return clamp(finiteAngle, -lock, lock);
+    }
+
+    record ErsWheelPower(double propulsionWatts, double regenerativeBrakingWatts) {}
+
+    record ErsEnergyFlow(double positiveErsUsedJoules, double positiveErsRefundJoules,
+                         double additionalIceHarvestJoules) {}
+
+    static KeyboardStabilityInputs keyboardStabilityInputs(double throttle, double brake,
+                                                            double steeringInput, double speedMetersPerSecond,
+                                                            double frontSlipAngle, double rearSlipAngle,
+                                                            double baseFrontBrakeBias, double strength) {
+        double assist = clamp(strength, 0.0, 1.0);
+        double steerUse = smoothstep((Math.abs(steeringInput) - 0.08) / 0.92);
+        double speedUse = smoothstep((speedMetersPerSecond - 5.0) / 20.0);
+        double frontExcess = Math.max(0.0, Math.abs(frontSlipAngle) - Math.abs(rearSlipAngle) - Math.toRadians(1.0));
+        double rearExcess = Math.max(0.0, Math.abs(rearSlipAngle) - Math.abs(frontSlipAngle) - Math.toRadians(0.5));
+        double understeer = clamp(frontExcess / Math.toRadians(7.0), 0.0, 1.0);
+        double oversteer = clamp(rearExcess / Math.toRadians(5.0), 0.0, 1.0);
+
+        double throttleIntervention = Math.max(understeer, steerUse * speedUse * 0.30);
+        double deliveredThrottle = clamp(throttle, 0.0, 1.0)
+            * (1.0 - assist * throttleIntervention * 0.50);
+        double deliveredBrake = clamp(brake, 0.0, 1.0)
+            * (1.0 - assist * oversteer * 0.25);
+        double brakeStabilityDemand = Math.max(oversteer, steerUse * speedUse * 0.35);
+        double frontBrakeBias = clamp(baseFrontBrakeBias + assist * brakeStabilityDemand * 0.12,
+            baseFrontBrakeBias, 0.72);
+        return new KeyboardStabilityInputs(deliveredThrottle, deliveredBrake, frontBrakeBias);
     }
 
     public static double tyreBrakeHeatPowerPerTyre(double brakeInput, double totalBrakeHeatPower, double axleBias) {
@@ -261,6 +576,15 @@ public final class VehiclePhysics {
         return Math.max(target, value - amount);
     }
 
+    private static double smoothstep(double value) {
+        double t = clamp(value, 0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
+    }
+
+    private static double square(double value) {
+        return value * value;
+    }
+
     private static double interpolate(double value, double from, double to, double fromValue, double toValue) {
         double t = clamp((value - from) / Math.max(1.0E-9, to - from), 0.0, 1.0);
         return fromValue + (toValue - fromValue) * t;
@@ -271,6 +595,28 @@ public final class VehiclePhysics {
     }
 
     public record TyreThermalState(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure) {
+    }
+
+    public record WheelSpeedSynchronization(double surfaceSpeed, double patchSpeed,
+                                             double relativeDifference, boolean directionMismatch) {
+    }
+
+    record PlanarForce(double longitudinal, double lateral) {
+    }
+
+    record WheelPatchVelocity(double longitudinal, double lateral) {
+    }
+
+    record BodyAcceleration(double longitudinal, double lateral) {
+    }
+
+    record AxleWheelLoads(double negativeLocalX, double positiveLocalX) {
+    }
+
+    record KeyboardStabilityInputs(double throttle, double brake, double frontBrakeBias) {
+    }
+
+    record BrakeAxleRequests(double front, double rear, double rearPowertrain) {
     }
 
     public static double simulateTyreEquilibriumC(double initialTemperatureC, double heatPowerWatts, double compoundHeatGain, double longitudinalG, double lateralG, double speedMetersPerSecond, int ticks) {

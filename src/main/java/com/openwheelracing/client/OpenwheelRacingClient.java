@@ -2,6 +2,7 @@ package com.openwheelracing.client;
 
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.client.input.WheelInputSettings;
+import com.openwheelracing.client.input.OWRClientCommands;
 import com.openwheelracing.client.render.OpenwheelCarRenderer;
 import com.openwheelracing.client.render.SafetyCarRenderer;
 import com.openwheelracing.client.screen.CarAssemblyScreen;
@@ -30,6 +31,7 @@ public final class OpenwheelRacingClient {
         NeoForge.EVENT_BUS.addListener(OpenwheelRacingClientEvents::onMouseButton);
         NeoForge.EVENT_BUS.addListener(OpenwheelRacingClientEvents::onRenderPlayer);
         NeoForge.EVENT_BUS.addListener(OpenwheelRacingClientEvents::onRenderLevelAfterEntities);
+        NeoForge.EVENT_BUS.addListener(OWRClientCommands::register);
     }
 
     private void onClientSetup(FMLClientSetupEvent event) {

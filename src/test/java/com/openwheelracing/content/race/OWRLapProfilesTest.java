@@ -55,6 +55,18 @@ class OWRLapProfilesTest {
         assertTrue(recorded.hasRecordedLine());
     }
 
+    @Test
+    void profilePreservesSessionIdentity() {
+        UUID track = UUID.randomUUID();
+        UUID route = UUID.randomUUID();
+        UUID driver = UUID.randomUUID();
+        OWRLapProfiles.BestLapProfile first = profile(track, route, driver, 1L, 3_000);
+        OWRLapProfiles.BestLapProfile second = profile(track, route, driver, 2L, 3_500);
+
+        assertEquals(1L, first.sessionId());
+        assertEquals(2L, second.sessionId());
+    }
+
     private static OWRLapProfiles.BestLapProfile profile(UUID trackId, UUID routeId, int[] times, int[] speeds) {
         return new OWRLapProfiles.BestLapProfile("minecraft:overworld", trackId, routeId, UUID.randomUUID(), "Driver", 1L, 4000, 16.0, 4.0, times, speeds, 1L);
     }
@@ -62,5 +74,11 @@ class OWRLapProfilesTest {
     private static OWRLapProfiles.BestLapProfile profile(UUID trackId, UUID routeId, UUID driverId, int lapMillis) {
         return new OWRLapProfiles.BestLapProfile("minecraft:overworld", trackId, routeId, driverId, "Driver", 1L, lapMillis, 16.0, 4.0,
             new int[]{0, 1000, 2000, 3000}, new int[]{1000, 2000, 3000, 4000}, 1L);
+    }
+
+    private static OWRLapProfiles.BestLapProfile profile(UUID trackId, UUID routeId, UUID driverId, long sessionId, int lapMillis) {
+        return new OWRLapProfiles.BestLapProfile("minecraft:overworld", trackId, routeId, driverId, "Driver",
+            sessionId, sessionId, lapMillis, 16.0, 4.0,
+            new int[]{0, 1000, 2000, 3000}, new int[]{1000, 2000, 3000, 4000}, new int[0], new int[0], sessionId);
     }
 }

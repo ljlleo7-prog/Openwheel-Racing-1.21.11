@@ -1,6 +1,7 @@
 package com.openwheelracing.network;
 
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
+import com.openwheelracing.content.entity.VehiclePhysics;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.ServerLiveryTextures;
@@ -8,6 +9,8 @@ import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.content.menu.CarPartsReplacementMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.race.LapProfileCollector;
+import com.openwheelracing.content.race.LapTimingPreferences;
+import com.openwheelracing.content.race.LapTimingScope;
 import com.openwheelracing.content.race.OWRLapProfiles;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.OWRRaceControlState;
@@ -91,6 +94,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorToggleRuleMessage.TYPE, codec(RaceDirectorToggleRuleMessage::encode, RaceDirectorToggleRuleMessage::decode), RaceDirectorToggleRuleMessage::handle);
         registrar.playToServer(RaceDirectorSetMinLapTicksMessage.TYPE, codec(RaceDirectorSetMinLapTicksMessage::encode, RaceDirectorSetMinLapTicksMessage::decode), RaceDirectorSetMinLapTicksMessage::handle);
         registrar.playToServer(RaceDirectorSetRaceLapLimitMessage.TYPE, codec(RaceDirectorSetRaceLapLimitMessage::encode, RaceDirectorSetRaceLapLimitMessage::decode), RaceDirectorSetRaceLapLimitMessage::handle);
+        registrar.playToServer(SetLapTimingScopeMessage.TYPE, codec(SetLapTimingScopeMessage::encode, SetLapTimingScopeMessage::decode), SetLapTimingScopeMessage::handle);
         registrar.playToServer(RaceDirectorSetErsLimitMessage.TYPE, codec(RaceDirectorSetErsLimitMessage::encode, RaceDirectorSetErsLimitMessage::decode), RaceDirectorSetErsLimitMessage::handle);
         registrar.playToServer(RaceDirectorSetGlobalFlagMessage.TYPE, codec(RaceDirectorSetGlobalFlagMessage::encode, RaceDirectorSetGlobalFlagMessage::decode), RaceDirectorSetGlobalFlagMessage::handle);
         registrar.playToServer(RaceDirectorCycleConditionModifierMessage.TYPE, codec(RaceDirectorCycleConditionModifierMessage::encode, RaceDirectorCycleConditionModifierMessage::decode), RaceDirectorCycleConditionModifierMessage::handle);
@@ -136,7 +140,11 @@ public final class OWRNetwork {
             car.getRelaxedFlLateralForce(),
             car.getRelaxedFrLateralForce(),
             car.getRelaxedRlLateralForce(),
-            car.getRelaxedRrLateralForce()
+            car.getRelaxedRrLateralForce(),
+            car.getWheelAngularSpeedFl(),
+            car.getWheelAngularSpeedFr(),
+            car.getWheelAngularSpeedRl(),
+            car.getWheelAngularSpeedRr()
         ));
     }
 
@@ -205,19 +213,12 @@ public final class OWRNetwork {
         return Math.max(-1.0f, Math.min(1.0f, value));
     }
 
-    private static float sanitizeKeyboardPedal(float value) {
-        return sanitizePedal(value) >= 0.5f ? 1.0f : 0.0f;
-    }
-
-    private static float sanitizeKeyboardSteering(float value) {
-        float clamped = sanitizeSteering(value);
-        if (clamped > 0.5f) {
-            return 1.0f;
+    private static float sanitizeSteeringAngle(float value) {
+        if (!Float.isFinite(value)) {
+            return 0.0f;
         }
-        if (clamped < -0.5f) {
-            return -1.0f;
-        }
-        return 0.0f;
+        float mechanicalLock = (float) Math.toRadians(VehiclePhysics.PROTOTYPE_MECHANICAL_STEERING_LOCK_DEGREES);
+        return Math.max(-mechanicalLock, Math.min(mechanicalLock, value));
     }
 
     public record TuneCarMessage(int slot, int delta) implements CustomPacketPayload {
@@ -492,9 +493,11 @@ public final class OWRNetwork {
         }
     }
 
-    public record DriveInputMessage(int sequence, float keyboardThrottle, float keyboardBrake, float keyboardSteering, float wheelThrottle, float wheelBrake, float wheelSteering,
+    public record DriveInputMessage(int sequence, float keyboardThrottle, float keyboardBrake, float wheelThrottle, float wheelBrake, float steeringAngleRadians,
             float lowSpeedSteeringRate, float highSpeedSteeringRate, float lowSpeedCenteringRate, float highSpeedCenteringRate,
-            float lowSpeedSteeringGain, float highSpeedSteeringGain, float speedResponseCurve, boolean keyboardSteeringSource) implements CustomPacketPayload {
+            float lowSpeedSteeringGain, float highSpeedSteeringGain, float speedResponseCurve,
+            float tractionControlStrength, float tractionControlEnvelope, float absEnvelope,
+            float stabilityAssistStrength, boolean keyboardSteeringSource) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<DriveInputMessage> TYPE = payloadType("drive_input_message");
 
         @Override
@@ -506,10 +509,9 @@ public final class OWRNetwork {
             buffer.writeVarInt(message.sequence);
             buffer.writeFloat(message.keyboardThrottle);
             buffer.writeFloat(message.keyboardBrake);
-            buffer.writeFloat(message.keyboardSteering);
             buffer.writeFloat(message.wheelThrottle);
             buffer.writeFloat(message.wheelBrake);
-            buffer.writeFloat(message.wheelSteering);
+            buffer.writeFloat(message.steeringAngleRadians);
             buffer.writeFloat(message.lowSpeedSteeringRate);
             buffer.writeFloat(message.highSpeedSteeringRate);
             buffer.writeFloat(message.lowSpeedCenteringRate);
@@ -517,12 +519,23 @@ public final class OWRNetwork {
             buffer.writeFloat(message.lowSpeedSteeringGain);
             buffer.writeFloat(message.highSpeedSteeringGain);
             buffer.writeFloat(message.speedResponseCurve);
+            buffer.writeFloat(message.tractionControlStrength);
+            buffer.writeFloat(message.tractionControlEnvelope);
+            buffer.writeFloat(message.absEnvelope);
+            buffer.writeFloat(message.stabilityAssistStrength);
             buffer.writeBoolean(message.keyboardSteeringSource);
         }
 
         private static DriveInputMessage decode(FriendlyByteBuf buffer) {
-            return new DriveInputMessage(buffer.readVarInt(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
-                buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readBoolean());
+            return new DriveInputMessage(
+                buffer.readVarInt(),
+                buffer.readFloat(), buffer.readFloat(),
+                buffer.readFloat(), buffer.readFloat(),
+                buffer.readFloat(),
+                buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
+                buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
+                buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
+                buffer.readBoolean());
         }
 
         private static void handle(DriveInputMessage message, IPayloadContext context) {
@@ -531,26 +544,27 @@ public final class OWRNetwork {
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
-                float keyboardThrottle = sanitizeKeyboardPedal(message.keyboardThrottle);
-                float keyboardBrake = sanitizeKeyboardPedal(message.keyboardBrake);
-                float keyboardSteering = sanitizeKeyboardSteering(message.keyboardSteering);
+                float keyboardThrottle = sanitizePedal(message.keyboardThrottle);
+                float keyboardBrake = sanitizePedal(message.keyboardBrake);
                 float throttle = keyboardThrottle;
                 float brake = keyboardBrake;
-                float steering = keyboardSteering;
                 boolean wheelAllowed = OWRRaceControlState.get(player.level()).isWheelInputAllowed();
                 if (wheelAllowed) {
                     float wheelThrottle = sanitizePedal(message.wheelThrottle);
                     float wheelBrake = sanitizePedal(message.wheelBrake);
-                    float wheelSteering = sanitizeSteering(message.wheelSteering);
                     throttle = Math.max(keyboardThrottle, wheelThrottle);
                     brake = Math.max(keyboardBrake, wheelBrake);
-                    if (Math.abs(wheelSteering) > 0.0f) {
-                        steering = wheelSteering;
-                    }
                 }
-                car.applyDriveInput(message.sequence, throttle, brake, steering, wheelAllowed ? message.keyboardSteeringSource : true);
+                boolean keyboardSource = wheelAllowed ? message.keyboardSteeringSource : true;
+                float steeringAngle = !wheelAllowed && !message.keyboardSteeringSource
+                    ? 0.0f
+                    : sanitizeSteeringAngle(message.steeringAngleRadians);
+                car.applyDriveInput(message.sequence, throttle, brake, steeringAngle, keyboardSource);
                 car.setKeyboardSteeringTuning(message.lowSpeedSteeringRate, message.highSpeedSteeringRate, message.lowSpeedCenteringRate, message.highSpeedCenteringRate,
                     message.lowSpeedSteeringGain, message.highSpeedSteeringGain, message.speedResponseCurve);
+                car.setTractionControlStrength(message.tractionControlStrength);
+                car.setAssistGripEnvelopes(message.tractionControlEnvelope, message.absEnvelope);
+                car.setKeyboardStabilityAssistStrength(message.stabilityAssistStrength);
             });
         }
     }
@@ -974,17 +988,23 @@ public final class OWRNetwork {
 
     public static void sendRankingBoard(ServerPlayer player, ServerLevel level) {
         OWRLapRecords records = OWRLapRecords.get(level);
-        PacketDistributor.sendToPlayer(player, new RankingBoardMessage(records.getActiveSessionName(), records.getActiveSessionBestLapsSorted()));
+        LapTimingScope scope = LapTimingPreferences.get(player.getUUID());
+        PacketDistributor.sendToPlayer(player, rankingBoard(records, scope));
     }
 
     public static void broadcastRankingBoard(net.minecraft.server.MinecraftServer server, net.minecraft.server.level.ServerLevel level) {
         OWRLapRecords records = OWRLapRecords.get(level);
-        RankingBoardMessage msg = new RankingBoardMessage(records.getActiveSessionName(), records.getActiveSessionBestLapsSorted());
         for (net.minecraft.server.level.ServerPlayer p : server.getPlayerList().getPlayers()) {
             if (p.level().dimension().equals(level.dimension())) {
-                PacketDistributor.sendToPlayer(p, msg);
+                PacketDistributor.sendToPlayer(p, rankingBoard(records, LapTimingPreferences.get(p.getUUID())));
             }
         }
+    }
+
+    private static RankingBoardMessage rankingBoard(OWRLapRecords records, LapTimingScope scope) {
+        return scope == LapTimingScope.ALL_TIME
+            ? new RankingBoardMessage("ALL TIME", records.getPlayerBestLapsSorted())
+            : new RankingBoardMessage("(" + records.getActiveSessionId() + ")", records.getActiveSessionBestLapsSorted());
     }
 
     public record LiveRaceTimingSnapshotMessage(LiveRaceTimingSnapshot snapshot) implements CustomPacketPayload {
@@ -1290,7 +1310,10 @@ public final class OWRNetwork {
         }
     }
 
-    public record DriveInputAckMessage(int entityId, int ackedInputSequence, double x, double y, double z, double deltaX, double deltaY, double deltaZ, float yaw, double yawRate, double steeringAngle, double relaxedFlLatForce, double relaxedFrLatForce, double relaxedRlLatForce, double relaxedRrLatForce) implements CustomPacketPayload {
+    public record DriveInputAckMessage(int entityId, int ackedInputSequence, double x, double y, double z,
+            double deltaX, double deltaY, double deltaZ, float yaw, double yawRate, double steeringAngle,
+            double relaxedFlLatForce, double relaxedFrLatForce, double relaxedRlLatForce, double relaxedRrLatForce,
+            double wheelAngularSpeedFl, double wheelAngularSpeedFr, double wheelAngularSpeedRl, double wheelAngularSpeedRr) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<DriveInputAckMessage> TYPE = payloadType("drive_input_ack_message");
 
         @Override
@@ -1314,10 +1337,14 @@ public final class OWRNetwork {
             buffer.writeDouble(message.relaxedFrLatForce);
             buffer.writeDouble(message.relaxedRlLatForce);
             buffer.writeDouble(message.relaxedRrLatForce);
+            buffer.writeDouble(message.wheelAngularSpeedFl);
+            buffer.writeDouble(message.wheelAngularSpeedFr);
+            buffer.writeDouble(message.wheelAngularSpeedRl);
+            buffer.writeDouble(message.wheelAngularSpeedRr);
         }
 
         private static DriveInputAckMessage decode(FriendlyByteBuf buffer) {
-            return new DriveInputAckMessage(buffer.readVarInt(), buffer.readVarInt(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readFloat(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
+            return new DriveInputAckMessage(buffer.readVarInt(), buffer.readVarInt(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readFloat(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
         }
 
         private static void handle(DriveInputAckMessage message, IPayloadContext context) {
@@ -1383,6 +1410,36 @@ public final class OWRNetwork {
                     return;
                 }
                 OWRRaceControlState.get(player.level()).setMinimumValidLapTicks(message.ticks);
+            });
+        }
+    }
+
+    public record SetLapTimingScopeMessage(int scope) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<SetLapTimingScopeMessage> TYPE = payloadType("set_lap_timing_scope_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(SetLapTimingScopeMessage message, FriendlyByteBuf buffer) {
+            buffer.writeByte(message.scope);
+        }
+
+        private static SetLapTimingScopeMessage decode(FriendlyByteBuf buffer) {
+            return new SetLapTimingScopeMessage(buffer.readUnsignedByte());
+        }
+
+        private static void handle(SetLapTimingScopeMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel level)) {
+                    return;
+                }
+                LapTimingPreferences.set(player.getUUID(), LapTimingScope.fromOrdinal(message.scope));
+                sendRankingBoard(player, level);
+                if (player.getVehicle() instanceof OpenwheelCarEntity car) {
+                    car.syncPlayerBestLap(player);
+                }
             });
         }
     }
@@ -2158,7 +2215,11 @@ public final class OWRNetwork {
                     message.relaxedFlLatForce,
                     message.relaxedFrLatForce,
                     message.relaxedRlLatForce,
-                    message.relaxedRrLatForce
+                    message.relaxedRrLatForce,
+                    message.wheelAngularSpeedFl,
+                    message.wheelAngularSpeedFr,
+                    message.wheelAngularSpeedRl,
+                    message.wheelAngularSpeedRr
                 );
             }
         } catch (ReflectiveOperationException ignored) {

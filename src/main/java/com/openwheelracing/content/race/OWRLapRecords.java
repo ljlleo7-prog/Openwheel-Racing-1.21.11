@@ -159,12 +159,32 @@ public class OWRLapRecords extends SavedData {
         return playerBestLaps.getOrDefault(playerId, 0);
     }
 
+    public int getBestLap(UUID playerId, LapTimingScope scope) {
+        if (scope == LapTimingScope.ALL_TIME) {
+            return getBestLap(playerId);
+        }
+        return laps.stream()
+            .filter(lap -> lap.sessionId() == activeSessionId && lap.driverId().equals(playerId))
+            .filter(lap -> !lap.invalidated() && lap.lapMillis() > 0)
+            .mapToInt(LapRecord::lapMillis)
+            .min()
+            .orElse(0);
+    }
+
     public int getOverallBestLapMillis() {
         int best = Integer.MAX_VALUE;
         for (int millis : playerBestLaps.values()) {
             if (millis > 0 && millis < best) best = millis;
         }
         return best == Integer.MAX_VALUE ? 0 : best;
+    }
+
+    public int getOverallBestLapMillis(LapTimingScope scope) {
+        return scope == LapTimingScope.ALL_TIME ? getOverallBestLapMillis() : laps.stream()
+            .filter(lap -> lap.sessionId() == activeSessionId && !lap.invalidated() && lap.lapMillis() > 0)
+            .mapToInt(LapRecord::lapMillis)
+            .min()
+            .orElse(0);
     }
 
     public record DriverBest(String name, int millis) {}
@@ -198,16 +218,26 @@ public class OWRLapRecords extends SavedData {
     }
 
     public Optional<SplitBestRecord> getSplitBest(UUID driverId, String segmentKey) {
+        return getSplitBest(LapTimingScope.SESSION, driverId, null, segmentKey);
+    }
+
+    public Optional<SplitBestRecord> getSplitBest(LapTimingScope scope, UUID driverId, UUID trackId, String segmentKey) {
         return splitBests.stream()
-            .filter(record -> record.sessionId() == activeSessionId)
+            .filter(record -> scope == LapTimingScope.ALL_TIME || record.sessionId() == activeSessionId)
+            .filter(record -> trackId == null || record.trackId().equals(trackId))
             .filter(record -> record.driverId().equals(driverId))
             .filter(record -> record.segmentKey().equals(segmentKey))
-            .findFirst();
+            .min(Comparator.comparingInt(SplitBestRecord::bestMiniMillis));
     }
 
     public int getSessionBestMiniMillis(String segmentKey) {
+        return getBestMiniMillis(LapTimingScope.SESSION, null, segmentKey);
+    }
+
+    public int getBestMiniMillis(LapTimingScope scope, UUID trackId, String segmentKey) {
         return splitBests.stream()
-            .filter(record -> record.sessionId() == activeSessionId)
+            .filter(record -> scope == LapTimingScope.ALL_TIME || record.sessionId() == activeSessionId)
+            .filter(record -> trackId == null || record.trackId().equals(trackId))
             .filter(record -> record.segmentKey().equals(segmentKey))
             .mapToInt(SplitBestRecord::bestMiniMillis)
             .filter(millis -> millis > 0)
@@ -216,10 +246,15 @@ public class OWRLapRecords extends SavedData {
     }
 
     public SplitComparison compareSplit(UUID driverId, String segmentKey, int cumulativeMillis, int miniMillis) {
-        Optional<SplitBestRecord> previous = getSplitBest(driverId, segmentKey);
+        return compareSplit(LapTimingScope.SESSION, driverId, null, segmentKey, cumulativeMillis, miniMillis);
+    }
+
+    public SplitComparison compareSplit(LapTimingScope scope, UUID driverId, UUID trackId, String segmentKey,
+                                        int cumulativeMillis, int miniMillis) {
+        Optional<SplitBestRecord> previous = getSplitBest(scope, driverId, trackId, segmentKey);
         int previousCumulative = previous.map(SplitBestRecord::bestCumulativeMillis).orElse(0);
         int previousMini = previous.map(SplitBestRecord::bestMiniMillis).orElse(0);
-        int previousSessionMini = getSessionBestMiniMillis(segmentKey);
+        int previousSessionMini = getBestMiniMillis(scope, trackId, segmentKey);
         boolean personalBestMini = previousMini == 0 || miniMillis < previousMini;
         boolean sessionBestMini = previousSessionMini == 0 || miniMillis < previousSessionMini;
         int cumulativeDelta = previousCumulative == 0 ? 0 : cumulativeMillis - previousCumulative;
@@ -228,7 +263,7 @@ public class OWRLapRecords extends SavedData {
     }
 
     public void commitValidSplit(UUID driverId, String dimensionId, UUID trackId, String segmentKey, int segmentOrder, int cumulativeMillis, int miniMillis) {
-        Optional<SplitBestRecord> previous = getSplitBest(driverId, segmentKey);
+        Optional<SplitBestRecord> previous = getSplitBest(LapTimingScope.SESSION, driverId, trackId, segmentKey);
         int previousCumulative = previous.map(SplitBestRecord::bestCumulativeMillis).orElse(0);
         int previousMini = previous.map(SplitBestRecord::bestMiniMillis).orElse(0);
         if (previous.isEmpty() || (cumulativeMillis > 0 && cumulativeMillis < previousCumulative) || miniMillis < previousMini) {
@@ -236,7 +271,8 @@ public class OWRLapRecords extends SavedData {
                 previousCumulative == 0 ? cumulativeMillis : Math.min(previousCumulative, cumulativeMillis),
                 previousMini == 0 ? miniMillis : Math.min(previousMini, miniMillis),
                 false);
-            splitBests.removeIf(record -> record.sessionId() == activeSessionId && record.driverId().equals(driverId) && record.segmentKey().equals(segmentKey));
+            splitBests.removeIf(record -> record.sessionId() == activeSessionId && record.driverId().equals(driverId)
+                && record.trackId().equals(trackId) && record.segmentKey().equals(segmentKey));
             splitBests.add(updated);
             markChanged();
         }

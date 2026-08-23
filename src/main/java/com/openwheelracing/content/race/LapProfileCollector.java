@@ -99,14 +99,19 @@ public final class LapProfileCollector {
     }
 
     public OWRLapProfiles.BestLapProfile finish(String dimensionId, UUID trackId, String driverName, long lapRecordId, int lapMillis, long gameTime) {
-        return finish(dimensionId, trackId, driverName, OWRLapProfiles.Origin.PLAYER, lapRecordId, lapMillis, gameTime);
+        return finish(dimensionId, trackId, driverName, OWRLapProfiles.Origin.PLAYER, lapRecordId, 0L, lapMillis, gameTime);
     }
 
     public OWRLapProfiles.BestLapProfile finish(String dimensionId, UUID trackId, String driverName, OWRLapProfiles.Origin origin,
                                                 long lapRecordId, int lapMillis, long gameTime) {
+        return finish(dimensionId, trackId, driverName, origin, lapRecordId, 0L, lapMillis, gameTime);
+    }
+
+    public OWRLapProfiles.BestLapProfile finish(String dimensionId, UUID trackId, String driverName, OWRLapProfiles.Origin origin,
+                                                long lapRecordId, long sessionId, int lapMillis, long gameTime) {
         if (route == null || coverage() < MIN_COVERAGE) return null;
         fillSmallGaps();
-        return new OWRLapProfiles.BestLapProfile(dimensionId, trackId, route.routeId(), driverId, driverName, origin, lapRecordId, lapMillis,
+        return new OWRLapProfiles.BestLapProfile(dimensionId, trackId, route.routeId(), driverId, driverName, origin, lapRecordId, sessionId, lapMillis,
             route.length(), spacing, timeMillis, speedCmps, lateralOffsetCm, headingResidualMilliRad, gameTime);
     }
 

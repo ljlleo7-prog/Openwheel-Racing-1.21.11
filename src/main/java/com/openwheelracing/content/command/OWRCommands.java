@@ -15,6 +15,7 @@ import com.openwheelracing.content.ai.OWRAiTrainingData;
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.race.OWRRaceControlState;
+import com.openwheelracing.content.race.OWRGrandPrixRegistry;
 import com.openwheelracing.content.race.timing.LiveRaceTimingService;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.content.track.TrackDefinition;
@@ -28,6 +29,7 @@ import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.registry.OWREntities;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -37,6 +39,8 @@ import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -67,6 +71,25 @@ public final class OWRCommands {
                     .then(Commands.literal("resume").executes(OWRCommands::resumeRaceTiming))
                     .then(Commands.literal("stop").executes(OWRCommands::stopRaceTiming))
                     .then(Commands.literal("status").executes(OWRCommands::showRaceTimingStatus))))
+            .then(Commands.literal("physicslog")
+                .then(Commands.literal("start").executes(OWRCommands::startPhysicsLog))
+                .then(Commands.literal("export").executes(OWRCommands::exportPhysicsLog))
+                .then(Commands.literal("stop").executes(OWRCommands::stopPhysicsLog))
+                .then(Commands.literal("status").executes(OWRCommands::showPhysicsLogStatus)))
+            .then(Commands.literal("gp")
+                .then(Commands.literal("register")
+                    .then(Commands.argument("gp", StringArgumentType.string())
+                        .then(Commands.argument("player", EntityArgument.player())
+                            .then(Commands.argument("code", StringArgumentType.word())
+                                .executes(OWRCommands::registerGrandPrixEntry)))))
+                .then(Commands.literal("unregister")
+                    .then(Commands.argument("gp", StringArgumentType.string())
+                        .then(Commands.argument("player", EntityArgument.player())
+                            .executes(OWRCommands::unregisterGrandPrixEntry))))
+                .then(Commands.literal("list")
+                    .executes(OWRCommands::listGrandPrixWeekends)
+                    .then(Commands.argument("gp", StringArgumentType.string())
+                        .executes(OWRCommands::listGrandPrixEntries))))
             .then(Commands.literal("ai")
                 .then(Commands.literal("fleet")
                     .then(Commands.literal("spawn")
@@ -183,10 +206,133 @@ public final class OWRCommands {
                         .executes(OWRCommands::generateAiLine)))));
     }
 
+    private static int startPhysicsLog(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        OpenwheelCarEntity car = drivenCar(context);
+        try {
+            Path path = car.startPhysicsTelemetry();
+            send(context, "Physics logging started: " + path.toAbsolutePath());
+            return 1;
+        } catch (IOException exception) {
+            send(context, "Physics logging failed: " + exception.getMessage());
+            return 0;
+        }
+    }
+
+    private static int exportPhysicsLog(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        OpenwheelCarEntity car = drivenCar(context);
+        try {
+            Path path = car.flushPhysicsTelemetry();
+            send(context, "Physics log exported with " + car.getPhysicsTelemetrySampleCount() + " samples: " + path.toAbsolutePath());
+            return 1;
+        } catch (IOException exception) {
+            send(context, "Physics log export failed: " + exception.getMessage());
+            return 0;
+        }
+    }
+
+    private static int stopPhysicsLog(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        OpenwheelCarEntity car = drivenCar(context);
+        long samples = car.getPhysicsTelemetrySampleCount();
+        try {
+            Path path = car.stopPhysicsTelemetry();
+            if (path == null) {
+                send(context, "Physics logging is not active for this car.");
+                return 0;
+            }
+            send(context, "Physics logging stopped with " + samples + " samples: " + path.toAbsolutePath());
+            return 1;
+        } catch (IOException exception) {
+            send(context, "Physics logging stop failed: " + exception.getMessage());
+            return 0;
+        }
+    }
+
+    private static int showPhysicsLogStatus(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        OpenwheelCarEntity car = drivenCar(context);
+        send(context, car.isPhysicsTelemetryActive()
+            ? "Physics logging active; buffered samples=" + car.getPhysicsTelemetrySampleCount() + "."
+            : "Physics logging is not active for this car.");
+        return car.isPhysicsTelemetryActive() ? 1 : 0;
+    }
+
+    private static OpenwheelCarEntity drivenCar(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        if (player.getVehicle() instanceof OpenwheelCarEntity car) {
+            return car;
+        }
+        throw EntityArgument.NO_ENTITIES_FOUND.create();
+    }
+
     private static int resumeRaceTiming(CommandContext<CommandSourceStack> context) {
         boolean resumed = LiveRaceTimingService.resume(context.getSource().getLevel());
         send(context, resumed ? "Live race timing resumed." : "No suspended live timing session to resume.");
         return resumed ? 1 : 0;
+    }
+
+    private static int registerGrandPrixEntry(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        String gpName = StringArgumentType.getString(context, "gp");
+        ServerPlayer player = EntityArgument.getPlayer(context, "player");
+        String code = StringArgumentType.getString(context, "code");
+        try {
+            OWRGrandPrixRegistry.RegistrationResult result = OWRGrandPrixRegistry.get(context.getSource().getServer()).register(
+                gpName, player.getUUID(), player.getScoreboardName(), code, context.getSource().getLevel().getGameTime());
+            if (!result.registered()) {
+                OWRGrandPrixRegistry.Entry collision = result.entry();
+                send(context, "GP registration refused: code " + OWRGrandPrixRegistry.sanitizeDisplayCode(code)
+                    + " is already assigned to " + collision.playerName() + " in " + collision.gpName() + ".");
+                return 0;
+            }
+            OWRGrandPrixRegistry.Entry entry = result.entry();
+            send(context, (result.updated() ? "Updated" : "Registered") + " " + entry.playerName() + " as "
+                + entry.displayCode() + " in " + entry.gpName() + ".");
+            return 1;
+        } catch (IllegalArgumentException exception) {
+            send(context, "GP registration refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static int unregisterGrandPrixEntry(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        String gpName = StringArgumentType.getString(context, "gp");
+        ServerPlayer player = EntityArgument.getPlayer(context, "player");
+        try {
+            boolean removed = OWRGrandPrixRegistry.get(context.getSource().getServer()).unregister(gpName, player.getUUID());
+            send(context, removed
+                ? "Unregistered " + player.getScoreboardName() + " from " + OWRGrandPrixRegistry.sanitizeGpName(gpName) + "."
+                : player.getScoreboardName() + " is not registered in " + OWRGrandPrixRegistry.sanitizeGpName(gpName) + ".");
+            return removed ? 1 : 0;
+        } catch (IllegalArgumentException exception) {
+            send(context, "GP unregister refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static int listGrandPrixWeekends(CommandContext<CommandSourceStack> context) {
+        List<String> names = OWRGrandPrixRegistry.get(context.getSource().getServer()).grandPrixNames();
+        if (names.isEmpty()) {
+            send(context, "No GP weekends have registered entries.");
+            return 0;
+        }
+        send(context, "GP weekends: " + String.join(", ", names) + ".");
+        return names.size();
+    }
+
+    private static int listGrandPrixEntries(CommandContext<CommandSourceStack> context) {
+        String gpName = StringArgumentType.getString(context, "gp");
+        try {
+            List<OWRGrandPrixRegistry.Entry> entries = OWRGrandPrixRegistry.get(context.getSource().getServer()).entries(gpName);
+            if (entries.isEmpty()) {
+                send(context, "No entries registered in " + OWRGrandPrixRegistry.sanitizeGpName(gpName) + ".");
+                return 0;
+            }
+            send(context, entries.getFirst().gpName() + ": " + entries.stream()
+                .map(entry -> entry.displayCode() + " " + entry.playerName())
+                .collect(java.util.stream.Collectors.joining(", ")) + ".");
+            return entries.size();
+        } catch (IllegalArgumentException exception) {
+            send(context, "GP list refused: " + exception.getMessage() + ".");
+            return 0;
+        }
     }
 
     private static int stopRaceTiming(CommandContext<CommandSourceStack> context) {
