@@ -16,16 +16,19 @@ For each value, define range, effect, UI label, and downside.
 
 | Value | Range | Positive Effect | Tradeoff | Notes |
 | --- | --- | --- | --- | --- |
-| Power Mode | Mode 0-3 | Higher the mode, higher output | Higher the mode, higher fuel consumption | Discrete max power output power, peak 750kW physics |
+| Power Mode | Locked at Mode 1 | Fixed baseline output | Fuel-use tradeoff is not implemented yet | Not adjustable until the fuel system exists |
 | Tyre Setup | C1-C5 | Higher compound number gives higher grip | Higher compound number wears faster | Not tunable, once made a tyre cannot be changed into other types |
-| Aero | Preset 0-4 | Higher the mode, higher downforce | Higher the mode, higher drag | Will turn into separate front wing and rear wing later |
+| Front Wing | 3-7 degrees | More front downforce and sharper high-speed turn-in | More drag; too much front balance makes the rear less stable | Stronger influence on steering balance |
+| Rear Wing | 9-15 degrees | More rear downforce and high-speed stability | More drag and less top speed | Stronger influence on total drag |
+| Anti-roll Balance | 0-10 | Higher values transfer a larger share of cornering load through the front axle | High values promote understeer; low values promote oversteer | Continuous slider, 5 is neutral |
 | Gearing | Preset 0-2 | Higher the mode, higher top speed | Higher the mode, higher ratio gives slower acceleration | Probably will turn into continuous ratio tuning later |
+| Front Brake Bias | 50-65% | Higher values make braking more stable | Too much front bias increases front lockup/understeer; low bias destabilizes the rear | Continuous slider |
 
 ## UI Flow
 
 - Where should tuning happen?
 
-  On the car assembly block for now
+  On the dedicated car setup station. Insert one completed car, adjust readable sliders, review the predicted results, then press Apply Setup to begin one atomic setup operation.
 
 ## Costs and Limits
 
@@ -59,4 +62,4 @@ For each value, define range, effect, UI label, and downside.
 
 - What must be implemented for setup tuning to become a real gameplay loop?
 
-  All parts adjustable as described above
+  The setup station has a dedicated layout rather than reusing the construction panel. Front wing, rear wing, anti-roll balance, final drive, and brake bias are readable sliders; power mode is visibly locked at 1 until fuel consumption provides a real tradeoff. One combined draft model predicts acceleration, top speed, aero grip, drag, and the resulting oversteer/understeer balance using a continuous blue-green-red scale. Aero balance compares front and rear wing, while the final handling balance also includes anti-roll and brake bias. A white marker shows the currently fitted value separately from the proposed slider value. Moving sliders is only a preview; the complete setup is applied after pressing Apply Setup. Tyre compound is not a free setup value: it comes from the fitted tyre item.

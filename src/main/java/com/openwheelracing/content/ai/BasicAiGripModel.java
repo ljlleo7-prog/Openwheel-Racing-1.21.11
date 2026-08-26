@@ -4,8 +4,8 @@ public final class BasicAiGripModel {
     private static final double GRAVITY = 9.81;
     private static final double AIR_DENSITY = 1.225;
     private static final double MASS_KG = 798.0;
-    private static final double BASE_LATERAL_MU = 2.15;
-    private static final double BASE_LONGITUDINAL_MU = 2.25;
+    private static final double BASE_LATERAL_MU = 2.365;
+    private static final double BASE_LONGITUDINAL_MU = 2.475;
     private static final double BASE_DOWNFORCE_AREA = 7.0;
     private static final double LOAD_SENSITIVITY = 0.035;
     private static final double BASE_POWER_WATTS = 780_000.0;

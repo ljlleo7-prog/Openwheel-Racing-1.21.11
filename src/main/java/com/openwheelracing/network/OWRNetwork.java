@@ -4,8 +4,10 @@ import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.entity.VehiclePhysics;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.car.CarLiveryTexture;
+import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.openwheelracing.content.car.ServerLiveryTextures;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
+import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.menu.CarPartsReplacementMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.race.LapProfileCollector;
@@ -73,6 +75,7 @@ public final class OWRNetwork {
     public static void register(RegisterPayloadHandlersEvent event) {
         PayloadRegistrar registrar = event.registrar(PROTOCOL);
         registrar.playToServer(TuneCarMessage.TYPE, codec(TuneCarMessage::encode, TuneCarMessage::decode), TuneCarMessage::handle);
+        registrar.playToServer(ApplyCarSetupMessage.TYPE, codec(ApplyCarSetupMessage::encode, ApplyCarSetupMessage::decode), ApplyCarSetupMessage::handle);
         registrar.playToServer(RepairCarMessage.TYPE, codec(RepairCarMessage::encode, RepairCarMessage::decode), RepairCarMessage::handle);
         registrar.playToServer(StartPartReplacementMessage.TYPE, codec(StartPartReplacementMessage::encode, StartPartReplacementMessage::decode), StartPartReplacementMessage::handle);
         registrar.playToServer(CycleLiveryMessage.TYPE, codec(CycleLiveryMessage::encode, CycleLiveryMessage::decode), CycleLiveryMessage::handle);
@@ -247,6 +250,34 @@ public final class OWRNetwork {
                 if (menu.queueSetupTune(message.slot, message.delta)) {
                     menu.slotsChanged(menu.getContainer());
                 }
+            });
+        }
+    }
+
+    public record ApplyCarSetupMessage(int power, int gearing, int frontWing, int rearWing, int antiRoll, int brakeBias) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<ApplyCarSetupMessage> TYPE = payloadType("apply_car_setup_message");
+
+        @Override public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+
+        private static void encode(ApplyCarSetupMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.power); buffer.writeInt(message.gearing);
+            buffer.writeInt(message.frontWing); buffer.writeInt(message.rearWing);
+            buffer.writeInt(message.antiRoll); buffer.writeInt(message.brakeBias);
+        }
+
+        private static ApplyCarSetupMessage decode(FriendlyByteBuf buffer) {
+            return new ApplyCarSetupMessage(buffer.readInt(), buffer.readInt(), buffer.readInt(),
+                buffer.readInt(), buffer.readInt(), buffer.readInt());
+        }
+
+        private static void handle(ApplyCarSetupMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof CarAssemblyMenu menu) || !menu.allowsSetup()) return;
+                PrototypeCarSetup current = PrototypeCarItem.getSetup(menu.getOutputStack());
+                PrototypeCarSetup requested = new PrototypeCarSetup(1, current.grip(), current.aero(), message.gearing,
+                    message.frontWing, message.rearWing, message.antiRoll, message.brakeBias);
+                if (menu.queueSetup(requested)) menu.slotsChanged(menu.getContainer());
             });
         }
     }
@@ -497,6 +528,7 @@ public final class OWRNetwork {
             float lowSpeedSteeringRate, float highSpeedSteeringRate, float lowSpeedCenteringRate, float highSpeedCenteringRate,
             float lowSpeedSteeringGain, float highSpeedSteeringGain, float speedResponseCurve,
             float tractionControlStrength, float tractionControlEnvelope, float absEnvelope,
+            float brakingYawAdjustment, float neutralYawAdjustment, float throttleYawAdjustment,
             float stabilityAssistStrength, boolean keyboardSteeringSource) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<DriveInputMessage> TYPE = payloadType("drive_input_message");
 
@@ -522,6 +554,9 @@ public final class OWRNetwork {
             buffer.writeFloat(message.tractionControlStrength);
             buffer.writeFloat(message.tractionControlEnvelope);
             buffer.writeFloat(message.absEnvelope);
+            buffer.writeFloat(message.brakingYawAdjustment);
+            buffer.writeFloat(message.neutralYawAdjustment);
+            buffer.writeFloat(message.throttleYawAdjustment);
             buffer.writeFloat(message.stabilityAssistStrength);
             buffer.writeBoolean(message.keyboardSteeringSource);
         }
@@ -533,6 +568,7 @@ public final class OWRNetwork {
                 buffer.readFloat(), buffer.readFloat(),
                 buffer.readFloat(),
                 buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
+                buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
                 buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
                 buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
                 buffer.readBoolean());
@@ -564,6 +600,7 @@ public final class OWRNetwork {
                     message.lowSpeedSteeringGain, message.highSpeedSteeringGain, message.speedResponseCurve);
                 car.setTractionControlStrength(message.tractionControlStrength);
                 car.setAssistGripEnvelopes(message.tractionControlEnvelope, message.absEnvelope);
+                car.setYawAdjustments(message.brakingYawAdjustment, message.neutralYawAdjustment, message.throttleYawAdjustment);
                 car.setKeyboardStabilityAssistStrength(message.stabilityAssistStrength);
             });
         }

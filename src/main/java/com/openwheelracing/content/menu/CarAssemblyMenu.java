@@ -2,6 +2,7 @@ package com.openwheelracing.content.menu;
 
 import com.openwheelracing.content.block.entity.CarAssemblyWorkstationBlockEntity;
 import com.openwheelracing.content.block.entity.CarWorkstationType;
+import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.openwheelracing.registry.OWRBlocks;
 import com.openwheelracing.registry.OWRItems;
 import com.openwheelracing.registry.OWRMenus;
@@ -64,6 +65,10 @@ public class CarAssemblyMenu extends AbstractContainerMenu {
 
     public boolean queueSetupTune(int slot, int delta) {
         return container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.queueSetupTune(slot, delta);
+    }
+
+    public boolean queueSetup(PrototypeCarSetup setup) {
+        return container instanceof CarAssemblyWorkstationBlockEntity workstation && workstation.queueSetup(setup);
     }
 
     public boolean queueRepair() {

@@ -59,6 +59,7 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
     private int pendingValue;
     private int pendingExtra;
     private String pendingText = "";
+    private PrototypeCarSetup pendingSetup;
 
     private final ContainerData data = new ContainerData() {
         @Override
@@ -141,12 +142,24 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
     }
 
     public boolean queueSetupTune(int slot, int delta) {
-        if (!workstationType.allowsSetup() || pendingOperation != OPERATION_NONE || !hasCarOutput() || slot < 0 || slot > 3 || delta == 0) {
+        if (!workstationType.allowsSetup() || pendingOperation != OPERATION_NONE || !hasCarOutput() || slot < 1 || slot > 5) {
             return false;
         }
         pendingOperation = OPERATION_SETUP;
         pendingAction = slot;
         pendingValue = delta;
+        progress = 0;
+        setChanged();
+        return true;
+    }
+
+    public boolean queueSetup(PrototypeCarSetup requested) {
+        if (!workstationType.allowsSetup() || pendingOperation != OPERATION_NONE || !hasCarOutput() || requested == null) {
+            return false;
+        }
+        PrototypeCarSetup fitted = PrototypeCarItem.getSetup(getItem(SLOT_OUTPUT));
+        pendingSetup = requested.withTyreCompound(fitted.grip());
+        pendingOperation = OPERATION_SETUP;
         progress = 0;
         setChanged();
         return true;
@@ -228,7 +241,7 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
             PrototypeCarSetup setup = result.getOrDefault(OWRDataComponents.CAR_SETUP.get(), PrototypeCarSetup.DEFAULT);
             int compound = TyreItem.getCompound(tyreStack);
             int remainingPercent = TyreItem.getRemainingPercent(tyreStack);
-            result.set(OWRDataComponents.CAR_SETUP.get(), new PrototypeCarSetup(setup.power(), compound, setup.aero(), setup.gearing()));
+            result.set(OWRDataComponents.CAR_SETUP.get(), setup.withTyreCompound(compound));
             result.set(OWRDataComponents.TYRE_TYPE.get(), TyreItem.getType(tyreStack).id());
             result.set(OWRDataComponents.TYRE_WEAR.get(), 100 - remainingPercent);
             int livery = PrototypeCarItem.getLivery(result);
@@ -278,14 +291,7 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
 
     private void applySetupTune(ItemStack stack) {
         PrototypeCarSetup setup = PrototypeCarItem.getSetup(stack);
-        PrototypeCarSetup updated = switch (pendingAction) {
-            case 0 -> new PrototypeCarSetup(setup.power() + pendingValue, setup.grip(), setup.aero(), setup.gearing());
-            case 1 -> new PrototypeCarSetup(setup.power(), setup.grip() + pendingValue, setup.aero(), setup.gearing());
-            case 2 -> new PrototypeCarSetup(setup.power(), setup.grip(), setup.aero() + pendingValue, setup.gearing());
-            case 3 -> new PrototypeCarSetup(setup.power(), setup.grip(), setup.aero(), setup.gearing() + pendingValue);
-            default -> setup;
-        };
-        stack.set(OWRDataComponents.CAR_SETUP.get(), updated);
+        stack.set(OWRDataComponents.CAR_SETUP.get(), pendingSetup == null ? setup.withTuning(pendingAction, pendingValue) : pendingSetup);
     }
 
     private void applyLiveryOperation(ItemStack stack) {
@@ -309,6 +315,7 @@ public class CarAssemblyWorkstationBlockEntity extends BlockEntity implements Co
         pendingValue = 0;
         pendingExtra = 0;
         pendingText = "";
+        pendingSetup = null;
         progress = 0;
     }
 

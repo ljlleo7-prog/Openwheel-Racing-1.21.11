@@ -113,6 +113,7 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Integer> COMPLETED_LAP_RESULT = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> CHECKPOINT_ARMED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Integer> PIT_STOP_TICKS = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> PIT_SERVICE_KIND = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> ABS_ENABLED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> TRACTION_CONTROL_ENABLED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Integer> LIVERY = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
@@ -144,8 +145,18 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Integer> ERS_LICO_BALANCED_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> ERS_LICO_ATTACK_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
 
-    private static final int PIT_STOP_DURATION = 60; // 3 seconds
+    public static final int PIT_STOP_DURATION = 60; // 3 seconds
+    public static final int TYRE_CHANGE_DURATION = 100; // 5 seconds
     private static final int PIT_RUBBER_COST = 2;    // rubber items consumed per stop
+    private static final int PIT_SERVICE_GENERAL = 0;
+    private static final int PIT_SERVICE_TYRES = 1;
+    private int pendingTyreCompound;
+    private int pendingTyreType;
+    private int pendingTyreRemaining;
+    private int removedTyreCompound;
+    private int removedTyreType;
+    private int removedTyreRemaining;
+    private UUID pitCrewPlayerId;
     private static final int COMPLETED_LAP_LINGER_DURATION = 100;
     public static final int LAP_RESULT_NONE = 0;
     public static final int LAP_RESULT_SLOWER = 1;
@@ -218,7 +229,7 @@ public class OpenwheelCarEntity extends Entity {
     private static final double REAR_AXLE_DISTANCE = WHEELBASE * 0.46;
     private static final VehicleProfile PROTOTYPE_PROFILE = new VehicleProfile(
         CAR_MASS_KG, WHEELBASE, TRACK_WIDTH, 0.46, 1100.0, 1.05, 7.0, 0.45, 780_000.0, 350_000.0,
-        40_000.0, 0.58, 2.15, 2.25, 210_000.0, 270_000.0, 245_000.0, 315_000.0,
+        40_000.0, 0.58, 2.365, 2.475, 210_000.0, 270_000.0, 245_000.0, 315_000.0,
         Math.toRadians(34.0), Math.toRadians(2.45), 1.0, 1.0, 900.0, 4000.0, 13000.0, 15000.0,
         260.0, new double[] {900.0, 2500.0, 4000.0, 4700.0, 6500.0, 8200.0, 10500.0, 11800.0, 12600.0, 13000.0},
         new double[] {0.03, 0.10, 0.22, 0.34, 0.56, 0.75, 0.95, 1.00, 0.78, 0.42},
@@ -234,8 +245,8 @@ public class OpenwheelCarEntity extends Entity {
     private static final double DOWNFORCE_AREA = 7.0;
     private static final double FRONT_AERO_BALANCE = 0.45;
     private static final double ROLLING_RESISTANCE = 0.012;
-    private static final double ASPHALT_MU_LATERAL = 2.15;
-    private static final double ASPHALT_MU_LONGITUDINAL = 2.25;
+    private static final double ASPHALT_MU_LATERAL = 2.365;
+    private static final double ASPHALT_MU_LONGITUDINAL = 2.475;
     private static final double LOAD_SENSITIVITY = 0.035;
     private static final double MIN_SURFACE_MU = 0.02;
     private static final double FRONT_CORNERING_STIFFNESS = 210_000.0;
@@ -321,6 +332,8 @@ public class OpenwheelCarEntity extends Entity {
     private static final double HIGH_SPEED_STEERING_RACK_RATE = Math.toRadians(4.0);
     private static final double LOW_SPEED_STEERING_CENTERING_RATE = Math.toRadians(90.0);
     private static final double HIGH_SPEED_STEERING_CENTERING_RATE = Math.toRadians(180.0);
+    private static final double COUNTER_STEER_RECOVERY_LOCK = Math.toRadians(14.0);
+    private static final double COUNTER_STEER_RECOVERY_RATE = Math.toRadians(180.0);
     private static final double STEERING_SPEED_SCALE = 20.0;
     private static final double SLIP_ANGLE_DEADBAND = Math.toRadians(0.15);
     private static final double FRONT_TYRE_RELAXATION_LENGTH = 0.42;
@@ -448,6 +461,9 @@ public class OpenwheelCarEntity extends Entity {
     private double tractionControlEnvelope = 1.02;
     private double absEnvelope = 0.98;
     private double keyboardStabilityAssistStrength = 0.65;
+    private double brakingYawAdjustment = 1.0;
+    private double neutralYawAdjustment = 1.0;
+    private double throttleYawAdjustment = 1.0;
     private int lastAcceptedInputSequence;
     private int lastAckedInputSequence;
     private long lastDriveInputAckAt = -DRIVE_INPUT_ACK_MIN_GAP_TICKS;
@@ -767,6 +783,7 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(COMPLETED_LAP_RESULT, LAP_RESULT_NONE);
         builder.define(CHECKPOINT_ARMED, false);
         builder.define(PIT_STOP_TICKS, 0);
+        builder.define(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
         builder.define(ABS_ENABLED, false);
         builder.define(TRACTION_CONTROL_ENABLED, false);
         builder.define(LIVERY, 0);
@@ -810,7 +827,7 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public void applyTyreCompound(int compound) {
-        setSetup(new PrototypeCarSetup(setup.power(), compound, setup.aero(), setup.gearing()));
+        setSetup(setup.withTyreCompound(compound));
         resetTyreThermalState();
     }
 
@@ -1176,6 +1193,12 @@ public class OpenwheelCarEntity extends Entity {
         keyboardStabilityAssistStrength = clamp(Double.isFinite(strength) ? strength : 0.65, 0.0, 1.0);
     }
 
+    public void setYawAdjustments(double braking, double neutral, double throttle) {
+        brakingYawAdjustment = clamp(Double.isFinite(braking) ? braking : 1.0, 0.0, 1.5);
+        neutralYawAdjustment = clamp(Double.isFinite(neutral) ? neutral : 1.0, 0.0, 1.5);
+        throttleYawAdjustment = clamp(Double.isFinite(throttle) ? throttle : 1.0, 0.0, 1.5);
+    }
+
     public void setTractionControlEnabled(boolean enabled) {
         entityData.set(TRACTION_CONTROL_ENABLED, enabled);
     }
@@ -1487,6 +1510,17 @@ public class OpenwheelCarEntity extends Entity {
         return entityData.get(PIT_STOP_TICKS);
     }
 
+    public boolean isTyreChangeInProgress() { return entityData.get(PIT_SERVICE_KIND) == PIT_SERVICE_TYRES && isInPitStop(); }
+
+    public Component getPitServiceStage() {
+        if (!isTyreChangeInProgress()) return Component.literal("Servicing car");
+        int ticks = getPitStopTicks();
+        if (ticks > 80) return Component.literal("Jacking car");
+        if (ticks > 50) return Component.literal("Removing old tyres");
+        if (ticks > 20) return Component.literal("Installing new tyres");
+        return Component.literal("Securing wheels");
+    }
+
     public boolean tryStartPitStop(Player player) {
         if (!isOnPitStopMark()) {
             messageDriver(Component.literal("Pit stop only available on the pit stop mark"));
@@ -1507,6 +1541,7 @@ public class OpenwheelCarEntity extends Entity {
         }
         player.getInventory().clearOrCountMatchingItems(item -> item.is(OWRItems.RUBBER.get()), PIT_RUBBER_COST, player.inventoryMenu.getCraftSlots());
         entityData.set(PIT_STOP_TICKS, PIT_STOP_DURATION);
+        entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
         messageDriver(Component.literal("Pit stop: servicing..."));
         return true;
     }
@@ -1525,24 +1560,22 @@ public class OpenwheelCarEntity extends Entity {
             return false;
         }
 
-        int newCompound = TyreItem.getCompound(heldStack);
-        com.openwheelracing.content.car.TyreType newType = TyreItem.getType(heldStack);
-        int newRemainingPercent = TyreItem.getRemainingPercent(heldStack);
-        int oldCompound = getTyreCompound();
-        com.openwheelracing.content.car.TyreType oldType = getTyreType();
-        int oldRemainingPercent = TyreItem.normalizeRemainingPercent(100.0 - getTyreWearPercent());
-
-        applyTyres(newCompound, newType);
-        setTyreWearPercentAndSync(100.0f - newRemainingPercent);
-        player.getCooldowns().addCooldown(heldStack, 10);
+        pendingTyreCompound = TyreItem.getCompound(heldStack);
+        pendingTyreType = TyreItem.getType(heldStack).id();
+        pendingTyreRemaining = TyreItem.getRemainingPercent(heldStack);
+        removedTyreCompound = getTyreCompound();
+        removedTyreType = getTyreType().id();
+        removedTyreRemaining = TyreItem.normalizeRemainingPercent(100.0 - getTyreWearPercent());
+        pitCrewPlayerId = player.getUUID();
+        entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_TYRES);
+        entityData.set(PIT_STOP_TICKS, TYRE_CHANGE_DURATION);
+        player.getCooldowns().addCooldown(heldStack, TYRE_CHANGE_DURATION);
         if (!player.getAbilities().instabuild) {
             heldStack.shrink(1);
         }
-        ItemStack oldTyres = TyreItem.create(oldCompound, oldType, 1, oldRemainingPercent);
-        if (!player.addItem(oldTyres)) {
-            player.drop(oldTyres, false);
-        }
-        messagePitCrew(player, Component.literal("Tyres changed to " + (newType == com.openwheelracing.content.car.TyreType.SLICK ? "C" + (newCompound + 1) : newType.displayName()) + " (" + newRemainingPercent + "%)"));
+        Component started = Component.literal("Tyre change started — jacking car");
+        messagePitCrew(player, started);
+        messageDriver(started);
         return true;
     }
 
@@ -1940,7 +1973,11 @@ public class OpenwheelCarEntity extends Entity {
             input.getIntOr("Power", PrototypeCarSetup.DEFAULT.power()),
             input.getIntOr("Grip", PrototypeCarSetup.DEFAULT.grip()),
             input.getIntOr("Aero", PrototypeCarSetup.DEFAULT.aero()),
-            input.getIntOr("Gearing", PrototypeCarSetup.DEFAULT.gearing())
+            input.getIntOr("Gearing", PrototypeCarSetup.DEFAULT.gearing()),
+            input.getIntOr("FrontWing", PrototypeCarSetup.DEFAULT.frontWing()),
+            input.getIntOr("RearWing", PrototypeCarSetup.DEFAULT.rearWing()),
+            input.getIntOr("AntiRoll", PrototypeCarSetup.DEFAULT.antiRoll()),
+            input.getIntOr("BrakeBias", PrototypeCarSetup.DEFAULT.brakeBias())
         ));
         entityData.set(TYRE_TYPE, com.openwheelracing.content.car.TyreType.fromId(input.getIntOr("TyreType", 0)).id());
         entityData.set(GEAR, clampGear(input.getIntOr("Gear", NEUTRAL_GEAR)));
@@ -2059,6 +2096,10 @@ public class OpenwheelCarEntity extends Entity {
         output.putInt("Grip", setup.grip());
         output.putInt("Aero", setup.aero());
         output.putInt("Gearing", setup.gearing());
+        output.putInt("FrontWing", setup.frontWing());
+        output.putInt("RearWing", setup.rearWing());
+        output.putInt("AntiRoll", setup.antiRoll());
+        output.putInt("BrakeBias", setup.brakeBias());
         output.putInt("TyreType", getTyreType().id());
         output.putInt("Gear", getGear());
         output.putInt("Rpm", getRpm());
@@ -2180,12 +2221,47 @@ public class OpenwheelCarEntity extends Entity {
         ticks--;
         entityData.set(PIT_STOP_TICKS, ticks);
 
+        if (entityData.get(PIT_SERVICE_KIND) == PIT_SERVICE_TYRES) {
+            if (ticks == 80) announceTyreStage("Removing old tyres");
+            if (ticks == 50) announceTyreStage("Installing new tyres");
+            if (ticks == 20) announceTyreStage("Securing wheels");
+            if (ticks == 0) completeTyreChange();
+            return;
+        }
+
         if (ticks == 0) {
             setComponentDamage(CarComponentDamage.NONE);
             setTyreWearPercent(0.0f);
             resetTyreThermalState();
             messageDriver(Component.literal("Pit stop complete — car serviced"));
         }
+    }
+
+    private void announceTyreStage(String text) {
+        Component message = Component.literal(text);
+        messageDriver(message);
+        ServerPlayer crew = pitCrewPlayer();
+        if (crew != null) messagePitCrew(crew, message);
+    }
+
+    private void completeTyreChange() {
+        com.openwheelracing.content.car.TyreType newType = com.openwheelracing.content.car.TyreType.fromId(pendingTyreType);
+        applyTyres(pendingTyreCompound, newType);
+        setTyreWearPercentAndSync(100.0f - pendingTyreRemaining);
+        ItemStack removed = TyreItem.create(removedTyreCompound, com.openwheelracing.content.car.TyreType.fromId(removedTyreType), 1, removedTyreRemaining);
+        ServerPlayer crew = pitCrewPlayer();
+        if ((crew == null || !crew.addItem(removed)) && level() instanceof ServerLevel serverLevel) {
+            spawnAtLocation(serverLevel, removed);
+        }
+        Component complete = Component.literal("Tyre change complete");
+        messageDriver(complete);
+        if (crew != null) messagePitCrew(crew, complete);
+        entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
+        pitCrewPlayerId = null;
+    }
+
+    private ServerPlayer pitCrewPlayer() {
+        return pitCrewPlayerId == null || level().getServer() == null ? null : level().getServer().getPlayerList().getPlayer(pitCrewPlayerId);
     }
 
     private void tickLapTimer() {
@@ -2856,7 +2932,7 @@ public class OpenwheelCarEntity extends Entity {
         double lowSpeedSteerAngle = profile.lowSpeedSteerAngle();
         double highSpeedSteerAngle = profile.highSpeedSteerAngle();
         double frontAeroBalance = profile.frontAeroBalance();
-        double brakeFrontBias = profile.brakeFrontBias();
+        double brakeFrontBias = setup.brakeFrontBias();
 
         Vec3 delta = getDeltaMovement();
         double horizontalSpeed = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
@@ -2949,13 +3025,18 @@ public class OpenwheelCarEntity extends Entity {
         double speedSteerT = square(speedRatio) / (1.0 + square(speedRatio));
         double offGripRelief = frontSteeringOffGripRelief;
         double speedCurveMultiplier = keyboardSteering ? keyboardSpeedResponseCurve : 1.0;
-        double steeringLockT = Math.pow(speedSteerT, STEERING_HIGH_SPEED_CURVE_POWER * speedCurveMultiplier);
         double lowLockGain = keyboardSteering ? keyboardLowSpeedSteeringGain : 1.0;
         double highLockGain = keyboardSteering ? keyboardHighSpeedSteeringGain : 1.0;
-        double keyboardSpeedSteeringLock = (lowSpeedSteerAngle * lowLockGain + (highSpeedSteerAngle * highLockGain - lowSpeedSteerAngle * lowLockGain) * steeringLockT)
+        double keyboardSpeedSteeringLock = VehiclePhysics.keyboardSpeedSteeringLock(
+            speedMetersPerSecond, lowSpeedSteerAngle, highSpeedSteerAngle,
+            lowLockGain, highLockGain, speedCurveMultiplier,
+            STEERING_SPEED_SCALE, STEERING_HIGH_SPEED_CURVE_POWER)
             * (1.0 + offGripRelief * STEERING_OFF_GRIP_LOCK_BONUS);
         double steeringLock = VehiclePhysics.steeringLockForInputSource(
             keyboardSteering, lowSpeedSteerAngle, keyboardSpeedSteeringLock);
+        double counterSteerRecovery = keyboardSteering
+            ? VehiclePhysics.counterSteerRecoveryBlend(steerInput, yawRate)
+            : 0.0;
         if (keyboardSteering) {
             double estimatedDownforce = 0.5 * AIR_DENSITY * downforceArea * setup.clACoefficient()
                 * speedMetersPerSecond * speedMetersPerSecond * (isDrsActive() ? DRS_DOWNFORCE_FACTOR : 1.0);
@@ -2969,11 +3050,14 @@ public class OpenwheelCarEntity extends Entity {
                 speedMetersPerSecond, wheelbase, carMassKg, GRAVITY, damagedDownforce,
                 asphaltMuLateral, surface.grip * temperatureGrip);
             steeringLock = Math.min(steeringLock, gripSteeringLimit);
+            double recoveryLock = Math.min(lowSpeedSteerAngle, COUNTER_STEER_RECOVERY_LOCK);
+            steeringLock += (Math.max(steeringLock, recoveryLock) - steeringLock) * counterSteerRecovery;
         }
         double lowRackRate = LOW_SPEED_STEERING_RACK_RATE * (keyboardSteering ? keyboardLowSpeedSteeringRate : 1.0);
         double highRackRate = HIGH_SPEED_STEERING_RACK_RATE * (keyboardSteering ? keyboardHighSpeedSteeringRate : 1.0);
         double rackRate = (lowRackRate + (highRackRate - lowRackRate) * speedSteerT)
             * (1.0 + offGripRelief * STEERING_OFF_GRIP_RATE_BONUS);
+        rackRate += (Math.max(rackRate, COUNTER_STEER_RECOVERY_RATE) - rackRate) * counterSteerRecovery;
         double lowCenteringRate = LOW_SPEED_STEERING_CENTERING_RATE * (keyboardSteering ? keyboardLowSpeedCenteringRate : 1.0);
         double highCenteringRate = HIGH_SPEED_STEERING_CENTERING_RATE * (keyboardSteering ? keyboardHighSpeedCenteringRate : 1.0);
         double centeringRate = lowCenteringRate + (highCenteringRate - lowCenteringRate) * speedSteerT;
@@ -3092,8 +3176,9 @@ public class OpenwheelCarEntity extends Entity {
             double subAeroDrag = 0.5 * AIR_DENSITY * dragArea * cdACoefficient * subSpeedSquared * (isDrsActive() ? DRS_DRAG_FACTOR : 1.0);
             double subStaticFrontLoad = carMassKg * GRAVITY * frontStaticWeight;
             double subStaticRearLoad = carMassKg * GRAVITY * (1.0 - frontStaticWeight);
-            double subAeroFrontLoad = subDownforce * frontAeroBalance * frontAeroDamageFactor;
-            double subAeroRearLoad = subDownforce * (1.0 - frontAeroBalance) * rearAeroDamageFactor;
+            double setupFrontAeroBalance = clamp(frontAeroBalance + setup.frontAeroBalanceAdjustment(), 0.35, 0.65);
+            double subAeroFrontLoad = subDownforce * setupFrontAeroBalance * frontAeroDamageFactor;
+            double subAeroRearLoad = subDownforce * (1.0 - setupFrontAeroBalance) * rearAeroDamageFactor;
 
             double subSpeedBlocksPerTick = subSpeed / 20.0;
             double driveDirection = gear == REVERSE_GEAR ? -1.0 : gear > NEUTRAL_GEAR ? 1.0 : 0.0;
@@ -3160,8 +3245,10 @@ public class OpenwheelCarEntity extends Entity {
                 * WetTyrePhysics.rollingResistanceForceMultiplier(getTyreType())
                 * tyreWearDragFactor * componentDragFactor * (carMassKg * GRAVITY + subDownforce);
             double subSinkDragForce = (surface.sinkDrag + wetResistance) * (carMassKg * GRAVITY + subDownforce);
-            double subAvailableRearDriveForce = asphaltMuLongitudinal * surface.grip
+            double unloadedRearDriveForce = asphaltMuLongitudinal * surface.grip
                 * Math.max(300.0, subStaticRearLoad + subAeroRearLoad);
+            double subAvailableRearDriveForce = VehiclePhysics.drivenAxleForceWithLongitudinalLoadTransfer(
+                unloadedRearDriveForce, asphaltMuLongitudinal * surface.grip, CG_HEIGHT, wheelbase);
             double subLoadTransferDriveForce = VehiclePhysics.tractionLimitedDriveForceForLoadTransfer(
                 subDriveForceRequest, subAvailableRearDriveForce);
             double subPreliminaryAx = (subLoadTransferDriveForce - subBrakeDirection * subBrakeForceEstimate
@@ -3171,8 +3258,9 @@ public class OpenwheelCarEntity extends Entity {
             double subLateralLoadTransfer = carMassKg * subLateralAccelerationEstimate * CG_HEIGHT / trackWidth;
             double subNormalFront = Math.max(300.0, subStaticFrontLoad + subAeroFrontLoad - subLongitudinalLoadTransfer);
             double subNormalRear = Math.max(300.0, subStaticRearLoad + subAeroRearLoad + subLongitudinalLoadTransfer);
-            double frontLateralTransfer = subLateralLoadTransfer * FRONT_ROLL_STIFFNESS_SHARE;
-            double rearLateralTransfer = subLateralLoadTransfer * REAR_ROLL_STIFFNESS_SHARE;
+            double frontRollShare = setup.frontRollStiffnessShare();
+            double frontLateralTransfer = subLateralLoadTransfer * frontRollShare;
+            double rearLateralTransfer = subLateralLoadTransfer * (1.0 - frontRollShare);
             VehiclePhysics.AxleWheelLoads frontWheelLoads = VehiclePhysics.lateralAxleLoads(
                 subNormalFront, frontLateralTransfer);
             VehiclePhysics.AxleWheelLoads rearWheelLoads = VehiclePhysics.lateralAxleLoads(
@@ -3274,9 +3362,18 @@ public class OpenwheelCarEntity extends Entity {
                 }
             }
             double rearLatUse = Math.max(Math.abs(relaxedRlLatForce) / Math.max(1.0, rlLatLimit), Math.abs(relaxedRrLatForce) / Math.max(1.0, rrLatLimit));
+            double speedAdjustedTractionEnvelope = VehiclePhysics.lowSpeedTractionEnvelope(
+                subSpeed, tractionControlEnvelope);
+            double speedAdjustedTractionStrength = VehiclePhysics.lowSpeedTractionControlStrength(
+                subSpeed, tractionControlStrength);
+            double rearCorneringStiffnessScale = VehiclePhysics.lowSpeedRearCorneringStiffnessScale(
+                subSpeed, neutralYawAdjustment);
+            double rearForceEnvelope = Math.max(speedAdjustedTractionEnvelope,
+                VehiclePhysics.tractionControlForceEnvelope(
+                    isTractionControlEnabled(), tractionControlEnvelope, tractionControlStrength));
             if (keyboardSteering) {
                 double baseTractionTarget = Math.sqrt(Math.max(0.0,
-                    square(VehiclePhysics.BASE_GRIP_ENVELOPE) - square(rearLatUse)));
+                    square(Math.max(VehiclePhysics.BASE_GRIP_ENVELOPE, speedAdjustedTractionEnvelope)) - square(rearLatUse)));
                 rlLongRequest = VehiclePhysics.tractionControlledDriveRequest(
                     rlLongRequest, rlLongLimit * baseTractionTarget, 1.0);
                 rrLongRequest = VehiclePhysics.tractionControlledDriveRequest(
@@ -3284,11 +3381,11 @@ public class OpenwheelCarEntity extends Entity {
             }
             if (keyboardSteering && isTractionControlEnabled()) {
                 double configuredTractionTarget = Math.sqrt(Math.max(0.0,
-                    square(tractionControlEnvelope) - square(rearLatUse)));
+                    square(speedAdjustedTractionEnvelope) - square(rearLatUse)));
                 rlLongRequest = VehiclePhysics.tractionControlledDriveRequest(
-                    rlLongRequest, rlLongLimit * configuredTractionTarget, tractionControlStrength);
+                    rlLongRequest, rlLongLimit * configuredTractionTarget, speedAdjustedTractionStrength);
                 rrLongRequest = VehiclePhysics.tractionControlledDriveRequest(
-                    rrLongRequest, rrLongLimit * configuredTractionTarget, tractionControlStrength);
+                    rrLongRequest, rrLongLimit * configuredTractionTarget, speedAdjustedTractionStrength);
             }
             WheelForces flForces = calculateWheelForces(
                 -halfTrackWidth, frontAxleDistance, steeringAngle - FRONT_TOE_OUT,
@@ -3317,12 +3414,12 @@ public class OpenwheelCarEntity extends Entity {
                 velocityLong, velocityLat, yawRate,
                 rlLongRequest, rlMuLong, rlMuLat, rlNormal,
                 profile.rearLongitudinalStiffness() * 0.5 * compoundStiffness * rlTyreWearGrip * rlGripDamageFactor * Math.sqrt(rlSurfaceGrip),
-                profile.rearCorneringStiffness() * 0.5 * rollingForceScale * compoundStiffness * rlTyreWearGrip * rlGripDamageFactor * Math.sqrt(rlSurfaceGrip),
+                profile.rearCorneringStiffness() * 0.5 * rollingForceScale * compoundStiffness * rlTyreWearGrip * rlGripDamageFactor * Math.sqrt(rlSurfaceGrip)
+                    * rearCorneringStiffnessScale,
                 rlLongLimit, rlLatLimit, REAR_TYRE_RELAXATION_LENGTH, subDt, subSpeed,
                 VehiclePhysics.gripEnvelopeForInputSource(keyboardSteering,
                     brake > 0.0 ? activeAbsEnvelope
-                        : VehiclePhysics.tractionControlForceEnvelope(
-                            isTractionControlEnabled(), tractionControlEnvelope, tractionControlStrength)),
+                        : rearForceEnvelope),
                 brakeRear > 0.0, steeringReleased,
                 relaxedRlLatForce, wheelAngularSpeedRl, wheelAngularSpeedsInitialized);
             WheelForces rrForces = calculateWheelForces(
@@ -3330,12 +3427,12 @@ public class OpenwheelCarEntity extends Entity {
                 velocityLong, velocityLat, yawRate,
                 rrLongRequest, rrMuLong, rrMuLat, rrNormal,
                 profile.rearLongitudinalStiffness() * 0.5 * compoundStiffness * rrTyreWearGrip * rrGripDamageFactor * Math.sqrt(rrSurfaceGrip),
-                profile.rearCorneringStiffness() * 0.5 * rollingForceScale * compoundStiffness * rrTyreWearGrip * rrGripDamageFactor * Math.sqrt(rrSurfaceGrip),
+                profile.rearCorneringStiffness() * 0.5 * rollingForceScale * compoundStiffness * rrTyreWearGrip * rrGripDamageFactor * Math.sqrt(rrSurfaceGrip)
+                    * rearCorneringStiffnessScale,
                 rrLongLimit, rrLatLimit, REAR_TYRE_RELAXATION_LENGTH, subDt, subSpeed,
                 VehiclePhysics.gripEnvelopeForInputSource(keyboardSteering,
                     brake > 0.0 ? activeAbsEnvelope
-                        : VehiclePhysics.tractionControlForceEnvelope(
-                            isTractionControlEnabled(), tractionControlEnvelope, tractionControlStrength)),
+                        : rearForceEnvelope),
                 brakeRear > 0.0, steeringReleased,
                 relaxedRrLatForce, wheelAngularSpeedRr, wheelAngularSpeedsInitialized);
             relaxedFlLatForce = flForces.relaxedLateralForce();
@@ -3369,7 +3466,12 @@ public class OpenwheelCarEntity extends Entity {
             double dragForce = resistanceForce.longitudinal();
             double longitudinalForce = rearLongForce + frontLongForce + resistanceForce.longitudinal();
             double lateralForce = frontLatForce + rearLatForce + resistanceForce.lateral();
-            double yawMoment = flForces.yawMoment() + frForces.yawMoment() + rlForces.yawMoment() + rrForces.yawMoment();
+            double frontYawMoment = flForces.yawMoment() + frForces.yawMoment();
+            double rearYawMoment = rlForces.yawMoment() + rrForces.yawMoment();
+            double yawMoment = VehiclePhysics.balancedHandlingYawMoment(
+                frontYawMoment, rearYawMoment, steeringAngle, velocityLong,
+                yawRate, wheelbase, brake, throttle,
+                brakingYawAdjustment, neutralYawAdjustment, throttleYawAdjustment);
             double yawAcceleration = yawMoment / yawInertia;
             double subVelocityLongBefore = velocityLong;
             VehiclePhysics.BodyAcceleration bodyAcceleration = VehiclePhysics.minecraftBodyAcceleration(
@@ -3446,8 +3548,8 @@ public class OpenwheelCarEntity extends Entity {
             finalRrLongRequest = rrLongRequest;
             finalBrakeDirection = subBrakeDirection;
             finalLongitudinalLoadTransfer = subLongitudinalLoadTransfer;
-            finalFrontYawMoment = flForces.yawMoment() + frForces.yawMoment();
-            finalRearYawMoment = rlForces.yawMoment() + rrForces.yawMoment();
+            finalFrontYawMoment = frontYawMoment;
+            finalRearYawMoment = rearYawMoment;
             finalDownforce = subDownforce;
             finalDragForce = dragForce;
             finalFrontSaturation = Math.max(flDemand, frDemand);

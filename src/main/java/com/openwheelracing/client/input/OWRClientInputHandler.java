@@ -116,11 +116,13 @@ public final class OWRClientInputHandler {
         float stabilityAssistStrength = assistedKeyboard ? 1.0f : 0.0f;
         car.setTractionControlStrength(settings.tractionControlStrength);
         car.setAssistGripEnvelopes(settings.tractionControlEnvelope, settings.absEnvelope);
+        car.setYawAdjustments(settings.brakingYawAdjustment, settings.neutralYawAdjustment, settings.throttleYawAdjustment);
         car.setKeyboardStabilityAssistStrength(stabilityAssistStrength);
         car.tickLocalClientMovement(driveInputSequence + 1, throttle, brake, steering, keyboardSteeringSource);
         sendDriveInputIfNeeded(keyboardThrottle, keyboardBrake, wheelThrottle, wheelBrake,
             (float) car.getSteeringAngleRadians(), keyboard,
             settings.tractionControlStrength, settings.tractionControlEnvelope, settings.absEnvelope,
+            settings.brakingYawAdjustment, settings.neutralYawAdjustment, settings.throttleYawAdjustment,
             stabilityAssistStrength, keyboardSteeringSource);
 
         boolean shiftUpDown = isDown(OWRKeyMappings.SHIFT_UP) || wheel.pressed(WheelInputSettings.ButtonRole.SHIFT_UP);
@@ -314,7 +316,8 @@ public final class OWRClientInputHandler {
     private static void sendDriveInputIfNeeded(float keyboardThrottle, float keyboardBrake, float wheelThrottle, float wheelBrake,
             float steeringAngleRadians,
             KeyboardInputSettings keyboard, float tractionControlStrength, float tractionControlEnvelope,
-            float absEnvelope, float stabilityAssistStrength, boolean keyboardSteeringSource) {
+            float absEnvelope, float brakingYawAdjustment, float neutralYawAdjustment,
+            float throttleYawAdjustment, float stabilityAssistStrength, boolean keyboardSteeringSource) {
         boolean idle = keyboardThrottle == 0.0f && keyboardBrake == 0.0f
             && wheelThrottle == 0.0f && wheelBrake == 0.0f && Math.abs(steeringAngleRadians) < 1.0E-5f;
         if (idle && sentIdleDriveInput) {
@@ -325,7 +328,9 @@ public final class OWRClientInputHandler {
             keyboardThrottle, keyboardBrake, wheelThrottle, wheelBrake, steeringAngleRadians,
             keyboard.lowSpeedSteeringRate, keyboard.highSpeedSteeringRate, keyboard.lowSpeedCenteringRate, keyboard.highSpeedCenteringRate,
             keyboard.lowSpeedSteeringGain, keyboard.highSpeedSteeringGain, keyboard.speedResponseCurve,
-            tractionControlStrength, tractionControlEnvelope, absEnvelope, stabilityAssistStrength, keyboardSteeringSource));
+            tractionControlStrength, tractionControlEnvelope, absEnvelope,
+            brakingYawAdjustment, neutralYawAdjustment, throttleYawAdjustment,
+            stabilityAssistStrength, keyboardSteeringSource));
     }
 
     /** Poll the raw GLFW key state regardless of Minecraft conflict context. */

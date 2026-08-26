@@ -40,7 +40,7 @@ public final class VehiclePhysics {
 
     private static final double CAR_MASS_KG = 769.0;
     private static final double GRAVITY = 9.81;
-    private static final double ASPHALT_MU_LONGITUDINAL = 2.25;
+    private static final double ASPHALT_MU_LONGITUDINAL = 2.475;
     private static final double MAX_BRAKE_FORCE = 40_000.0;
 
     private VehiclePhysics() {
@@ -227,6 +227,76 @@ public final class VehiclePhysics {
         return saturationEvidence * slipEvidence * yawDeficit;
     }
 
+    static double balancedHandlingYawMoment(double frontYawMoment, double rearYawMoment,
+                                            double steeringAngle, double longitudinalSpeed,
+                                            double yawRate, double wheelbase,
+                                            double brakeInput, double throttleInput,
+                                            double brakingAdjustment, double neutralAdjustment,
+                                            double throttleAdjustment) {
+        double steeringDirection = Math.signum(steeringAngle);
+        if (steeringDirection == 0.0 || Math.abs(longitudinalSpeed) < 2.0) {
+            return frontYawMoment + rearYawMoment;
+        }
+
+        double steeringUse = smoothstep(Math.abs(steeringAngle) / Math.toRadians(6.0));
+        double brakeUse = smoothstep(clamp(brakeInput, 0.0, 1.0));
+        double throttleUse = smoothstep(clamp(throttleInput, 0.0, 1.0));
+        double brakingScale = clamp(brakingAdjustment, 0.0, 1.5);
+        double neutralScale = clamp(neutralAdjustment, 0.0, 1.5);
+        double throttleScale = clamp(throttleAdjustment, 0.0, 1.5);
+        double nonBrakingYawAssist = 1.0 - smoothstep(clamp(brakeInput, 0.0, 1.0) / 0.05);
+
+        // A locked/saturated front axle should wash wide rather than keep winding yaw into
+        // the corner. Preserve the opposite-signed part because it is arresting a spin.
+        double frontTurnIn = Math.max(0.0, frontYawMoment * steeringDirection);
+        double adjustedFront = frontYawMoment
+            - steeringDirection * frontTurnIn
+                * Math.min(0.45, 0.20 * brakingScale) * brakeUse * steeringUse;
+
+        // Power oversteer comes from easing the rear axle's counter-yaw only while the car
+        // is below its kinematic yaw target. The relief vanishes at/above target yaw, so it
+        // cannot continue feeding an established spin.
+        double desiredYawRate = Math.abs(longitudinalSpeed * Math.tan(steeringAngle)
+            / Math.max(0.5, wheelbase));
+        double yawAlongSteering = yawRate * steeringDirection;
+        double yawDeficit = clamp((desiredYawRate - yawAlongSteering)
+            / Math.max(0.05, desiredYawRate), 0.0, 1.0);
+        double rearCounterYaw = Math.max(0.0, -rearYawMoment * steeringDirection);
+        double lowSpeedRotation = lowSpeedCornerRotationBlend(longitudinalSpeed);
+        double coastRelief = 0.20 + 0.30 * lowSpeedRotation;
+        double throttleRelief = 0.35 + 0.15 * lowSpeedRotation;
+        double counterYawRelief = (coastRelief * neutralScale
+            + throttleRelief * throttleScale * throttleUse) * nonBrakingYawAssist;
+        double rawTurnInMoment = (frontYawMoment + rearYawMoment) * steeringDirection;
+        double turnInGate = smoothstep(rawTurnInMoment / 2_000.0);
+        double adjustedRear = rearYawMoment
+            + steeringDirection * rearCounterYaw * counterYawRelief * steeringUse
+                * smoothstep(yawDeficit) * turnInGate;
+        double availableTyreMoment = Math.abs(frontYawMoment) + Math.abs(rearYawMoment);
+        double adjustedMoment = adjustedFront + adjustedRear;
+
+        // Braking softens turn-in but deliberately retains steering authority. Stability
+        // comes from the separate signed yaw-error recovery below, not from locking the
+        // chassis to zero turn-in moment.
+        double remainingTurnIn = Math.max(0.0, adjustedMoment * steeringDirection);
+        double turnInReduction = Math.min(0.80, 0.45 * brakingScale) * brakeUse;
+        adjustedMoment -= steeringDirection * remainingTurnIn * turnInReduction;
+
+        double signedBrakingYawTarget = steeringDirection * desiredYawRate * 0.85;
+        double sameDirectionExcess = yawAlongSteering - Math.abs(signedBrakingYawTarget);
+        double oppositeDirectionExcess = -yawAlongSteering - desiredYawRate * 0.15;
+        double brakingYawError = sameDirectionExcess > 0.0
+            ? steeringDirection * sameDirectionExcess
+            : oppositeDirectionExcess > 0.0
+                ? -steeringDirection * oppositeDirectionExcess
+                : 0.0;
+        double brakingRecovery = smoothstep(Math.abs(brakingYawError)
+            / Math.max(0.08, desiredYawRate * 0.35));
+        adjustedMoment -= Math.signum(brakingYawError) * availableTyreMoment
+            * Math.min(1.25, brakingScale) * brakeUse * steeringUse * brakingRecovery;
+        return adjustedMoment;
+    }
+
     static double keyboardGripSteeringLimit(double speedMetersPerSecond, double wheelbase,
                                             double massKg, double gravity, double downforce,
                                             double baseLateralMu, double gripCoefficient) {
@@ -239,6 +309,24 @@ public final class VehiclePhysics {
         double availableLateralAcceleration = Math.max(0.0, baseLateralMu)
             * Math.max(0.0, gripCoefficient) * normalAcceleration * 1.08;
         return Math.atan(Math.max(0.0, wheelbase) * availableLateralAcceleration / speedSquared);
+    }
+
+    static double keyboardSpeedSteeringLock(double speedMetersPerSecond,
+                                            double lowSpeedLock, double highSpeedLock,
+                                            double lowSpeedGain, double highSpeedGain,
+                                            double responseCurve, double speedScale,
+                                            double curvePower) {
+        double speedRatio = Math.max(0.0, speedMetersPerSecond) / Math.max(0.1, speedScale);
+        double speedBlend = square(speedRatio) / (1.0 + square(speedRatio));
+        double lockBlend = Math.pow(speedBlend, Math.max(0.01, curvePower * responseCurve));
+        double lowLock = Math.max(0.0, lowSpeedLock) * Math.max(0.0, lowSpeedGain);
+        double highLock = Math.max(0.0, highSpeedLock) * Math.max(0.0, highSpeedGain);
+        return lowLock + (highLock - lowLock) * lockBlend;
+    }
+
+    static double kinematicCornerRadius(double wheelbase, double steeringAngle) {
+        double tangent = Math.tan(Math.abs(steeringAngle));
+        return tangent <= 1.0E-9 ? Double.POSITIVE_INFINITY : Math.max(0.0, wheelbase) / tangent;
     }
 
     static double softCombinedLongitudinalLimit(double request, double lateralForce,
@@ -262,8 +350,30 @@ public final class VehiclePhysics {
             return BASE_GRIP_ENVELOPE;
         }
         double blend = clamp(strength, 0.0, 1.0);
-        double target = clamp(configuredEnvelope, 0.90, 1.10);
+        double target = clamp(configuredEnvelope, 0.90, 1.18);
         return BASE_GRIP_ENVELOPE + (target - BASE_GRIP_ENVELOPE) * blend;
+    }
+
+    static double lowSpeedTractionEnvelope(double speedMetersPerSecond, double configuredEnvelope) {
+        double speedBlend = smoothstep((Math.max(0.0, speedMetersPerSecond) - 8.0) / 17.0);
+        double lowSpeedEnvelope = Math.max(clamp(configuredEnvelope, 0.90, 1.10), 1.30);
+        return lowSpeedEnvelope + (clamp(configuredEnvelope, 0.90, 1.10) - lowSpeedEnvelope) * speedBlend;
+    }
+
+    static double lowSpeedTractionControlStrength(double speedMetersPerSecond, double configuredStrength) {
+        double speedBlend = smoothstep((Math.max(0.0, speedMetersPerSecond) - 8.0) / 17.0);
+        double strength = clamp(configuredStrength, 0.0, 1.0);
+        return strength * (0.40 + 0.60 * speedBlend);
+    }
+
+    static double lowSpeedCornerRotationBlend(double speedMetersPerSecond) {
+        return 1.0 - smoothstep((Math.abs(speedMetersPerSecond) - 30.0) / 25.0);
+    }
+
+    static double lowSpeedRearCorneringStiffnessScale(double speedMetersPerSecond,
+                                                       double neutralAdjustment) {
+        return 1.0 - 0.30 * clamp(neutralAdjustment, 0.0, 1.5)
+            * lowSpeedCornerRotationBlend(speedMetersPerSecond);
     }
 
     static double gripEnvelopeForInputSource(boolean keyboardInput, double assistedEnvelope) {
@@ -320,6 +430,15 @@ public final class VehiclePhysics {
         return clamp(requestedDriveForce, -limit, limit);
     }
 
+    static double drivenAxleForceWithLongitudinalLoadTransfer(double unloadedAxleForceLimit,
+                                                               double longitudinalMu,
+                                                               double cgHeight,
+                                                               double wheelbase) {
+        double feedback = Math.max(0.0, longitudinalMu) * Math.max(0.0, cgHeight)
+            / Math.max(0.5, wheelbase);
+        return Math.max(0.0, unloadedAxleForceLimit) / Math.max(0.50, 1.0 - feedback);
+    }
+
     static ErsWheelPower ersWheelPower(double icePowerWatts, double ersPowerWatts) {
         double netPower = Math.max(0.0, icePowerWatts) + ersPowerWatts;
         return new ErsWheelPower(Math.max(0.0, netPower), Math.max(0.0, -netPower));
@@ -354,6 +473,11 @@ public final class VehiclePhysics {
     static double steeringLockForInputSource(boolean keyboardInput, double mechanicalLock,
                                              double keyboardSpeedLock) {
         return keyboardInput ? Math.max(0.0, keyboardSpeedLock) : Math.max(0.0, mechanicalLock);
+    }
+
+    static double counterSteerRecoveryBlend(double steeringInput, double yawRate) {
+        double opposingYaw = -clamp(steeringInput, -1.0, 1.0) * yawRate;
+        return smoothstep((opposingYaw - 0.02) / 0.35);
     }
 
     public static double steeringCommandDegrees(double normalizedInput, double steeringLockRadians) {

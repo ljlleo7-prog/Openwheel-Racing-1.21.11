@@ -20,7 +20,7 @@ import org.lwjgl.glfw.GLFW;
 
 public class OpenwheelSetupScreen extends Screen {
     private static final int PANEL_WIDTH = 380;
-    private static final int CONTENT_HEIGHT = 902;
+    private static final int CONTENT_HEIGHT = 980;
     private static final int GRAPH_WIDTH = 156;
     private static final int GRAPH_HEIGHT = 74;
     private static final int GRAPH_TEMP_MIN = 50;
@@ -91,21 +91,27 @@ public class OpenwheelSetupScreen extends Screen {
         addRenderableWidget(new TractionControlStrengthSlider(left, controlsY + 18, PANEL_WIDTH - 32, 20));
         addRenderableWidget(new AssistEnvelopeSlider(left, controlsY + 44, PANEL_WIDTH - 32, 20, AssistEnvelope.TC));
         addRenderableWidget(new AssistEnvelopeSlider(left, controlsY + 70, PANEL_WIDTH - 32, 20, AssistEnvelope.ABS));
+        addRenderableWidget(new YawAdjustmentSlider(left, controlsY + 98, PANEL_WIDTH - 32, 20,
+            YawAdjustment.BRAKING, settings.brakingYawAdjustment));
+        addRenderableWidget(new YawAdjustmentSlider(left, controlsY + 124, PANEL_WIDTH - 32, 20,
+            YawAdjustment.NEUTRAL, settings.neutralYawAdjustment));
+        addRenderableWidget(new YawAdjustmentSlider(left, controlsY + 150, PANEL_WIDTH - 32, 20,
+            YawAdjustment.THROTTLE, settings.throttleYawAdjustment));
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.keyboard_setup"), button -> Minecraft.getInstance().setScreen(new KeyboardSetupScreen(this)))
-            .bounds(left, controlsY + 98, PANEL_WIDTH - 32, 20)
+            .bounds(left, controlsY + 178, PANEL_WIDTH - 32, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.wheel_setup"), button -> Minecraft.getInstance().setScreen(new WheelSetupScreen(this)))
-            .bounds(left, controlsY + 122, PANEL_WIDTH - 32, 20)
+            .bounds(left, controlsY + 202, PANEL_WIDTH - 32, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.keybind_setup"), button -> Minecraft.getInstance().setScreen(new KeyBindsScreen(this, Minecraft.getInstance().options)))
-            .bounds(left, controlsY + 146, PANEL_WIDTH - 32, 20)
+            .bounds(left, controlsY + 226, PANEL_WIDTH - 32, 20)
             .build());
 
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.done"), button -> saveAndClose())
-            .bounds(x + 106, y + 874, 76, 20)
+            .bounds(x + 106, y + 952, 76, 20)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.setup.cancel"), button -> closeToParent())
-            .bounds(x + 198, y + 874, 76, 20)
+            .bounds(x + 198, y + 952, 76, 20)
             .build());
         updateWidgetVisibility();
     }
@@ -128,7 +134,7 @@ public class OpenwheelSetupScreen extends Screen {
         fillPanel(graphics, x + 6, y + 22, y + 148, 0xFF2A3038);
         fillPanel(graphics, x + 6, y + 140, y + 478, 0xFF293443);
         fillPanel(graphics, x + 6, y + 494, y + 672, 0xFF242D38);
-        fillPanel(graphics, x + 6, y + 688, y + 856, 0xFF2F3640);
+        fillPanel(graphics, x + 6, y + 688, y + 934, 0xFF2F3640);
         drawIfVisible(graphics, title, x + 10, y + 8, 0xFFE8EDF2);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.visual"), x + 12, y + 24, 0xFFC9D1D9);
         drawIfVisible(graphics, Component.translatable("screen.openwheelracing.setup.shift_lights"), x + 24, y + 106, 0xFFE8EDF2);
@@ -364,6 +370,47 @@ public class OpenwheelSetupScreen extends Screen {
     private enum AssistEnvelope {
         TC,
         ABS
+    }
+
+    private enum YawAdjustment {
+        BRAKING,
+        NEUTRAL,
+        THROTTLE
+    }
+
+    private class YawAdjustmentSlider extends AbstractSliderButton {
+        private final YawAdjustment adjustment;
+
+        private YawAdjustmentSlider(int x, int y, int width, int height,
+                                    YawAdjustment adjustment, float initialValue) {
+            super(x, y, width, height, Component.empty(), initialValue / 1.5f);
+            this.adjustment = adjustment;
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.translatable("screen.openwheelracing.setup.yaw_adjustment."
+                + adjustment.name().toLowerCase(Locale.ROOT), Math.round(yawAdjustmentValue(adjustment) * 100.0f)));
+        }
+
+        @Override
+        protected void applyValue() {
+            float setting = (float) value * 1.5f;
+            switch (adjustment) {
+                case BRAKING -> settings.brakingYawAdjustment = setting;
+                case NEUTRAL -> settings.neutralYawAdjustment = setting;
+                case THROTTLE -> settings.throttleYawAdjustment = setting;
+            }
+        }
+
+        private float yawAdjustmentValue(YawAdjustment target) {
+            return switch (target) {
+                case BRAKING -> settings.brakingYawAdjustment;
+                case NEUTRAL -> settings.neutralYawAdjustment;
+                case THROTTLE -> settings.throttleYawAdjustment;
+            };
+        }
     }
 
     private class AssistEnvelopeSlider extends AbstractSliderButton {

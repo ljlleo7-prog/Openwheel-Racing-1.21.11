@@ -198,9 +198,10 @@ public final class CarHudOverlay {
 
     private static void renderPitStop(GuiGraphics graphics, Font font, OpenwheelCarEntity car, int x, int y, int width) {
         int remaining = car.getPitStopTicks();
-        int pct = Math.max(0, Math.min(100, 100 - (remaining * 100 / 60)));
+        int duration = car.isTyreChangeInProgress() ? OpenwheelCarEntity.TYRE_CHANGE_DURATION : OpenwheelCarEntity.PIT_STOP_DURATION;
+        int pct = Math.max(0, Math.min(100, 100 - (remaining * 100 / duration)));
         graphics.fill(x + 1, y + 1, x + 1 + (width - 2) * pct / 100, y + 4, 0xFFDA1A20);
-        String label = "PIT " + (remaining / 20 + 1) + "s";
+        String label = (car.isTyreChangeInProgress() ? car.getPitServiceStage().getString() : "PIT SERVICE") + "  " + ((remaining + 19) / 20) + "s";
         graphics.drawString(font, label, x + (width - font.width(label)) / 2, y + 2, 0xFFFFFFFF, false);
     }
 

@@ -70,6 +70,14 @@
 
   Yes under 30% health
 
+## Pit-Lane Tyre Changes
+
+- A crew player starts a tyre change by right-clicking a stationary car on a pit-stop mark while holding a tyre set. A driver may remain seated.
+- The tyre set is reserved when service starts; the car cannot drive or begin another service during the five-second change.
+- Service progresses through visible stages: jacking the car, removing old tyres, installing new tyres, and securing wheels.
+- The driver sees the current stage and countdown on the HUD. The crew player receives the same stage messages.
+- New compound, type, wear, and temperatures apply only when installation completes. The removed tyre set, including its remaining life, is returned to the crew or dropped beside the car if it cannot be returned.
+
 ## Acceptance Criteria
 
 - What is the minimum tyre/rubber loop for the next prototype?

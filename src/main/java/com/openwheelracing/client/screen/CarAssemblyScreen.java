@@ -2,6 +2,8 @@ package com.openwheelracing.client.screen;
 
 import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
+import com.openwheelracing.content.car.PrototypeCarSetup;
+import com.openwheelracing.content.car.CarSetupPrediction;
 import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.content.block.entity.CarWorkstationType;
@@ -22,6 +24,9 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
     private int pickerRed;
     private int pickerGreen;
     private int pickerBlue;
+    private PrototypeCarSetup displayedSetup;
+    private PrototypeCarSetup draftSetup;
+    private final SetupSlider[] setupSliders = new SetupSlider[6];
 
     public CarAssemblyScreen(CarAssemblyMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -32,17 +37,26 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
 
     @Override
     protected void init() {
+        imageWidth = menu.getWorkstationType() == CarWorkstationType.SETUP ? 548 : 256;
         super.init();
         visibleWorkstationType = menu.getWorkstationType();
+        displayedSetup = currentSetup();
+        draftSetup = displayedSetup;
         if (colorPickerChannel >= 0) {
             addColorPickerWidgets();
             return;
         }
-        if (menu.allowsSetup()) {
+        if (visibleWorkstationType == CarWorkstationType.SETUP) {
+            addSetupSliders();
+            addRenderableWidget(Button.builder(Component.literal("Apply setup"), button -> applyDraftSetup())
+                .bounds(leftPos + 400, topPos + 154, 88, 16)
+                .build());
+            addRenderableWidget(Button.builder(Component.literal("Repair"), button -> OWRNetwork.sendToServer(new OWRNetwork.RepairCarMessage()))
+                .bounds(leftPos + 492, topPos + 154, 48, 16)
+                .build());
+        } else if (menu.allowsSetup()) {
             addTuneButtons(0, 28);
-            addTuneButtons(1, 43);
-            addTuneButtons(2, 58);
-            addTuneButtons(3, 73);
+            addTuneButtons(3, 43);
             addRenderableWidget(Button.builder(Component.literal("Repair"), button -> OWRNetwork.sendToServer(new OWRNetwork.RepairCarMessage()))
                 .bounds(leftPos + 190, topPos + 98, 52, 14)
                 .build());
@@ -57,6 +71,14 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
     }
 
     @Override
+    protected void containerTick() {
+        super.containerTick();
+        if (visibleWorkstationType == CarWorkstationType.SETUP && !currentSetup().equals(displayedSetup)) {
+            rebuildWidgets();
+        }
+    }
+
+    @Override
     protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
         if (visibleWorkstationType != menu.getWorkstationType()) {
             rebuildWidgets();
@@ -65,6 +87,10 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
         int y = topPos;
 
         graphics.fill(x, y, x + imageWidth, y + imageHeight, 0xFFC6C6C6);
+        if (visibleWorkstationType == CarWorkstationType.SETUP) {
+            renderDedicatedSetup(graphics, x, y);
+            return;
+        }
         if (menu.allowsConstruction()) {
             graphics.fill(x + 6, y + 6, x + 172, y + 114, 0xFFDADADA);
         }
@@ -133,6 +159,7 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics, mouseX, mouseY, partialTick);
         super.render(graphics, mouseX, mouseY, partialTick);
+        if (visibleWorkstationType == CarWorkstationType.SETUP) renderCurrentSetupMarkers(graphics);
         renderTooltip(graphics, mouseX, mouseY);
     }
 
@@ -144,12 +171,115 @@ public class CarAssemblyScreen extends AbstractContainerScreen<CarAssemblyMenu> 
     }
 
     private void addTuneButtons(int setupSlot, int yOffset) {
-        addRenderableWidget(Button.builder(Component.literal("-"), button -> OWRNetwork.sendToServer(new OWRNetwork.TuneCarMessage(setupSlot, -1)))
+        addRenderableWidget(Button.builder(Component.literal("-"), button -> sendRelativeTune(setupSlot, -1))
             .bounds(leftPos + 214, topPos + yOffset, 12, 11)
             .build());
-        addRenderableWidget(Button.builder(Component.literal("+"), button -> OWRNetwork.sendToServer(new OWRNetwork.TuneCarMessage(setupSlot, 1)))
+        addRenderableWidget(Button.builder(Component.literal("+"), button -> sendRelativeTune(setupSlot, 1))
             .bounds(leftPos + 232, topPos + yOffset, 12, 11)
             .build());
+    }
+
+    private void addSetupSliders() {
+        PrototypeCarSetup setup = draftSetup;
+        int sliderX = leftPos + 174;
+        int sliderWidth = 210;
+        setupSliders[0] = null;
+        setupSliders[1] = addRenderableWidget(new SetupSlider(sliderX, topPos + 32, sliderWidth, 18, 1, 3, 7, setup.frontWing(), "Front wing", "°"));
+        setupSliders[2] = addRenderableWidget(new SetupSlider(sliderX, topPos + 52, sliderWidth, 18, 2, 9, 15, setup.rearWing(), "Rear wing", "°"));
+        setupSliders[4] = addRenderableWidget(new SetupSlider(sliderX, topPos + 72, sliderWidth, 18, 4, 0, 10, setup.antiRoll(), "Anti-roll", ""));
+        setupSliders[3] = addRenderableWidget(new SetupSlider(sliderX, topPos + 92, sliderWidth, 18, 3, 0, 2, setup.gearing(), "Final drive", ""));
+        setupSliders[5] = addRenderableWidget(new SetupSlider(sliderX, topPos + 112, sliderWidth, 18, 5, 50, 65, setup.brakeBias(), "Brake bias", "% F"));
+    }
+
+    private void renderDedicatedSetup(GuiGraphics graphics, int x, int y) {
+        graphics.fill(x + 6, y + 6, x + 168, y + 130, 0xFF252B33);
+        graphics.fill(x + 170, y + 6, x + 390, y + 144, 0xFF303841);
+        graphics.fill(x + 392, y + 6, x + imageWidth - 6, y + 144, 0xFF272F38);
+        graphics.fill(x + 6, y + 132, x + imageWidth - 6, y + 210, 0xFFD0D0D0);
+        graphics.drawString(font, title, x + 12, y + 10, 0xFFE8EDF2, false);
+        graphics.drawString(font, "Power mode: 1 (locked)", x + 174, y + 17, 0xFF8B949E, false);
+        graphics.drawString(font, "Place car here", x + 45, y + 38, 0xFFADB7C2, false);
+        drawSlot(graphics, x + WORKSTATION_SLOT_X[6], y + WORKSTATION_SLOT_Y[6]);
+        graphics.drawString(font, "Move sliders to preview", x + 16, y + 74, 0xFFADB7C2, false);
+        graphics.drawString(font, "Apply commits the full setup", x + 16, y + 86, 0xFFADB7C2, false);
+        drawCombinedPrediction(graphics, x + 400, y + 14);
+        for (int row = 0; row < 3; row++) for (int column = 0; column < 9; column++)
+            drawSlot(graphics, x + 46 + column * 18, y + 136 + row * 18);
+        for (int column = 0; column < 9; column++) drawSlot(graphics, x + 46 + column * 18, y + 194);
+        graphics.drawString(font, playerInventoryTitle, x + 8, y + inventoryLabelY, 0xFF404040, false);
+        int progress = menu.getScaledProgress();
+        if (progress > 0) graphics.fill(x + 174, y + 143, x + 174 + progress * 8, y + 146, 0xFF55AAFF);
+    }
+
+    private void drawCombinedPrediction(GuiGraphics graphics, int x, int y) {
+        CarSetupPrediction.Summary summary = CarSetupPrediction.combined(
+            draftSetup.power() / 3.0, draftSetup.gearing() / 2.0,
+            (draftSetup.frontWing() - 3) / 4.0, (draftSetup.rearWing() - 9) / 6.0,
+            draftSetup.antiRoll() / 10.0, (draftSetup.brakeBias() - 50) / 15.0);
+        graphics.drawString(font, "COMBINED DRAFT", x, y, 0xFFE8EDF2, false);
+        drawSummaryLine(graphics, x, y + 11, "accel", summary.acceleration(), false);
+        drawSummaryLine(graphics, x, y + 21, "top speed", summary.topSpeed(), false);
+        drawSummaryLine(graphics, x, y + 31, "aero grip", summary.grip(), false);
+        drawSummaryLine(graphics, x, y + 41, "drag", summary.drag(), false);
+        drawSummaryLine(graphics, x, y + 51, "balance", summary.balance(), true);
+    }
+
+    private void drawSummaryLine(GuiGraphics graphics, int x, int y, String name, double position, boolean balance) {
+        String text = balance ? CarSetupPrediction.balanceTerm(position) : name + " - " + CarSetupPrediction.level(position);
+        graphics.drawString(font, text, x, y, CarSetupPrediction.color(position), false);
+    }
+
+    private void renderCurrentSetupMarkers(GuiGraphics graphics) {
+        for (SetupSlider slider : setupSliders) {
+            if (slider == null) continue;
+            int markerX = slider.getX() + 4 + (int) Math.round(slider.currentPosition() * (slider.getWidth() - 8));
+            int top = slider.getY() - 2;
+            graphics.fill(markerX - 2, top, markerX + 3, top + 2, 0xFFFFFFFF);
+            graphics.fill(markerX, top + 2, markerX + 1, slider.getY() + slider.getHeight() + 1, 0xFFFFFFFF);
+        }
+        graphics.drawString(font, "white marker = current", leftPos + 396, topPos + 134, 0xFFADB7C2, false);
+    }
+
+    private void applyDraftSetup() {
+        if (menu.getOutputStack().isEmpty() || draftSetup.equals(displayedSetup)) return;
+        OWRNetwork.sendToServer(new OWRNetwork.ApplyCarSetupMessage(draftSetup.power(), draftSetup.gearing(),
+            draftSetup.frontWing(), draftSetup.rearWing(), draftSetup.antiRoll(), draftSetup.brakeBias()));
+    }
+
+    private PrototypeCarSetup currentSetup() {
+        return menu.getOutputStack().isEmpty() ? PrototypeCarSetup.DEFAULT : PrototypeCarItem.getSetup(menu.getOutputStack());
+    }
+
+    private void sendRelativeTune(int slot, int delta) {
+        PrototypeCarSetup setup = currentSetup();
+        int current = slot == 0 ? setup.power() : setup.gearing();
+        OWRNetwork.sendToServer(new OWRNetwork.TuneCarMessage(slot, current + delta));
+    }
+
+    private class SetupSlider extends AbstractSliderButton {
+        private final int slot;
+        private final int min;
+        private final int max;
+        private final String label;
+        private final String suffix;
+
+        SetupSlider(int x, int y, int width, int height, int slot, int min, int max, int initial, String label, String suffix) {
+            super(x, y, width, height, Component.empty(), (initial - min) / (double) (max - min));
+            this.slot = slot; this.min = min; this.max = max; this.label = label; this.suffix = suffix;
+            updateMessage();
+        }
+
+        private int selectedValue() { return min + (int) Math.round(value * (max - min)); }
+        @Override protected void updateMessage() { setMessage(Component.literal(label + ": " + selectedValue() + suffix)); }
+        @Override protected void applyValue() { draftSetup = draftSetup.withTuning(slot, selectedValue()); }
+        private double normalizedValue() { return (selectedValue() - min) / (double) (max - min); }
+        private double currentPosition() {
+            int current = switch (slot) {
+                case 0 -> displayedSetup.power(); case 1 -> displayedSetup.frontWing(); case 2 -> displayedSetup.rearWing();
+                case 3 -> displayedSetup.gearing(); case 4 -> displayedSetup.antiRoll(); case 5 -> displayedSetup.brakeBias(); default -> min;
+            };
+            return (current - min) / (double) (max - min);
+        }
     }
 
     private void addLiveryButtons(int yOffset) {

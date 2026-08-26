@@ -62,4 +62,15 @@ class LongitudinalWheelDynamicsTest {
         assertEquals(0.0, VehiclePhysics.brakingWheelAngularTarget(3.0, 0.33, 30.0, 0.50), 1.0E-12);
         assertEquals(0.0, VehiclePhysics.brakingWheelAngularTarget(-3.0, 0.33, 30.0, 0.50), 1.0E-12);
     }
+
+    @Test
+    void tractionControlSoftensContinuouslyAtLowSpeed() {
+        assertEquals(1.30, VehiclePhysics.lowSpeedTractionEnvelope(8.0, 1.02), 1.0E-12);
+        assertEquals(1.16, VehiclePhysics.lowSpeedTractionEnvelope(16.5, 1.02), 1.0E-12);
+        assertEquals(1.02, VehiclePhysics.lowSpeedTractionEnvelope(25.0, 1.02), 1.0E-12);
+
+        assertEquals(0.14, VehiclePhysics.lowSpeedTractionControlStrength(8.0, 0.35), 1.0E-12);
+        assertEquals(0.245, VehiclePhysics.lowSpeedTractionControlStrength(16.5, 0.35), 1.0E-12);
+        assertEquals(0.35, VehiclePhysics.lowSpeedTractionControlStrength(25.0, 0.35), 1.0E-12);
+    }
 }

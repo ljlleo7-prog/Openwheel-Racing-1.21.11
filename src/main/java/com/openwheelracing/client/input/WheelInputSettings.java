@@ -48,6 +48,9 @@ public class WheelInputSettings {
     public Float tractionControlStrength;
     public Float tractionControlEnvelope;
     public Float absEnvelope;
+    public Float brakingYawAdjustment;
+    public Float neutralYawAdjustment;
+    public Float throttleYawAdjustment;
     public KeyboardInputSettings keyboard = KeyboardInputSettings.defaults();
     public AxisBinding steering = new AxisBinding(-1, false, -1.0f, 1.0f, 0.0f, 0.08f, 1.0f, 1.0f);
     public AxisBinding throttle = new AxisBinding(-1, true, -1.0f, 1.0f, 1.0f, 0.03f, 1.0f, 1.0f);
@@ -192,6 +195,9 @@ public class WheelInputSettings {
         tractionControlStrength = clamp(tractionControlStrength == null ? 0.35f : tractionControlStrength, 0.0f, 1.0f);
         tractionControlEnvelope = clamp(tractionControlEnvelope == null ? 1.02f : tractionControlEnvelope, 0.90f, 1.10f);
         absEnvelope = clamp(absEnvelope == null ? 0.98f : absEnvelope, 0.90f, 1.10f);
+        brakingYawAdjustment = clamp(brakingYawAdjustment == null ? 1.0f : brakingYawAdjustment, 0.0f, 1.5f);
+        neutralYawAdjustment = clamp(neutralYawAdjustment == null ? 1.0f : neutralYawAdjustment, 0.0f, 1.5f);
+        throttleYawAdjustment = clamp(throttleYawAdjustment == null ? 1.0f : throttleYawAdjustment, 0.0f, 1.5f);
         if (shiftLightFullRpm < shiftLightStartRpm + 500) {
             shiftLightFullRpm = Math.min(15_000, shiftLightStartRpm + 500);
         }
@@ -241,6 +247,9 @@ public class WheelInputSettings {
         settings.tractionControlStrength = 0.35f;
         settings.tractionControlEnvelope = 1.02f;
         settings.absEnvelope = 0.98f;
+        settings.brakingYawAdjustment = 1.0f;
+        settings.neutralYawAdjustment = 1.0f;
+        settings.throttleYawAdjustment = 1.0f;
         settings.buttons = new EnumMap<>(ButtonRole.class);
         return settings;
     }
