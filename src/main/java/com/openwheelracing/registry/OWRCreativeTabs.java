@@ -50,6 +50,7 @@ public final class OWRCreativeTabs {
             output.accept(OWRItems.RACING_ELECTRONICS.get());
             output.accept(OWRItems.CHASSIS.get());
             output.accept(OWRItems.ENGINE.get());
+            output.accept(OWRItems.JACK.get());
             for (int compound = 0; compound <= 4; compound++) {
                 output.accept(TyreItem.create(compound));
             }

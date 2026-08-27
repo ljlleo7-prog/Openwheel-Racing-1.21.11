@@ -31,6 +31,9 @@ public final class OWRItems {
     public static final DeferredHolder<Item, Item> RACING_ELECTRONICS = registerSimple("racing_electronics");
     public static final DeferredHolder<Item, Item> CHASSIS = registerSimple("chassis");
     public static final DeferredHolder<Item, Item> ENGINE = registerSimple("engine");
+    public static final DeferredHolder<Item, Item> JACK = ITEMS.register("jack",
+        () -> new Item(new Item.Properties().setId(key("jack")).stacksTo(1))
+    );
     public static final DeferredHolder<Item, Item> TIRES = ITEMS.register("tires",
         () -> new TyreItem(new Item.Properties().setId(key("tires")))
     );

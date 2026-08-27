@@ -75,6 +75,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         state.tyreCompound = car.getTyreCompound();
         state.liveryColors = car.getLiveryColors();
         state.liveryTexture = car.getLiveryTexture();
+        state.jackLift = car.getJackLift(partialTick);
     }
 
     @Override
@@ -87,6 +88,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         int[] bakedColors = BAKED_COLORS.computeIfAbsent(liveryColorKey, ignored -> carModel.bakeColors(face -> liveryColor(face, state.liveryColors, liveryImage)));
 
         poseStack.pushPose();
+        poseStack.translate(0.0f, state.jackLift, 0.0f);
         poseStack.mulPose(Axis.YP.rotationDegrees(-state.yRot));
 
         int light = state.lightCoords;
@@ -261,6 +263,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         public float frontWheelSteerDegrees;
         public int lightCoords;
         public int tyreCompound;
+        public float jackLift;
         public CarLiveryColors liveryColors = CarLiveryColors.DEFAULT;
         public CarLiveryTexture liveryTexture = CarLiveryTexture.NONE;
     }

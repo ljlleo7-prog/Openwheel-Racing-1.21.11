@@ -114,6 +114,8 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Boolean> CHECKPOINT_ARMED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Integer> PIT_STOP_TICKS = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> PIT_SERVICE_KIND = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> TYRE_SERVICE_PHASE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> TYRE_SERVICE_DURATION = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> ABS_ENABLED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> TRACTION_CONTROL_ENABLED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Integer> LIVERY = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
@@ -146,17 +148,31 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Integer> ERS_LICO_ATTACK_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
 
     public static final int PIT_STOP_DURATION = 60; // 3 seconds
-    public static final int TYRE_CHANGE_DURATION = 100; // 5 seconds
+    public static final int TYRE_PHASE_NONE = 0;
+    public static final int TYRE_PHASE_JACKING_UP = 1;
+    public static final int TYRE_PHASE_READY_REMOVE = 2;
+    public static final int TYRE_PHASE_REMOVING = 3;
+    public static final int TYRE_PHASE_READY_INSTALL = 4;
+    public static final int TYRE_PHASE_INSTALLING = 5;
+    public static final int TYRE_PHASE_READY_LOWER = 6;
+    public static final int TYRE_PHASE_LOWERING = 7;
+    private static final int TYRE_ACTION_NONE = 0;
+    private static final int TYRE_ACTION_REMOVE = 1;
+    private static final int TYRE_ACTION_INSTALL = 2;
+    private static final int TYRE_ACTION_LOWER = 3;
     private static final int PIT_RUBBER_COST = 2;    // rubber items consumed per stop
     private static final int PIT_SERVICE_GENERAL = 0;
     private static final int PIT_SERVICE_TYRES = 1;
     private int pendingTyreCompound;
     private int pendingTyreType;
     private int pendingTyreRemaining;
+    private boolean newTyresReserved;
     private int removedTyreCompound;
     private int removedTyreType;
     private int removedTyreRemaining;
     private UUID pitCrewPlayerId;
+    private int queuedTyreAction;
+    private boolean tyrePhaseSetbackApplied;
     private static final int COMPLETED_LAP_LINGER_DURATION = 100;
     public static final int LAP_RESULT_NONE = 0;
     public static final int LAP_RESULT_SLOWER = 1;
@@ -784,6 +800,8 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(CHECKPOINT_ARMED, false);
         builder.define(PIT_STOP_TICKS, 0);
         builder.define(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
+        builder.define(TYRE_SERVICE_PHASE, TYRE_PHASE_NONE);
+        builder.define(TYRE_SERVICE_DURATION, 0);
         builder.define(ABS_ENABLED, false);
         builder.define(TRACTION_CONTROL_ENABLED, false);
         builder.define(LIVERY, 0);
@@ -1503,22 +1521,39 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public boolean isInPitStop() {
-        return entityData.get(PIT_STOP_TICKS) > 0;
+        return entityData.get(PIT_STOP_TICKS) > 0 || getTyreServicePhase() != TYRE_PHASE_NONE;
     }
 
     public int getPitStopTicks() {
         return entityData.get(PIT_STOP_TICKS);
     }
 
-    public boolean isTyreChangeInProgress() { return entityData.get(PIT_SERVICE_KIND) == PIT_SERVICE_TYRES && isInPitStop(); }
+    public int getPitServiceDuration() { return entityData.get(TYRE_SERVICE_DURATION); }
+    public int getTyreServicePhase() { return entityData.get(TYRE_SERVICE_PHASE); }
+    public boolean isTyreChangeInProgress() { return getTyreServicePhase() != TYRE_PHASE_NONE; }
+    public boolean isJacked() { return getTyreServicePhase() >= TYRE_PHASE_JACKING_UP; }
+
+    public float getJackLift(float partialTick) {
+        int phase = getTyreServicePhase();
+        int duration = Math.max(1, getPitServiceDuration());
+        float remaining = Math.max(0.0f, getPitStopTicks() - partialTick);
+        if (phase == TYRE_PHASE_JACKING_UP) return 0.16f * (1.0f - remaining / duration);
+        if (phase == TYRE_PHASE_LOWERING) return 0.16f * remaining / duration;
+        return phase == TYRE_PHASE_NONE ? 0.0f : 0.16f;
+    }
 
     public Component getPitServiceStage() {
         if (!isTyreChangeInProgress()) return Component.literal("Servicing car");
-        int ticks = getPitStopTicks();
-        if (ticks > 80) return Component.literal("Jacking car");
-        if (ticks > 50) return Component.literal("Removing old tyres");
-        if (ticks > 20) return Component.literal("Installing new tyres");
-        return Component.literal("Securing wheels");
+        return Component.literal(switch (getTyreServicePhase()) {
+            case TYRE_PHASE_JACKING_UP -> "Jacking car up";
+            case TYRE_PHASE_READY_REMOVE -> "Jacked — empty hand to remove tyres";
+            case TYRE_PHASE_REMOVING -> "Unscrewing tyres";
+            case TYRE_PHASE_READY_INSTALL -> "Tyres off — fit new tyres";
+            case TYRE_PHASE_INSTALLING -> "Installing new tyres";
+            case TYRE_PHASE_READY_LOWER -> "Tyres fitted — lower with jack";
+            case TYRE_PHASE_LOWERING -> "Lowering car";
+            default -> "Servicing car";
+        });
     }
 
     public boolean tryStartPitStop(Player player) {
@@ -1546,37 +1581,119 @@ public class OpenwheelCarEntity extends Entity {
         return true;
     }
 
-    private boolean trySwapTyres(Player player, ItemStack heldStack) {
+    private boolean tryStartTyreService(Player player, ItemStack jackStack) {
         if (!isOnPitStopMark()) {
-            messagePitCrew(player, Component.literal("Tyre change only available on the pit stop mark"));
+            messagePitCrew(player, Component.literal("Jack can only be used on the pit stop mark"));
             return false;
         }
         double speed = Math.sqrt(getDeltaMovement().x * getDeltaMovement().x + getDeltaMovement().z * getDeltaMovement().z);
         if (speed > 0.05) {
-            messagePitCrew(player, Component.literal("Come to a stop before tyre change"));
+            messagePitCrew(player, Component.literal("Come to a stop before jacking the car"));
             return false;
         }
-        if (isInPitStop() || player.getCooldowns().isOnCooldown(heldStack)) {
+        if (isInPitStop() || player.getCooldowns().isOnCooldown(jackStack)) {
             return false;
         }
+        pitCrewPlayerId = player.getUUID();
+        entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_TYRES);
+        startTyrePhase(player, TYRE_PHASE_JACKING_UP, jackStack);
+        messageDriver(Component.literal("Pit crew is jacking the car"));
+        return true;
+    }
 
+    private boolean handleTyreServiceInteraction(Player player, ItemStack heldStack) {
+        if (pitCrewPlayer() == null && getPitStopTicks() == 0) {
+            pitCrewPlayerId = player.getUUID();
+            messagePitCrew(player, Component.literal("You take over the tyre service"));
+        }
+        if (!player.getUUID().equals(pitCrewPlayerId)) {
+            messagePitCrew(player, Component.literal("Another technician is servicing this car"));
+            return true;
+        }
+        int phase = getTyreServicePhase();
+        int requestedAction = heldStack.isEmpty() ? TYRE_ACTION_REMOVE
+            : heldStack.is(OWRItems.TIRES.get()) ? TYRE_ACTION_INSTALL
+            : heldStack.is(OWRItems.JACK.get()) ? TYRE_ACTION_LOWER : TYRE_ACTION_NONE;
+        int expectedAction = switch (phase) {
+            case TYRE_PHASE_JACKING_UP, TYRE_PHASE_READY_REMOVE -> TYRE_ACTION_REMOVE;
+            case TYRE_PHASE_REMOVING, TYRE_PHASE_READY_INSTALL -> TYRE_ACTION_INSTALL;
+            case TYRE_PHASE_INSTALLING, TYRE_PHASE_READY_LOWER -> TYRE_ACTION_LOWER;
+            default -> TYRE_ACTION_NONE;
+        };
+        if (requestedAction != expectedAction) {
+            messagePitCrew(player, getPitServiceStage());
+            return true;
+        }
+        if (getPitStopTicks() > 0) {
+            handlePrematureTyreAction(player, requestedAction, heldStack);
+            return true;
+        }
+        startRequestedTyreAction(player, requestedAction, heldStack);
+        return true;
+    }
+
+    private void handlePrematureTyreAction(Player player, int action, ItemStack heldStack) {
+        int ticks = getPitStopTicks();
+        if (ticks <= PitTyreServiceTiming.INPUT_BUFFER_TICKS) {
+            if (queuedTyreAction == TYRE_ACTION_NONE) {
+                if (action == TYRE_ACTION_INSTALL && !reserveNewTyres(player, heldStack)) return;
+                queuedTyreAction = action;
+                messagePitCrew(player, Component.literal("Next operation queued"));
+            }
+            return;
+        }
+        if (!tyrePhaseSetbackApplied) {
+            int duration = getPitServiceDuration();
+            int adjustedTicks = PitTyreServiceTiming.applyEarlySetback(ticks, duration);
+            entityData.set(PIT_STOP_TICKS, adjustedTicks);
+            if (getTyreServicePhase() == TYRE_PHASE_JACKING_UP) {
+                player.getCooldowns().addCooldown(new ItemStack(OWRItems.JACK.get()), adjustedTicks);
+            } else if (getTyreServicePhase() == TYRE_PHASE_INSTALLING) {
+                player.getCooldowns().addCooldown(new ItemStack(OWRItems.TIRES.get()), adjustedTicks);
+            }
+            tyrePhaseSetbackApplied = true;
+            level().playSound(null, getX(), getY(), getZ(), SoundEvents.METAL_HIT, SoundSource.PLAYERS, 0.55f, 1.35f);
+            messagePitCrew(player, Component.literal("Too early — operation interrupted"));
+        }
+    }
+
+    private void startRequestedTyreAction(Player player, int action, ItemStack heldStack) {
+        switch (action) {
+            case TYRE_ACTION_REMOVE -> {
+                removedTyreCompound = getTyreCompound();
+                removedTyreType = getTyreType().id();
+                removedTyreRemaining = TyreItem.normalizeRemainingPercent(100.0 - getTyreWearPercent());
+                startTyrePhase(player, TYRE_PHASE_REMOVING, ItemStack.EMPTY);
+            }
+            case TYRE_ACTION_INSTALL -> {
+                if (!newTyresReserved && !reserveNewTyres(player, heldStack)) return;
+                startTyrePhase(player, TYRE_PHASE_INSTALLING, new ItemStack(OWRItems.TIRES.get()));
+            }
+            case TYRE_ACTION_LOWER -> startTyrePhase(player, TYRE_PHASE_LOWERING, heldStack);
+            default -> { }
+        }
+    }
+
+    private boolean reserveNewTyres(Player player, ItemStack heldStack) {
+        if (!heldStack.is(OWRItems.TIRES.get())) return false;
         pendingTyreCompound = TyreItem.getCompound(heldStack);
         pendingTyreType = TyreItem.getType(heldStack).id();
         pendingTyreRemaining = TyreItem.getRemainingPercent(heldStack);
-        removedTyreCompound = getTyreCompound();
-        removedTyreType = getTyreType().id();
-        removedTyreRemaining = TyreItem.normalizeRemainingPercent(100.0 - getTyreWearPercent());
-        pitCrewPlayerId = player.getUUID();
-        entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_TYRES);
-        entityData.set(PIT_STOP_TICKS, TYRE_CHANGE_DURATION);
-        player.getCooldowns().addCooldown(heldStack, TYRE_CHANGE_DURATION);
-        if (!player.getAbilities().instabuild) {
-            heldStack.shrink(1);
-        }
-        Component started = Component.literal("Tyre change started — jacking car");
-        messagePitCrew(player, started);
-        messageDriver(started);
+        newTyresReserved = true;
+        if (!player.getAbilities().instabuild) heldStack.shrink(1);
         return true;
+    }
+
+    private void startTyrePhase(Player player, int phase, ItemStack cooldownStack) {
+        int duration = PitTyreServiceTiming.durationFromRoll(random.nextInt(5));
+        entityData.set(TYRE_SERVICE_PHASE, phase);
+        entityData.set(TYRE_SERVICE_DURATION, duration);
+        entityData.set(PIT_STOP_TICKS, duration);
+        tyrePhaseSetbackApplied = false;
+        queuedTyreAction = TYRE_ACTION_NONE;
+        if (!cooldownStack.isEmpty()) player.getCooldowns().addCooldown(cooldownStack, duration);
+        level().playSound(null, getX(), getY(), getZ(), SoundEvents.METAL_PRESSURE_PLATE_CLICK_ON, SoundSource.PLAYERS, 0.55f, 0.9f + random.nextFloat() * 0.2f);
+        messagePitCrew(player, getPitServiceStage());
     }
 
     public void crossStartFinishLine(BlockPos pos, Direction markerFacing) {
@@ -1876,11 +1993,16 @@ public class OpenwheelCarEntity extends Entity {
     @Override
     public InteractionResult interact(Player player, InteractionHand hand) {
         ItemStack heldStack = player.getItemInHand(hand);
+        if (isTyreChangeInProgress()) {
+            if (!level().isClientSide()) handleTyreServiceInteraction(player, heldStack);
+            return InteractionResult.SUCCESS;
+        }
+        if (heldStack.is(OWRItems.JACK.get())) {
+            if (!level().isClientSide()) tryStartTyreService(player, heldStack);
+            return InteractionResult.CONSUME;
+        }
         if (heldStack.is(OWRItems.TIRES.get())) {
-            if (level().isClientSide()) {
-                return InteractionResult.SUCCESS;
-            }
-            trySwapTyres(player, heldStack);
+            if (!level().isClientSide()) messagePitCrew(player, Component.literal("Jack the car before changing tyres"));
             return InteractionResult.CONSUME;
         }
 
@@ -1942,7 +2064,7 @@ public class OpenwheelCarEntity extends Entity {
         if (hasPassenger(passenger)) {
             Vec3 seat = SEAT_OFFSET.yRot((float) -Math.toRadians(getYRot()));
             double riderX = getX() + seat.x;
-            double riderY = getY() + seat.y;
+            double riderY = getY() + seat.y + getJackLift(0.0f);
             double riderZ = getZ() + seat.z;
             callback.accept(passenger, riderX, riderY, riderZ);
         }
@@ -2026,6 +2148,21 @@ public class OpenwheelCarEntity extends Entity {
         resetSyncedTyreTemperatureCache();
         tyreGraining = input.getDoubleOr("TyreGraining", 0.0);
         tyrePatching = input.getDoubleOr("TyrePatching", 0.0);
+        int savedServicePhase = Math.max(TYRE_PHASE_NONE, Math.min(TYRE_PHASE_LOWERING, input.getIntOr("TyreServicePhase", TYRE_PHASE_NONE)));
+        entityData.set(TYRE_SERVICE_PHASE, savedServicePhase);
+        entityData.set(PIT_SERVICE_KIND, savedServicePhase == TYRE_PHASE_NONE ? PIT_SERVICE_GENERAL : PIT_SERVICE_TYRES);
+        entityData.set(TYRE_SERVICE_DURATION, input.getIntOr("TyreServiceDuration", 0));
+        entityData.set(PIT_STOP_TICKS, input.getIntOr("TyreServiceTicks", 0));
+        pendingTyreCompound = input.getIntOr("PendingTyreCompound", 0);
+        pendingTyreType = input.getIntOr("PendingTyreType", 0);
+        pendingTyreRemaining = input.getIntOr("PendingTyreRemaining", 0);
+        newTyresReserved = input.getBooleanOr("NewTyresReserved", false);
+        removedTyreCompound = input.getIntOr("RemovedTyreCompound", 0);
+        removedTyreType = input.getIntOr("RemovedTyreType", 0);
+        removedTyreRemaining = input.getIntOr("RemovedTyreRemaining", 0);
+        queuedTyreAction = input.getIntOr("QueuedTyreAction", TYRE_ACTION_NONE);
+        String savedCrew = input.getStringOr("PitCrewPlayer", "");
+        try { pitCrewPlayerId = savedCrew.isEmpty() ? null : UUID.fromString(savedCrew); } catch (IllegalArgumentException ignored) { pitCrewPlayerId = null; }
         syncTyreTemperature();
         setLivery(input.getIntOr("Livery", 0));
         setLiveryColors(new CarLiveryColors(
@@ -2134,6 +2271,18 @@ public class OpenwheelCarEntity extends Entity {
         output.putDouble("TyreSlipExposureRr", tyreSlipExposureRr);
         output.putDouble("TyreGraining", tyreGraining);
         output.putDouble("TyrePatching", tyrePatching);
+        output.putInt("TyreServicePhase", getTyreServicePhase());
+        output.putInt("TyreServiceDuration", getPitServiceDuration());
+        output.putInt("TyreServiceTicks", getPitStopTicks());
+        output.putInt("PendingTyreCompound", pendingTyreCompound);
+        output.putInt("PendingTyreType", pendingTyreType);
+        output.putInt("PendingTyreRemaining", pendingTyreRemaining);
+        output.putBoolean("NewTyresReserved", newTyresReserved);
+        output.putInt("RemovedTyreCompound", removedTyreCompound);
+        output.putInt("RemovedTyreType", removedTyreType);
+        output.putInt("RemovedTyreRemaining", removedTyreRemaining);
+        output.putInt("QueuedTyreAction", queuedTyreAction);
+        if (pitCrewPlayerId != null) output.putString("PitCrewPlayer", pitCrewPlayerId.toString());
         output.putInt("Livery", getLivery());
         CarLiveryColors liveryColors = getLiveryColors();
         output.putInt("LiveryBody", liveryColors.body());
@@ -2210,25 +2359,29 @@ public class OpenwheelCarEntity extends Entity {
 
     private void tickPitStop() {
         int ticks = entityData.get(PIT_STOP_TICKS);
-        if (ticks <= 0) {
+        if (isTyreChangeInProgress()) {
+            inputThrottle = 0;
+            inputBrake = 0;
+            setDeltaMovement(0.0, getDeltaMovement().y, 0.0);
+            if (ticks > 0) {
+                ticks--;
+                entityData.set(PIT_STOP_TICKS, ticks);
+                if (tickCount % 2 == 0) {
+                    ServerPlayer crew = pitCrewPlayer();
+                    int duration = Math.max(1, getPitServiceDuration());
+                    int percent = 100 - ticks * 100 / duration;
+                    if (crew != null) messagePitCrew(crew, Component.literal(getPitServiceStage().getString() + " — " + percent + "%"));
+                }
+                if (ticks == 0) completeTyrePhase();
+            }
             return;
         }
-        // Block inputs during service
+        if (ticks <= 0) return;
         inputThrottle = 0;
         inputBrake = 0;
         inputSteering = 0;
-
         ticks--;
         entityData.set(PIT_STOP_TICKS, ticks);
-
-        if (entityData.get(PIT_SERVICE_KIND) == PIT_SERVICE_TYRES) {
-            if (ticks == 80) announceTyreStage("Removing old tyres");
-            if (ticks == 50) announceTyreStage("Installing new tyres");
-            if (ticks == 20) announceTyreStage("Securing wheels");
-            if (ticks == 0) completeTyreChange();
-            return;
-        }
-
         if (ticks == 0) {
             setComponentDamage(CarComponentDamage.NONE);
             setTyreWearPercent(0.0f);
@@ -2237,27 +2390,59 @@ public class OpenwheelCarEntity extends Entity {
         }
     }
 
-    private void announceTyreStage(String text) {
-        Component message = Component.literal(text);
-        messageDriver(message);
+    private void completeTyrePhase() {
+        int completed = getTyreServicePhase();
+        int readyPhase = switch (completed) {
+            case TYRE_PHASE_JACKING_UP -> TYRE_PHASE_READY_REMOVE;
+            case TYRE_PHASE_REMOVING -> TYRE_PHASE_READY_INSTALL;
+            case TYRE_PHASE_INSTALLING -> TYRE_PHASE_READY_LOWER;
+            case TYRE_PHASE_LOWERING -> TYRE_PHASE_NONE;
+            default -> completed;
+        };
+        if (completed == TYRE_PHASE_INSTALLING) {
+            com.openwheelracing.content.car.TyreType type = com.openwheelracing.content.car.TyreType.fromId(pendingTyreType);
+            applyTyres(pendingTyreCompound, type);
+            setTyreWearPercentAndSync(100.0f - pendingTyreRemaining);
+        }
+        entityData.set(TYRE_SERVICE_PHASE, readyPhase);
+        entityData.set(TYRE_SERVICE_DURATION, 0);
+        level().playSound(null, getX(), getY(), getZ(), SoundEvents.METAL_PRESSURE_PLATE_CLICK_OFF, SoundSource.PLAYERS, 0.55f, 1.2f);
+        int queued = queuedTyreAction;
+        queuedTyreAction = TYRE_ACTION_NONE;
+        if (completed == TYRE_PHASE_LOWERING) {
+            finishTyreService();
+            return;
+        }
         ServerPlayer crew = pitCrewPlayer();
-        if (crew != null) messagePitCrew(crew, message);
+        if (crew != null) {
+            messagePitCrew(crew, getPitServiceStage());
+            if (queued != TYRE_ACTION_NONE) startRequestedTyreAction(crew, queued, heldStackForAction(crew, queued));
+        }
+        messageDriver(getPitServiceStage());
     }
 
-    private void completeTyreChange() {
-        com.openwheelracing.content.car.TyreType newType = com.openwheelracing.content.car.TyreType.fromId(pendingTyreType);
-        applyTyres(pendingTyreCompound, newType);
-        setTyreWearPercentAndSync(100.0f - pendingTyreRemaining);
+    private ItemStack heldStackForAction(Player player, int action) {
+        for (InteractionHand hand : InteractionHand.values()) {
+            ItemStack stack = player.getItemInHand(hand);
+            if (action == TYRE_ACTION_INSTALL && stack.is(OWRItems.TIRES.get())
+                || action == TYRE_ACTION_LOWER && stack.is(OWRItems.JACK.get())) return stack;
+        }
+        return ItemStack.EMPTY;
+    }
+
+    private void finishTyreService() {
         ItemStack removed = TyreItem.create(removedTyreCompound, com.openwheelracing.content.car.TyreType.fromId(removedTyreType), 1, removedTyreRemaining);
         ServerPlayer crew = pitCrewPlayer();
-        if ((crew == null || !crew.addItem(removed)) && level() instanceof ServerLevel serverLevel) {
-            spawnAtLocation(serverLevel, removed);
-        }
+        if ((crew == null || !crew.addItem(removed)) && level() instanceof ServerLevel serverLevel) spawnAtLocation(serverLevel, removed);
         Component complete = Component.literal("Tyre change complete");
         messageDriver(complete);
         if (crew != null) messagePitCrew(crew, complete);
         entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
+        entityData.set(TYRE_SERVICE_PHASE, TYRE_PHASE_NONE);
+        entityData.set(PIT_STOP_TICKS, 0);
         pitCrewPlayerId = null;
+        queuedTyreAction = TYRE_ACTION_NONE;
+        newTyresReserved = false;
     }
 
     private ServerPlayer pitCrewPlayer() {

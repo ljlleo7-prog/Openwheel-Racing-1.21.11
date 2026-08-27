@@ -72,11 +72,12 @@
 
 ## Pit-Lane Tyre Changes
 
-- A crew player starts a tyre change by right-clicking a stationary car on a pit-stop mark while holding a tyre set. A driver may remain seated.
-- The tyre set is reserved when service starts; the car cannot drive or begin another service during the five-second change.
-- Service progresses through visible stages: jacking the car, removing old tyres, installing new tyres, and securing wheels.
-- The driver sees the current stage and countdown on the HUD. The crew player receives the same stage messages.
-- New compound, type, wear, and temperatures apply only when installation completes. The removed tyre set, including its remaining life, is returned to the crew or dropped beside the car if it cannot be returned.
+- A crew player starts by right-clicking a stationary car on a pit-stop mark with a racing jack. The car rises visually and is immobilized until it is lowered; a driver may remain seated.
+- Once raised, the technician right-clicks with an empty hand to unscrew and remove the old tyres, right-clicks with the new tyre set to install it, then right-clicks with the jack to lower the car.
+- Each physical operation independently takes 6-10 ticks. The jack and tyre item cooldowns, technician action-bar percentage, and driver HUD show progress and the required next operation.
+- Correct next inputs during the final two ticks are buffered. Starting earlier interrupts unfinished work and rolls the current operation back by two ticks once per phase; invalid-sequence inputs are rejected without a griefable penalty.
+- The new tyre set is reserved when installation starts. Compound, type, wear, and temperatures apply only when installation completes. The removed tyre set retains its remaining life and returns to the technician after lowering, or drops beside the car if it cannot be returned.
+- Service state persists across chunk/world reloads, and another technician can take over a waiting operation if the original technician disconnects.
 
 ## Acceptance Criteria
 
