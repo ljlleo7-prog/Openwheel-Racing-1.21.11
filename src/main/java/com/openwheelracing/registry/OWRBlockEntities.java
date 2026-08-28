@@ -7,6 +7,8 @@ import com.openwheelracing.content.block.entity.CarWorkstationType;
 import com.openwheelracing.content.block.entity.RaceDirectorBlockEntity;
 import com.openwheelracing.content.block.entity.RaceMonitorType;
 import com.openwheelracing.content.block.entity.RefineryBlockEntity;
+import com.openwheelracing.content.block.entity.RaceLightBlockEntity;
+import com.openwheelracing.content.race.RaceLightType;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -53,6 +55,12 @@ public final class OWRBlockEntities {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<RaceDirectorBlockEntity>> TEAM_TERMINAL = BLOCK_ENTITIES.register("team_terminal",
         () -> new BlockEntityType<>((pos, state) -> new RaceDirectorBlockEntity(pos, state, RaceMonitorType.TEAM), Set.of(OWRBlocks.TEAM_TERMINAL.get()))
     );
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<RaceLightBlockEntity>> FLAG_LIGHT = BLOCK_ENTITIES.register("flag_light",
+        () -> new BlockEntityType<>((pos, state) -> new RaceLightBlockEntity(pos, state, RaceLightType.FLAG), Set.of(OWRBlocks.FLAG_LIGHT.get())));
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<RaceLightBlockEntity>> STARTING_LIGHT = BLOCK_ENTITIES.register("starting_light",
+        () -> new BlockEntityType<>((pos, state) -> new RaceLightBlockEntity(pos, state, RaceLightType.START), Set.of(OWRBlocks.STARTING_LIGHT.get())));
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<RaceLightBlockEntity>> PIT_LIGHT = BLOCK_ENTITIES.register("pit_light",
+        () -> new BlockEntityType<>((pos, state) -> new RaceLightBlockEntity(pos, state, RaceLightType.PIT), Set.of(OWRBlocks.PIT_LIGHT.get())));
 
     private OWRBlockEntities() {
     }
@@ -72,6 +80,10 @@ public final class OWRBlockEntities {
             case BOARD -> RACE_BOARD_TERMINAL;
             case TEAM -> TEAM_TERMINAL;
         };
+    }
+
+    public static DeferredHolder<BlockEntityType<?>, BlockEntityType<RaceLightBlockEntity>> typeFor(RaceLightType type) {
+        return switch (type) { case FLAG -> FLAG_LIGHT; case START -> STARTING_LIGHT; case PIT -> PIT_LIGHT; };
     }
 
     public static void register(IEventBus modBus) {

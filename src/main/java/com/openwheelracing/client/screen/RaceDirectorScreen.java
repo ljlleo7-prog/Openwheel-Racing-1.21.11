@@ -46,6 +46,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     private long selectedLapId = -1L;
     private int selectedTeamCarId = -1;
     private int autoDetectRadius = AUTO_DETECT_DEFAULT_RADIUS;
+    private int flagSector;
     private EditBox sessionNameBox;
 
     public RaceDirectorScreen(RaceDirectorMenu menu, Inventory playerInventory, Component title) {
@@ -210,10 +211,13 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             .bounds(leftPos + 208, topPos + 68, 16, 16)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.checkpoints_short"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.CHECKPOINTS)))
-            .bounds(leftPos + RIGHT_X, topPos + 68, 72, 16)
+            .bounds(leftPos + RIGHT_X, topPos + 68, 48, 16)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.off_track_short"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.OFF_TRACK)))
-            .bounds(leftPos + RIGHT_X + 78, topPos + 68, 92, 16)
+            .bounds(leftPos + RIGHT_X + 52, topPos + 68, 58, 16)
+            .build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.auto_shift_short"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorToggleRuleMessage(OWRNetwork.RaceDirectorToggleRuleMessage.AUTO_SHIFTING)))
+            .bounds(leftPos + RIGHT_X + 114, topPos + 68, 56, 16)
             .build());
         addRenderableWidget(Button.builder(Component.literal("-"), button -> setMinimumLapTicks(menu.getSnapshot().minimumValidLapTicks() - 20))
             .bounds(leftPos + RIGHT_X, topPos + 158, 18, 14)
@@ -234,6 +238,23 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             }
         }).bounds(leftPos + LEFT_X, topPos + 314, 170, 16).build());
         addFlagTiles(leftPos + RIGHT_X, topPos + 116);
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.start_lights"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.START_PHASE, 1, 0)))
+            .bounds(leftPos + 230, topPos + 318, 74, 14).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.lights_out"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.START_PHASE, 6, 0)))
+            .bounds(leftPos + 308, topPos + 318, 64, 14).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.auto_flags"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.AUTO_FLAGGING, -1, 0)))
+            .bounds(leftPos + 376, topPos + 318, 68, 14).build());
+        addRenderableWidget(Button.builder(Component.literal("S-"), button -> flagSector = Math.max(0, flagSector - 1)).bounds(leftPos + 448, topPos + 318, 24, 14).build());
+        addRenderableWidget(Button.builder(Component.literal("S" + flagSector + "+"), button -> { flagSector++; rebuildWidgets(); }).bounds(leftPos + 476, topPos + 318, 42, 14).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.sector_yellow"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.SECTOR_FLAG, flagSector, com.openwheelracing.content.race.RaceSignal.YELLOW.ordinal())))
+            .bounds(leftPos + 522, topPos + 318, 24, 14).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.sector_clear"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.SECTOR_FLAG, flagSector, com.openwheelracing.content.race.RaceSignal.OFF.ordinal())))
+            .bounds(leftPos + 548, topPos + 318, 24, 14).build());
+        if (selectedTeamCarId >= 0) {
+            addRenderableWidget(Button.builder(Component.literal("BLUE"), button -> setSelectedDriverFlag(com.openwheelracing.content.race.RaceSignal.BLUE)).bounds(leftPos + 230, topPos + 334, 46, 14).build());
+            addRenderableWidget(Button.builder(Component.literal("MECH"), button -> setSelectedDriverFlag(com.openwheelracing.content.race.RaceSignal.ORANGE)).bounds(leftPos + 280, topPos + 334, 46, 14).build());
+            addRenderableWidget(Button.builder(Component.literal("CLEAR"), button -> setSelectedDriverFlag(com.openwheelracing.content.race.RaceSignal.OFF)).bounds(leftPos + 330, topPos + 334, 46, 14).build());
+        }
     }
 
     private void addSessionNameBox() {
@@ -252,6 +273,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     private void setRaceLapLimit(int laps) {
         OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetRaceLapLimitMessage(laps));
+    }
+
+    private void setSelectedDriverFlag(com.openwheelracing.content.race.RaceSignal signal) {
+        if (selectedTeamCarId >= 0) OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.DRIVER_FLAG, selectedTeamCarId, signal.ordinal()));
     }
 
     private void addTeamWidgets() {
@@ -320,7 +345,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         drawWeatherTelemetry(graphics, snapshot);
         drawMapState(graphics, snapshot);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.rule_setup"), RIGHT_X, 88, 0xFFE8EDF2, false);
-        graphics.drawString(font, fit(Component.translatable("screen.openwheelracing.race_director.rule_status", state(snapshot.checkpointCheckEnabled()), state(snapshot.offTrackCheckEnabled()), formatSeconds(snapshot.minimumValidLapTicks())).getString(), COLUMN_WIDTH - 8), RIGHT_X, 100, 0xFFC9D1D9, false);
+        graphics.drawString(font, fit(Component.translatable("screen.openwheelracing.race_director.rule_status", state(snapshot.checkpointCheckEnabled()), state(snapshot.offTrackCheckEnabled()), state(snapshot.autoShiftingAllowed()), formatSeconds(snapshot.minimumValidLapTicks())).getString(), COLUMN_WIDTH - 8), RIGHT_X, 100, 0xFFC9D1D9, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.flag_assignment"), RIGHT_X, 112, 0xFFE8EDF2, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_limits"), RIGHT_X, 180, 0xFFE8EDF2, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.ers_capacity", snapshot.maxErsCapacityMj()), RIGHT_X + 24, 194, 0xFFC9D1D9, false);

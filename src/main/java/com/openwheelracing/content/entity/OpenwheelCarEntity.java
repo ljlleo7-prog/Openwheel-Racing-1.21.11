@@ -1009,6 +1009,22 @@ public class OpenwheelCarEntity extends Entity {
         return entityData.get(RPM);
     }
 
+    public int getMaxForwardGear() {
+        return vehicleProfile().maxForwardGear();
+    }
+
+    public int getRedlineRpm() {
+        return (int) Math.round(vehicleProfile().redlineRpm());
+    }
+
+    public int getProjectedRpmForGear(int gear) {
+        if (gear < 1) {
+            return getRpm();
+        }
+        return (int) Math.round(getSpeedKmh() / Math.max(1.0,
+            vehicleProfile().gearTopSpeedKmh(gear) * setup.topSpeedCoefficient()) * vehicleProfile().redlineRpm());
+    }
+
     public float getSpeedKmh() {
         return entityData.get(SPEED);
     }

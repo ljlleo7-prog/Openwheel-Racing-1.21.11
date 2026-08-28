@@ -1,0 +1,6 @@
+{
+  "parent": "openwheelracing:block/starting_light_base",
+  "textures": {
+    "lamp": "openwheelracing:block/starting_light_purple"
+  }
+}

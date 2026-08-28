@@ -70,6 +70,10 @@ public class OpenwheelSetupScreen extends Screen {
             settings.allTimeLapTiming = !settings.allTimeLapTiming;
             button.setMessage(timingScopeLabel());
         }).bounds(right, y + 82, buttonWidth, 20).build());
+        addRenderableWidget(Button.builder(autoShiftLabel(), button -> {
+            settings.autoShiftEnabled = !settings.autoShiftEnabled;
+            button.setMessage(autoShiftLabel());
+        }).bounds(left, y + 82, buttonWidth, 20).build());
         addRenderableWidget(new ShiftLightRangeSlider(x + 24, y + 118, PANEL_WIDTH - 48, 18));
 
         int ersY = y + 156;
@@ -294,7 +298,7 @@ public class OpenwheelSetupScreen extends Screen {
     @Override
     public boolean keyPressed(KeyEvent event) {
         if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
-            closeToParent();
+            saveAndClose();
             return true;
         }
         return super.keyPressed(event);
@@ -302,7 +306,7 @@ public class OpenwheelSetupScreen extends Screen {
 
     @Override
     public void onClose() {
-        closeToParent();
+        saveAndClose();
     }
 
     private Component hudToggleLabel(String hud, boolean shown) {
@@ -317,6 +321,13 @@ public class OpenwheelSetupScreen extends Screen {
         return Component.translatable(settings.allTimeLapTiming
             ? "screen.openwheelracing.setup.timing_scope.all_time"
             : "screen.openwheelracing.setup.timing_scope.session");
+    }
+
+    private Component autoShiftLabel() {
+        return Component.translatable("screen.openwheelracing.setup.auto_shift",
+            Component.translatable(settings.autoShiftEnabled
+                ? "screen.openwheelracing.setup.enabled"
+                : "screen.openwheelracing.setup.disabled"));
     }
 
     private void saveAndClose() {

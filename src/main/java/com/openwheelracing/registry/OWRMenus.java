@@ -6,6 +6,7 @@ import com.openwheelracing.content.menu.CarAssemblyMenu;
 import com.openwheelracing.content.menu.CarPartsReplacementMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.menu.RefineryMenu;
+import com.openwheelracing.content.menu.RaceLightMenu;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.inventory.MenuType;
 import net.neoforged.neoforge.common.extensions.IMenuTypeExtension;
@@ -39,6 +40,8 @@ public final class OWRMenus {
     public static final DeferredHolder<MenuType<?>, MenuType<RaceDirectorMenu>> TEAM_TERMINAL = MENUS.register("team_terminal",
         () -> IMenuTypeExtension.create((containerId, playerInventory, extraData) -> new RaceDirectorMenu(containerId, playerInventory, RaceMonitorType.TEAM))
     );
+    public static final DeferredHolder<MenuType<?>, MenuType<RaceLightMenu>> RACE_LIGHT = MENUS.register("race_light",
+        () -> IMenuTypeExtension.create(RaceLightMenu::new));
 
     public static DeferredHolder<MenuType<?>, MenuType<RaceDirectorMenu>> typeFor(RaceMonitorType monitorType) {
         return switch (monitorType) {

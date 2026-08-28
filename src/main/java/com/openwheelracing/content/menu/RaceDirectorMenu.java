@@ -189,6 +189,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         return new RaceDirectorSnapshot(
             controlState.isCheckpointCheckEnabled(),
             controlState.isOffTrackCheckEnabled(),
+            controlState.isAutoShiftingAllowed(),
             controlState.getMinimumValidLapTicks(),
             controlState.getRaceLapLimit(),
             page,

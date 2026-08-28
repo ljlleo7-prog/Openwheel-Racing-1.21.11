@@ -29,6 +29,9 @@ public final class OWRCreativeTabs {
             output.accept(OWRBlocks.RACE_DIRECTOR_ITEM.get());
             output.accept(OWRBlocks.RACE_BOARD_TERMINAL_ITEM.get());
             output.accept(OWRBlocks.TEAM_TERMINAL_ITEM.get());
+            output.accept(OWRBlocks.FLAG_LIGHT_ITEM.get());
+            output.accept(OWRBlocks.STARTING_LIGHT_ITEM.get());
+            output.accept(OWRBlocks.PIT_LIGHT_ITEM.get());
             output.accept(OWRBlocks.ASPHALT_TRACK_ITEM.get());
             output.accept(OWRBlocks.ASPHALT_TRACK_SLAB_ITEM.get());
             output.accept(OWRBlocks.KERB_ITEM.get());

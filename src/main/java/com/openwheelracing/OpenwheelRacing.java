@@ -7,6 +7,7 @@ import com.openwheelracing.content.block.TrackWeatherChunkProgression;
 import com.openwheelracing.content.block.TrackMoistureTelemetryService;
 import com.openwheelracing.content.command.OWRCommands;
 import com.openwheelracing.content.race.OWRLegacyDimensionDataImporter;
+import com.openwheelracing.content.race.RaceAutoFlagService;
 import com.openwheelracing.content.race.timing.LiveRaceTimingService;
 import com.openwheelracing.content.track.TrackMapAutoDetector;
 import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
@@ -67,6 +68,7 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(TrackWeatherChunkProgression::onServerTick);
         NeoForge.EVENT_BUS.addListener(BasicAiFleetManager::onServerTick);
         NeoForge.EVENT_BUS.addListener(LiveRaceTimingService::onServerTick);
+        NeoForge.EVENT_BUS.addListener(RaceAutoFlagService::onServerTick);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -101,6 +103,7 @@ public final class OpenwheelRacing {
     private void onServerStopped(ServerStoppedEvent event) {
         BasicAiFleetManager.clearAll();
         LiveRaceTimingService.clearAll();
+        RaceAutoFlagService.clearAll();
         BasicAiFleetChunkTickets.releaseAll();
         TrackMapAutoDetector.clearJobs();
         SurveyRouteRuntime.clearAll();

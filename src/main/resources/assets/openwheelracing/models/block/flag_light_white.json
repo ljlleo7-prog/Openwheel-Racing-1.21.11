@@ -1,0 +1,6 @@
+{
+  "parent": "openwheelracing:block/flag_light_base",
+  "textures": {
+    "lamp": "openwheelracing:block/flag_light_white"
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "variants": {
+    "facing=north,signal=off": {
+      "model": "openwheelracing:block/starting_light_off"
+    },
+    "facing=north,signal=green": {
+      "model": "openwheelracing:block/starting_light_green"
+    },
+    "facing=north,signal=yellow": {
+      "model": "openwheelracing:block/starting_light_yellow"
+    },
+    "facing=north,signal=red": {
+      "model": "openwheelracing:block/starting_light_red"
+    },
+    "facing=north,signal=blue": {
+      "model": "openwheelracing:block/starting_light_blue"
+    },
+    "facing=north,signal=white": {
+      "model": "openwheelracing:block/starting_light_white"
+    },
+    "facing=north,signal=orange": {
+      "model": "openwheelracing:block/starting_light_orange"
+    },
+    "facing=north,signal=purple": {
+      "model": "openwheelracing:block/starting_light_purple"
+    },
+    "facing=east,signal=off": {
+      "model": "openwheelracing:block/starting_light_off",
+      "y": 90
+    },
+    "facing=east,signal=green": {
+      "model": "openwheelracing:block/starting_light_green",
+      "y": 90
+    },
+    "facing=east,signal=yellow": {
+      "model": "openwheelracing:block/starting_light_yellow",
+      "y": 90
+    },
+    "facing=east,signal=red": {
+      "model": "openwheelracing:block/starting_light_red",
+      "y": 90
+    },
+    "facing=east,signal=blue": {
+      "model": "openwheelracing:block/starting_light_blue",
+      "y": 90
+    },
+    "facing=east,signal=white": {
+      "model": "openwheelracing:block/starting_light_white",
+      "y": 90
+    },
+    "facing=east,signal=orange": {
+      "model": "openwheelracing:block/starting_light_orange",
+      "y": 90
+    },
+    "facing=east,signal=purple": {
+      "model": "openwheelracing:block/starting_light_purple",
+      "y": 90
+    },
+    "facing=south,signal=off": {
+      "model": "openwheelracing:block/starting_light_off",
+      "y": 180
+    },
+    "facing=south,signal=green": {
+      "model": "openwheelracing:block/starting_light_green",
+      "y": 180
+    },
+    "facing=south,signal=yellow": {
+      "model": "openwheelracing:block/starting_light_yellow",
+      "y": 180
+    },
+    "facing=south,signal=red": {
+      "model": "openwheelracing:block/starting_light_red",
+      "y": 180
+    },
+    "facing=south,signal=blue": {
+      "model": "openwheelracing:block/starting_light_blue",
+      "y": 180
+    },
+    "facing=south,signal=white": {
+      "model": "openwheelracing:block/starting_light_white",
+      "y": 180
+    },
+    "facing=south,signal=orange": {
+      "model": "openwheelracing:block/starting_light_orange",
+      "y": 180
+    },
+    "facing=south,signal=purple": {
+      "model": "openwheelracing:block/starting_light_purple",
+      "y": 180
+    },
+    "facing=west,signal=off": {
+      "model": "openwheelracing:block/starting_light_off",
+      "y": 270
+    },
+    "facing=west,signal=green": {
+      "model": "openwheelracing:block/starting_light_green",
+      "y": 270
+    },
+    "facing=west,signal=yellow": {
+      "model": "openwheelracing:block/starting_light_yellow",
+      "y": 270
+    },
+    "facing=west,signal=red": {
+      "model": "openwheelracing:block/starting_light_red",
+      "y": 270
+    },
+    "facing=west,signal=blue": {
+      "model": "openwheelracing:block/starting_light_blue",
+      "y": 270
+    },
+    "facing=west,signal=white": {
+      "model": "openwheelracing:block/starting_light_white",
+      "y": 270
+    },
+    "facing=west,signal=orange": {
+      "model": "openwheelracing:block/starting_light_orange",
+      "y": 270
+    },
+    "facing=west,signal=purple": {
+      "model": "openwheelracing:block/starting_light_purple",
+      "y": 270
+    }
+  }
+}

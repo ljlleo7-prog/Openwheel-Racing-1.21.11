@@ -9,6 +9,7 @@ import com.openwheelracing.client.screen.CarAssemblyScreen;
 import com.openwheelracing.client.screen.CarPartsReplacementScreen;
 import com.openwheelracing.client.screen.RaceDirectorScreen;
 import com.openwheelracing.client.screen.RefineryScreen;
+import com.openwheelracing.client.screen.RaceLightScreen;
 import com.openwheelracing.registry.OWREntities;
 import com.openwheelracing.registry.OWRMenus;
 import net.minecraft.client.Minecraft;
@@ -49,5 +50,6 @@ public final class OpenwheelRacingClient {
         event.register(OWRMenus.RACE_DIRECTOR.get(), RaceDirectorScreen::new);
         event.register(OWRMenus.RACE_BOARD_TERMINAL.get(), RaceDirectorScreen::new);
         event.register(OWRMenus.TEAM_TERMINAL.get(), RaceDirectorScreen::new);
+        event.register(OWRMenus.RACE_LIGHT.get(), RaceLightScreen::new);
     }
 }

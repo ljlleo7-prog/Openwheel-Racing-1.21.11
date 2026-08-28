@@ -13,6 +13,7 @@ import org.lwjgl.glfw.GLFW;
 public final class OWRClientInputHandler {
     private static boolean shiftUpWasDown;
     private static boolean shiftDownWasDown;
+    private static int autoShiftCooldownTicks;
     private static final boolean[] onboardNumberWasDown = new boolean[9];
     private static boolean sentIdleDriveInput;
     private static int driveInputSequence;
@@ -135,6 +136,11 @@ public final class OWRClientInputHandler {
         }
         shiftUpWasDown = shiftUpDown;
         shiftDownWasDown = shiftDownDown;
+        if (!shiftUpDown && !shiftDownDown) {
+            handleAutoShift(settings, car, throttle, brake);
+        } else {
+            autoShiftCooldownTicks = AutoShiftPolicy.COOLDOWN_TICKS;
+        }
         handleOnboardNumberKeys();
         while (OWRKeyMappings.EXIT_CAR.consumeClick()) {
             OWRNetwork.sendToServer(new OWRNetwork.ExitCarMessage());
@@ -178,7 +184,7 @@ public final class OWRClientInputHandler {
             return false;
         }
         car.shiftLocal(1);
-        OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(1));
+        OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(1, false));
         return true;
     }
 
@@ -188,8 +194,21 @@ public final class OWRClientInputHandler {
             return false;
         }
         car.shiftLocal(-1);
-        OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(-1));
+        OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(-1, false));
         return true;
+    }
+
+    private static void handleAutoShift(WheelInputSettings settings, OpenwheelCarEntity car, float throttle, float brake) {
+        if (!settings.autoShiftEnabled) {
+            autoShiftCooldownTicks = 0;
+            return;
+        }
+        AutoShiftPolicy.Decision decision = AutoShiftPolicy.decide(car.getGear(), car.getMaxForwardGear(), car.getRpm(),
+            car.getRedlineRpm(), car.getProjectedRpmForGear(car.getGear() - 1), throttle, brake, autoShiftCooldownTicks);
+        autoShiftCooldownTicks = decision.cooldownTicks();
+        if (decision.direction() != 0) {
+            OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(decision.direction(), true));
+        }
     }
 
     public static boolean toggleDrs() {

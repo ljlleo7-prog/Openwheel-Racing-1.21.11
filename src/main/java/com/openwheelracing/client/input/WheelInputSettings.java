@@ -45,6 +45,7 @@ public class WheelInputSettings {
     public Double ersCapacityMj;
     public Integer shiftLightStartRpm;
     public Integer shiftLightFullRpm;
+    public Boolean autoShiftEnabled;
     public Float tractionControlStrength;
     public Float tractionControlEnvelope;
     public Float absEnvelope;
@@ -192,6 +193,9 @@ public class WheelInputSettings {
         ersCapacityMj = clampDouble(ersCapacityMj == null ? 4.0 : ersCapacityMj, 2.0, 12.0);
         shiftLightStartRpm = clampInt(shiftLightStartRpm == null ? 9_000 : shiftLightStartRpm, 5_000, 12_500);
         shiftLightFullRpm = clampInt(shiftLightFullRpm == null ? 13_000 : shiftLightFullRpm, 6_000, 15_000);
+        if (autoShiftEnabled == null) {
+            autoShiftEnabled = false;
+        }
         tractionControlStrength = clamp(tractionControlStrength == null ? 0.35f : tractionControlStrength, 0.0f, 1.0f);
         tractionControlEnvelope = clamp(tractionControlEnvelope == null ? 1.02f : tractionControlEnvelope, 0.90f, 1.10f);
         absEnvelope = clamp(absEnvelope == null ? 0.98f : absEnvelope, 0.90f, 1.10f);
@@ -244,6 +248,7 @@ public class WheelInputSettings {
         settings.ersCapacityMj = 4.0;
         settings.shiftLightStartRpm = 9_000;
         settings.shiftLightFullRpm = 13_000;
+        settings.autoShiftEnabled = false;
         settings.tractionControlStrength = 0.35f;
         settings.tractionControlEnvelope = 1.02f;
         settings.absEnvelope = 0.98f;

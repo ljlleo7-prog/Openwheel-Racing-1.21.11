@@ -1,0 +1,6 @@
+{
+  "parent": "openwheelracing:block/pit_light_base",
+  "textures": {
+    "lamp": "openwheelracing:block/pit_light_white"
+  }
+}

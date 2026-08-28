@@ -62,7 +62,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "14";
+    private static final String PROTOCOL = "15";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -100,6 +100,7 @@ public final class OWRNetwork {
         registrar.playToServer(SetLapTimingScopeMessage.TYPE, codec(SetLapTimingScopeMessage::encode, SetLapTimingScopeMessage::decode), SetLapTimingScopeMessage::handle);
         registrar.playToServer(RaceDirectorSetErsLimitMessage.TYPE, codec(RaceDirectorSetErsLimitMessage::encode, RaceDirectorSetErsLimitMessage::decode), RaceDirectorSetErsLimitMessage::handle);
         registrar.playToServer(RaceDirectorSetGlobalFlagMessage.TYPE, codec(RaceDirectorSetGlobalFlagMessage::encode, RaceDirectorSetGlobalFlagMessage::decode), RaceDirectorSetGlobalFlagMessage::handle);
+        registrar.playToServer(RaceDirectorSignalControlMessage.TYPE, codec(RaceDirectorSignalControlMessage::encode, RaceDirectorSignalControlMessage::decode), RaceDirectorSignalControlMessage::handle);
         registrar.playToServer(RaceDirectorCycleConditionModifierMessage.TYPE, codec(RaceDirectorCycleConditionModifierMessage::encode, RaceDirectorCycleConditionModifierMessage::decode), RaceDirectorCycleConditionModifierMessage::handle);
         registrar.playToServer(RaceDirectorStartSessionMessage.TYPE, codec(RaceDirectorStartSessionMessage::encode, RaceDirectorStartSessionMessage::decode), RaceDirectorStartSessionMessage::handle);
         registrar.playToServer(RaceDirectorRefreshSessionMessage.TYPE, codec(RaceDirectorRefreshSessionMessage::encode, RaceDirectorRefreshSessionMessage::decode), RaceDirectorRefreshSessionMessage::handle);
@@ -468,7 +469,7 @@ public final class OWRNetwork {
         }
     }
 
-    public record ShiftMessage(int direction) implements CustomPacketPayload {
+    public record ShiftMessage(int direction, boolean automatic) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<ShiftMessage> TYPE = payloadType("shift_message");
 
         @Override
@@ -478,16 +479,20 @@ public final class OWRNetwork {
 
         private static void encode(ShiftMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.direction);
+            buffer.writeBoolean(message.automatic);
         }
 
         private static ShiftMessage decode(FriendlyByteBuf buffer) {
-            return new ShiftMessage(buffer.readInt());
+            return new ShiftMessage(buffer.readInt(), buffer.readBoolean());
         }
 
         private static void handle(ShiftMessage message, IPayloadContext context) {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
+                    return;
+                }
+                if (message.automatic && !OWRRaceControlState.get(player.level()).isAutoShiftingAllowed()) {
                     return;
                 }
                 if (message.direction > 0) {
@@ -1198,6 +1203,7 @@ public final class OWRNetwork {
             RaceDirectorSnapshot snapshot = message.snapshot;
             buffer.writeBoolean(snapshot.checkpointCheckEnabled());
             buffer.writeBoolean(snapshot.offTrackCheckEnabled());
+            buffer.writeBoolean(snapshot.autoShiftingAllowed());
             buffer.writeInt(snapshot.minimumValidLapTicks());
             buffer.writeVarInt(snapshot.raceLapLimit());
             buffer.writeInt(snapshot.page());
@@ -1235,6 +1241,7 @@ public final class OWRNetwork {
         private static RaceDirectorSnapshotMessage decode(FriendlyByteBuf buffer) {
             boolean checkpointCheckEnabled = buffer.readBoolean();
             boolean offTrackCheckEnabled = buffer.readBoolean();
+            boolean autoShiftingAllowed = buffer.readBoolean();
             int minimumValidLapTicks = buffer.readInt();
             int raceLapLimit = buffer.readVarInt();
             int page = buffer.readInt();
@@ -1269,7 +1276,7 @@ public final class OWRNetwork {
             for (int index = 0; index < carCount; index++) {
                 teamCars.add(TeamCarRow.decode(buffer));
             }
-            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled,
+            return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, autoShiftingAllowed,
                 minimumValidLapTicks, raceLapLimit, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj,
                 maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier,
                 activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, trackMap, trackMapScanRunning,
@@ -1399,6 +1406,7 @@ public final class OWRNetwork {
 
         public static final int CHECKPOINTS = 0;
         public static final int OFF_TRACK = 1;
+        public static final int AUTO_SHIFTING = 2;
 
         private static void encode(RaceDirectorToggleRuleMessage message, FriendlyByteBuf buffer) {
             buffer.writeInt(message.rule);
@@ -1419,6 +1427,8 @@ public final class OWRNetwork {
                     state.toggleCheckpointCheck();
                 } else if (message.rule == OFF_TRACK) {
                     state.toggleOffTrackCheck();
+                } else if (message.rule == AUTO_SHIFTING) {
+                    state.toggleAutoShiftingAllowed();
                 }
             });
         }
@@ -1579,9 +1589,45 @@ public final class OWRNetwork {
                 OWRRaceControlState state = OWRRaceControlState.get(player.level());
                 RaceFlagMode requested = RaceFlagMode.fromOrdinal(message.flag);
                 RaceFlagMode next = state.getGlobalFlag() == requested ? RaceFlagMode.GREEN : requested;
+                state.clearSectorSignals();
                 state.setGlobalFlag(next);
                 if (player.level() instanceof ServerLevel serverLevel) {
                     broadcastRaceFlag(serverLevel, next, true);
+                }
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+    }
+
+    public record RaceDirectorSignalControlMessage(int action, int first, int second) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSignalControlMessage> TYPE = payloadType("race_director_signal_control_message");
+        public static final int START_PHASE = 0, AUTO_FLAGGING = 1, SECTOR_FLAG = 2, PIT_SIGNAL = 3, DRIVER_FLAG = 4;
+        @Override public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(RaceDirectorSignalControlMessage message, FriendlyByteBuf buffer) { buffer.writeVarInt(message.action); buffer.writeVarInt(message.first); buffer.writeVarInt(message.second); }
+        private static RaceDirectorSignalControlMessage decode(FriendlyByteBuf buffer) { return new RaceDirectorSignalControlMessage(buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt()); }
+        private static void handle(RaceDirectorSignalControlMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                if (!(context.player() instanceof ServerPlayer player) || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) return;
+                OWRRaceControlState state = OWRRaceControlState.get(player.level());
+                switch (message.action) {
+                    case START_PHASE -> {
+                        state.setStartPhase(message.first);
+                        if (message.first == 1 && player.level() instanceof ServerLevel level) {
+                            com.openwheelracing.content.race.RaceAutoFlagService.requestStart(level);
+                        }
+                    }
+                    case AUTO_FLAGGING -> state.setAutoFlagging(message.first < 0 ? !state.isAutoFlagging() : message.first != 0);
+                    case SECTOR_FLAG -> state.setSectorSignal(message.first, -1, com.openwheelracing.content.race.RaceSignal.fromOrdinal(message.second));
+                    case PIT_SIGNAL -> state.setPitSignal(com.openwheelracing.content.race.PitLightMode.fromOrdinal(message.first), com.openwheelracing.content.race.RaceSignal.fromOrdinal(message.second));
+                    case DRIVER_FLAG -> {
+                        net.minecraft.world.entity.Entity entity = player.level().getEntity(message.first);
+                        if (entity instanceof OpenwheelCarEntity car) {
+                            java.util.UUID driver = car.getBasicAiIdentity().map(com.openwheelracing.content.ai.BasicAiDriverIdentity::driverId)
+                                .orElseGet(() -> car.getFirstPassenger() == null ? null : car.getFirstPassenger().getUUID());
+                            state.setDriverSignal(driver, com.openwheelracing.content.race.RaceSignal.fromOrdinal(message.second));
+                        }
+                    }
+                    default -> { return; }
                 }
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });

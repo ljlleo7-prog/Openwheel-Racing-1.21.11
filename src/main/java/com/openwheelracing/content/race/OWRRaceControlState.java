@@ -17,6 +17,7 @@ public class OWRRaceControlState extends SavedData {
         Codec.BOOL.optionalFieldOf("off_track_check_enabled", true).forGetter(OWRRaceControlState::isOffTrackCheckEnabled),
         Codec.INT.optionalFieldOf("minimum_valid_lap_ticks", OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS).forGetter(OWRRaceControlState::getMinimumValidLapTicks),
         Codec.BOOL.optionalFieldOf("wheel_input_allowed", true).forGetter(OWRRaceControlState::isWheelInputAllowed),
+        Codec.BOOL.optionalFieldOf("auto_shifting_allowed", true).forGetter(OWRRaceControlState::isAutoShiftingAllowed),
         Codec.INT.optionalFieldOf("max_ers_capacity_mj", 4).forGetter(OWRRaceControlState::getMaxErsCapacityMj),
         Codec.INT.optionalFieldOf("max_balanced_deploy_kw", 200).forGetter(OWRRaceControlState::getMaxBalancedDeployKw),
         Codec.INT.optionalFieldOf("max_attack_deploy_kw", 350).forGetter(OWRRaceControlState::getMaxAttackDeployKw),
@@ -24,7 +25,8 @@ public class OWRRaceControlState extends SavedData {
         Codec.INT.optionalFieldOf("global_flag", RaceFlagMode.DEFAULT.ordinal()).forGetter(state -> state.getGlobalFlag().ordinal()),
         Codec.DOUBLE.optionalFieldOf("car_damage_modifier", 1.0).forGetter(OWRRaceControlState::getCarDamageModifier),
         Codec.DOUBLE.optionalFieldOf("tyre_wear_modifier", 1.0).forGetter(OWRRaceControlState::getTyreWearModifier),
-        Codec.INT.optionalFieldOf("race_lap_limit", DEFAULT_RACE_LAP_LIMIT).forGetter(OWRRaceControlState::getRaceLapLimit)
+        Codec.INT.optionalFieldOf("race_lap_limit", DEFAULT_RACE_LAP_LIMIT).forGetter(OWRRaceControlState::getRaceLapLimit),
+        SignalSettings.CODEC.optionalFieldOf("signals", SignalSettings.DEFAULT).forGetter(OWRRaceControlState::signalSettings)
     ).apply(instance, OWRRaceControlState::new));
 
     private static final SavedDataType<OWRRaceControlState> TYPE = new SavedDataType<>(
@@ -38,6 +40,7 @@ public class OWRRaceControlState extends SavedData {
     private boolean offTrackCheckEnabled;
     private int minimumValidLapTicks;
     private boolean wheelInputAllowed;
+    private boolean autoShiftingAllowed;
     private int maxErsCapacityMj;
     private int maxBalancedDeployKw;
     private int maxAttackDeployKw;
@@ -47,19 +50,27 @@ public class OWRRaceControlState extends SavedData {
     private double tyreWearModifier;
     private int raceLapLimit;
     private int revision;
+    private final java.util.Map<String, Integer> sectorFlags;
+    private final java.util.Map<String, Integer> driverFlags;
+    private boolean autoFlagging;
+    private int startPhase;
+    private RaceSignal pitEntrySignal;
+    private RaceSignal pitExitSignal;
+    private RaceSignal pitWeatherSignal;
 
     public OWRRaceControlState() {
-        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true, 4, 200, 350, 350,
-            RaceFlagMode.DEFAULT.ordinal(), 1.0, 1.0, DEFAULT_RACE_LAP_LIMIT);
+        this(false, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, true, true, 4, 200, 350, 350,
+            RaceFlagMode.DEFAULT.ordinal(), 1.0, 1.0, DEFAULT_RACE_LAP_LIMIT, SignalSettings.DEFAULT);
     }
 
-    private OWRRaceControlState(boolean checkpointCheckEnabled, boolean offTrackCheckEnabled, int minimumValidLapTicks, boolean wheelInputAllowed,
+    private OWRRaceControlState(boolean checkpointCheckEnabled, boolean offTrackCheckEnabled, int minimumValidLapTicks, boolean wheelInputAllowed, boolean autoShiftingAllowed,
             int maxErsCapacityMj, int maxBalancedDeployKw, int maxAttackDeployKw, int maxHarvestNegativeKw, int globalFlag,
-            double carDamageModifier, double tyreWearModifier, int raceLapLimit) {
+            double carDamageModifier, double tyreWearModifier, int raceLapLimit, SignalSettings signals) {
         this.checkpointCheckEnabled = checkpointCheckEnabled;
         this.offTrackCheckEnabled = offTrackCheckEnabled;
         this.minimumValidLapTicks = Math.max(1, minimumValidLapTicks);
         this.wheelInputAllowed = wheelInputAllowed;
+        this.autoShiftingAllowed = autoShiftingAllowed;
         this.maxErsCapacityMj = clamp(maxErsCapacityMj, 2, 12);
         this.maxBalancedDeployKw = clamp(maxBalancedDeployKw, 0, 350);
         this.maxAttackDeployKw = clamp(maxAttackDeployKw, 0, 350);
@@ -68,6 +79,13 @@ public class OWRRaceControlState extends SavedData {
         this.carDamageModifier = snapConditionModifier(carDamageModifier);
         this.tyreWearModifier = snapConditionModifier(tyreWearModifier);
         this.raceLapLimit = clamp(raceLapLimit, 0, MAX_RACE_LAP_LIMIT);
+        this.sectorFlags = new java.util.HashMap<>(signals.sectorFlags());
+        this.driverFlags = new java.util.HashMap<>(signals.driverFlags());
+        this.autoFlagging = signals.autoFlagging();
+        this.startPhase = clamp(signals.startPhase(), 0, 6);
+        this.pitEntrySignal = RaceSignal.fromOrdinal(signals.pitEntrySignal());
+        this.pitExitSignal = RaceSignal.fromOrdinal(signals.pitExitSignal());
+        this.pitWeatherSignal = RaceSignal.fromOrdinal(signals.pitWeatherSignal());
     }
 
     public static OWRRaceControlState get(ServerLevel level) {
@@ -87,6 +105,7 @@ public class OWRRaceControlState extends SavedData {
             legacy.offTrackCheckEnabled,
             legacy.minimumValidLapTicks,
             legacy.wheelInputAllowed,
+            legacy.autoShiftingAllowed,
             legacy.maxErsCapacityMj,
             legacy.maxBalancedDeployKw,
             legacy.maxAttackDeployKw,
@@ -94,7 +113,7 @@ public class OWRRaceControlState extends SavedData {
             legacy.globalFlag.ordinal(),
             legacy.carDamageModifier,
             legacy.tyreWearModifier,
-            legacy.raceLapLimit
+            legacy.raceLapLimit, legacy.signalSettings()
         );
         copy.markChanged();
         level.getDataStorage().set(TYPE, copy);
@@ -118,6 +137,10 @@ public class OWRRaceControlState extends SavedData {
 
     public boolean isWheelInputAllowed() {
         return wheelInputAllowed;
+    }
+
+    public boolean isAutoShiftingAllowed() {
+        return autoShiftingAllowed;
     }
 
     public int getMaxErsCapacityMj() {
@@ -150,6 +173,64 @@ public class OWRRaceControlState extends SavedData {
 
     public int getRaceLapLimit() {
         return raceLapLimit;
+    }
+
+    public boolean isAutoFlagging() { return autoFlagging; }
+    public int getStartPhase() { return startPhase; }
+    public RaceSignal getSectorSignal(int sector, int minisector) {
+        Integer exact = sectorFlags.get(sector + ":" + minisector);
+        if (exact == null) exact = sectorFlags.get(sector + ":-1");
+        return exact == null ? signalForGlobalFlag() : RaceSignal.fromOrdinal(exact);
+    }
+    public RaceSignal getDriverSignal(java.util.UUID driverId) {
+        Integer signal = driverId == null ? null : driverFlags.get(driverId.toString());
+        return signal == null ? RaceSignal.OFF : RaceSignal.fromOrdinal(signal);
+    }
+    public RaceSignal getPitSignal(PitLightMode mode) {
+        return switch (mode) { case ENTRY -> pitEntrySignal; case EXIT -> pitExitSignal; case WEATHER -> pitWeatherSignal; };
+    }
+    public RaceSignal signalForGlobalFlag() {
+        return switch (globalFlag) { case GREEN -> RaceSignal.GREEN; case YELLOW, SAFETY_CAR, VIRTUAL_SAFETY_CAR -> RaceSignal.YELLOW; case RED -> RaceSignal.RED; };
+    }
+    private SignalSettings signalSettings() {
+        return new SignalSettings(sectorFlags, driverFlags, autoFlagging, startPhase, pitEntrySignal.ordinal(), pitExitSignal.ordinal(), pitWeatherSignal.ordinal());
+    }
+
+    private record SignalSettings(java.util.Map<String, Integer> sectorFlags, java.util.Map<String, Integer> driverFlags,
+            boolean autoFlagging, int startPhase, int pitEntrySignal, int pitExitSignal, int pitWeatherSignal) {
+        private static final SignalSettings DEFAULT = new SignalSettings(java.util.Map.of(), java.util.Map.of(), false, 0,
+            RaceSignal.GREEN.ordinal(), RaceSignal.GREEN.ordinal(), RaceSignal.OFF.ordinal());
+        private static final Codec<SignalSettings> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            Codec.unboundedMap(Codec.STRING, Codec.INT).optionalFieldOf("sector_flags", java.util.Map.of()).forGetter(SignalSettings::sectorFlags),
+            Codec.unboundedMap(Codec.STRING, Codec.INT).optionalFieldOf("driver_flags", java.util.Map.of()).forGetter(SignalSettings::driverFlags),
+            Codec.BOOL.optionalFieldOf("auto_flagging", false).forGetter(SignalSettings::autoFlagging),
+            Codec.INT.optionalFieldOf("start_phase", 0).forGetter(SignalSettings::startPhase),
+            Codec.INT.optionalFieldOf("pit_entry", RaceSignal.GREEN.ordinal()).forGetter(SignalSettings::pitEntrySignal),
+            Codec.INT.optionalFieldOf("pit_exit", RaceSignal.GREEN.ordinal()).forGetter(SignalSettings::pitExitSignal),
+            Codec.INT.optionalFieldOf("pit_weather", RaceSignal.OFF.ordinal()).forGetter(SignalSettings::pitWeatherSignal)
+        ).apply(instance, SignalSettings::new));
+    }
+    public void setSectorSignal(int sector, int minisector, RaceSignal signal) {
+        String key = Math.max(0, sector) + ":" + Math.max(-1, minisector);
+        if (signal == null || signal == RaceSignal.OFF) sectorFlags.remove(key); else sectorFlags.put(key, signal.ordinal());
+        markChanged();
+    }
+    public void clearSectorSignals() {
+        if (sectorFlags.isEmpty()) return;
+        sectorFlags.clear();
+        markChanged();
+    }
+    public void setDriverSignal(java.util.UUID driverId, RaceSignal signal) {
+        if (driverId == null) return;
+        if (signal == null || signal == RaceSignal.OFF) driverFlags.remove(driverId.toString()); else driverFlags.put(driverId.toString(), signal.ordinal());
+        markChanged();
+    }
+    public void setAutoFlagging(boolean enabled) { if (autoFlagging != enabled) { autoFlagging = enabled; markChanged(); } }
+    public void setStartPhase(int phase) { int next = clamp(phase, 0, 6); if (startPhase != next) { startPhase = next; markChanged(); } }
+    public void setPitSignal(PitLightMode mode, RaceSignal signal) {
+        RaceSignal next = signal == null ? RaceSignal.OFF : signal;
+        switch (mode) { case ENTRY -> pitEntrySignal = next; case EXIT -> pitExitSignal = next; case WEATHER -> pitWeatherSignal = next; }
+        markChanged();
     }
 
     public boolean toggleCheckpointCheck() {
@@ -188,6 +269,12 @@ public class OWRRaceControlState extends SavedData {
         }
         wheelInputAllowed = allowed;
         markChanged();
+    }
+
+    public boolean toggleAutoShiftingAllowed() {
+        autoShiftingAllowed = !autoShiftingAllowed;
+        markChanged();
+        return autoShiftingAllowed;
     }
 
     public void setMaxErsCapacityMj(int value) {

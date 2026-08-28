@@ -1,0 +1,58 @@
+{
+  "textures": {
+    "particle": "minecraft:block/gray_concrete",
+    "housing": "openwheelracing:block/race_light_housing"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        16,
+        16
+      ],
+      "faces": {
+        "north": {
+          "texture": "#housing"
+        },
+        "east": {
+          "texture": "#housing"
+        },
+        "south": {
+          "texture": "#housing"
+        },
+        "west": {
+          "texture": "#housing"
+        },
+        "up": {
+          "texture": "#housing"
+        },
+        "down": {
+          "texture": "#housing"
+        }
+      }
+    },
+    {
+      "from": [
+        4,
+        4,
+        -0.125
+      ],
+      "to": [
+        12,
+        12,
+        0.2
+      ],
+      "faces": {
+        "north": {
+          "texture": "#lamp",
+          "tintindex": 0
+        }
+      }
+    }
+  ]
+}

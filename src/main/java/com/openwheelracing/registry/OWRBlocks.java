@@ -10,6 +10,8 @@ import com.openwheelracing.content.block.WettableTrackBlock;
 import com.openwheelracing.content.block.WettableTrackSlabBlock;
 import com.openwheelracing.content.block.RaceDirectorBlock;
 import com.openwheelracing.content.block.RefineryBlock;
+import com.openwheelracing.content.block.RaceLightBlock;
+import com.openwheelracing.content.race.RaceLightType;
 import com.openwheelracing.content.block.entity.CarWorkstationType;
 import com.openwheelracing.content.block.entity.RaceMonitorType;
 import net.minecraft.world.item.BlockItem;
@@ -52,6 +54,9 @@ public final class OWRBlocks {
     public static final DeferredHolder<Block, Block> RACE_DIRECTOR = registerRaceMonitor("race_director", RaceMonitorType.DIRECTOR);
     public static final DeferredHolder<Block, Block> RACE_BOARD_TERMINAL = registerRaceMonitor("race_board_terminal", RaceMonitorType.BOARD);
     public static final DeferredHolder<Block, Block> TEAM_TERMINAL = registerRaceMonitor("team_terminal", RaceMonitorType.TEAM);
+    public static final DeferredHolder<Block, Block> FLAG_LIGHT = registerRaceLight("flag_light", RaceLightType.FLAG);
+    public static final DeferredHolder<Block, Block> STARTING_LIGHT = registerRaceLight("starting_light", RaceLightType.START);
+    public static final DeferredHolder<Block, Block> PIT_LIGHT = registerRaceLight("pit_light", RaceLightType.PIT);
 
     public static final DeferredHolder<Block, LiquidBlock> CRUDE_OIL_DEPOSIT = BLOCKS.register("crude_oil_deposit",
         () -> new CrudeOilBlock(BlockBehaviour.Properties.of()
@@ -81,6 +86,9 @@ public final class OWRBlocks {
     public static final DeferredHolder<Item, Item> RACE_DIRECTOR_ITEM = registerBlockItem("race_director", RACE_DIRECTOR);
     public static final DeferredHolder<Item, Item> RACE_BOARD_TERMINAL_ITEM = registerBlockItem("race_board_terminal", RACE_BOARD_TERMINAL);
     public static final DeferredHolder<Item, Item> TEAM_TERMINAL_ITEM = registerBlockItem("team_terminal", TEAM_TERMINAL);
+    public static final DeferredHolder<Item, Item> FLAG_LIGHT_ITEM = registerBlockItem("flag_light", FLAG_LIGHT);
+    public static final DeferredHolder<Item, Item> STARTING_LIGHT_ITEM = registerBlockItem("starting_light", STARTING_LIGHT);
+    public static final DeferredHolder<Item, Item> PIT_LIGHT_ITEM = registerBlockItem("pit_light", PIT_LIGHT);
     public static final DeferredHolder<Item, Item> ASPHALT_TRACK_ITEM = registerBlockItem("asphalt_track", ASPHALT_TRACK);
     public static final DeferredHolder<Item, Item> ASPHALT_TRACK_SLAB_ITEM = registerBlockItem("asphalt_track_slab", ASPHALT_TRACK_SLAB);
     public static final DeferredHolder<Item, Item> KERB_ITEM = registerBlockItem("kerb", KERB);
@@ -105,6 +113,11 @@ public final class OWRBlocks {
             .strength(3.5f, 6.0f)
             .requiresCorrectToolForDrops(), monitorType)
         );
+    }
+
+    private static DeferredHolder<Block, Block> registerRaceLight(String name, RaceLightType type) {
+        return BLOCKS.register(name, () -> new RaceLightBlock(BlockBehaviour.Properties.of().setId(key(name)).mapColor(MapColor.METAL)
+            .strength(3.5f, 6.0f).requiresCorrectToolForDrops(), type));
     }
 
     private static DeferredHolder<Block, Block> registerCarStation(String name, CarWorkstationType workstationType) {
