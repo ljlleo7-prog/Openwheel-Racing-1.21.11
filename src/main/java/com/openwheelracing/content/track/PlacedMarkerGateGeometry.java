@@ -118,7 +118,22 @@ public final class PlacedMarkerGateGeometry {
         Collection<Gate> gates,
         double lateralExpansion
     ) {
-        Crossing best = null;
+        List<Crossing> crossings = crossings(previous, current, previousCenterY, currentCenterY, previousHalfHeight,
+            currentHalfHeight, gates, lateralExpansion);
+        return crossings.isEmpty() ? Optional.empty() : Optional.of(crossings.getFirst());
+    }
+
+    public static List<Crossing> crossings(
+        Vec3 previous,
+        Vec3 current,
+        double previousCenterY,
+        double currentCenterY,
+        double previousHalfHeight,
+        double currentHalfHeight,
+        Collection<Gate> gates,
+        double lateralExpansion
+    ) {
+        List<Crossing> crossings = new ArrayList<>();
         for (Gate gate : gates) {
             double movementT = TrackGeometry.crossing(previous, current, gate.left(lateralExpansion), gate.right(lateralExpansion))
                 .map(TrackGeometry.LineCrossing::movementT)
@@ -132,11 +147,11 @@ public final class PlacedMarkerGateGeometry {
                 continue;
             }
             TrackGeometry.LineCrossing crossing = TrackGeometry.crossing(previous, current, gate.left(lateralExpansion), gate.right(lateralExpansion)).orElseThrow();
-            if (best == null || crossing.movementT() < best.crossing().movementT()) {
-                best = new Crossing(gate, crossing);
-            }
+            crossings.add(new Crossing(gate, crossing));
         }
-        return Optional.ofNullable(best);
+        crossings.sort(Comparator.comparingDouble((Crossing value) -> value.crossing().movementT())
+            .thenComparing(value -> value.gate().key()));
+        return List.copyOf(crossings);
     }
 
     private static boolean sameRun(Gate previous, Marker marker) {

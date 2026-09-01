@@ -8,7 +8,9 @@ public enum RaceSignal implements net.minecraft.util.StringRepresentable {
     BLUE("blue", 12),
     WHITE("white", 12),
     ORANGE("orange", 13),
-    PURPLE("purple", 10);
+    PURPLE("purple", 10),
+    SAFETY_CAR("safety_car", 15),
+    VIRTUAL_SAFETY_CAR("virtual_safety_car", 15);
 
     private final String key;
     private final int lightLevel;

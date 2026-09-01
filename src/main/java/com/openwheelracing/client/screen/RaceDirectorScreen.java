@@ -46,7 +46,6 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     private long selectedLapId = -1L;
     private int selectedTeamCarId = -1;
     private int autoDetectRadius = AUTO_DETECT_DEFAULT_RADIUS;
-    private int flagSector;
     private EditBox sessionNameBox;
 
     public RaceDirectorScreen(RaceDirectorMenu menu, Inventory playerInventory, Component title) {
@@ -243,13 +242,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.lights_out"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.START_PHASE, 6, 0)))
             .bounds(leftPos + 308, topPos + 318, 64, 14).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.auto_flags"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.AUTO_FLAGGING, -1, 0)))
-            .bounds(leftPos + 376, topPos + 318, 68, 14).build());
-        addRenderableWidget(Button.builder(Component.literal("S-"), button -> flagSector = Math.max(0, flagSector - 1)).bounds(leftPos + 448, topPos + 318, 24, 14).build());
-        addRenderableWidget(Button.builder(Component.literal("S" + flagSector + "+"), button -> { flagSector++; rebuildWidgets(); }).bounds(leftPos + 476, topPos + 318, 42, 14).build());
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.sector_yellow"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.SECTOR_FLAG, flagSector, com.openwheelracing.content.race.RaceSignal.YELLOW.ordinal())))
-            .bounds(leftPos + 522, topPos + 318, 24, 14).build());
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.sector_clear"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.SECTOR_FLAG, flagSector, com.openwheelracing.content.race.RaceSignal.OFF.ordinal())))
-            .bounds(leftPos + 548, topPos + 318, 24, 14).build());
+            .bounds(leftPos + 376, topPos + 318, 100, 14).build());
         if (selectedTeamCarId >= 0) {
             addRenderableWidget(Button.builder(Component.literal("BLUE"), button -> setSelectedDriverFlag(com.openwheelracing.content.race.RaceSignal.BLUE)).bounds(leftPos + 230, topPos + 334, 46, 14).build());
             addRenderableWidget(Button.builder(Component.literal("MECH"), button -> setSelectedDriverFlag(com.openwheelracing.content.race.RaceSignal.ORANGE)).bounds(leftPos + 280, topPos + 334, 46, 14).build());
@@ -356,6 +349,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.drawString(font, "Damage", RIGHT_X + 24, 284, 0xFFC9D1D9, false);
         graphics.drawString(font, "Tyres", RIGHT_X + 24, 302, 0xFFC9D1D9, false);
         drawSelectedLap(graphics);
+        drawPitPenalties(graphics, snapshot);
         drawDirectorTelemetry(graphics, snapshot);
     }
 
@@ -386,6 +380,22 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
                 : (car.inPitLane() ? 0xFF79C0FF : car.liveryColor());
             graphics.fill(x + 2, y, x + 6, y + 10, stripColor);
             graphics.drawString(font, fit("#" + car.entityId() + " " + car.liveryName() + " " + car.riderName(), COLUMN_WIDTH - 14), x + 10, y, car.onMap() ? 0xFFE8EDF2 : 0xFFFF7777, false);
+        }
+    }
+
+    private void drawPitPenalties(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
+        int x = RIGHT_X;
+        int y = 326;
+        graphics.drawString(font, "PIT INCIDENTS — PENDING VERIFICATION", x, y, 0xFFFFD76A, false);
+        if (snapshot.pendingPitPenalties().isEmpty()) {
+            graphics.drawString(font, "None", x, y + 13, 0xFF8792A2, false);
+            return;
+        }
+        int shown = Math.min(4, snapshot.pendingPitPenalties().size());
+        for (int offset = 0; offset < shown; offset++) {
+            var row = snapshot.pendingPitPenalties().get(snapshot.pendingPitPenalties().size() - 1 - offset);
+            String text = row.driverName() + "  I " + Math.round(row.instantKmh()) + " / A " + Math.round(row.averageKmh()) + " km/h";
+            graphics.drawString(font, fit(text, COLUMN_WIDTH - 4), x, y + 13 + offset * 12, 0xFFFF7777, false);
         }
     }
 

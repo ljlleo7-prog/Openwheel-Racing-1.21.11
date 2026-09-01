@@ -58,7 +58,15 @@ public final class PlacedMarkerGateMath {
     public static Optional<Crossing> earliestCrossing(double previousX, double previousZ, double currentX, double currentZ,
                                                        double previousY, double currentY, double previousHalfHeight, double currentHalfHeight,
                                                        Collection<Gate> gates, double lateralExpansion) {
-        Crossing best = null;
+        List<Crossing> crossings = crossings(previousX, previousZ, currentX, currentZ, previousY, currentY,
+            previousHalfHeight, currentHalfHeight, gates, lateralExpansion);
+        return crossings.isEmpty() ? Optional.empty() : Optional.of(crossings.getFirst());
+    }
+
+    public static List<Crossing> crossings(double previousX, double previousZ, double currentX, double currentZ,
+                                            double previousY, double currentY, double previousHalfHeight, double currentHalfHeight,
+                                            Collection<Gate> gates, double lateralExpansion) {
+        List<Crossing> crossings = new ArrayList<>();
         for (Gate gate : gates) {
             double left = gate.lateralStart() - lateralExpansion;
             double right = gate.lateralEnd() + 1.0 + lateralExpansion;
@@ -76,11 +84,10 @@ public final class PlacedMarkerGateMath {
             if (!gate.overlapsVertical(centerY, halfHeight)) {
                 continue;
             }
-            if (best == null || movementT < best.movementT()) {
-                best = new Crossing(gate, movementT, crossing.get()[1]);
-            }
+            crossings.add(new Crossing(gate, movementT, crossing.get()[1]));
         }
-        return Optional.ofNullable(best);
+        crossings.sort(Comparator.comparingDouble(Crossing::movementT).thenComparing(crossing -> crossing.gate().key()));
+        return List.copyOf(crossings);
     }
 
     private static Optional<double[]> crossing(double previousX, double previousZ, double currentX, double currentZ,

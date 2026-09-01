@@ -23,4 +23,14 @@ class PitTyreServiceTimingTest {
         assertEquals(24, PitTyreServiceTiming.MIN_DURATION_TICKS * 4);
         assertEquals(40, PitTyreServiceTiming.MAX_DURATION_TICKS * 4);
     }
+
+    @Test
+    void cancellationReturnsExactlyTheTyreSetNotFittedToTheCar() {
+        assertEquals(PitTyreServiceTiming.RETURN_NONE,
+            PitTyreServiceTiming.cancellationReturn(false, false));
+        assertEquals(PitTyreServiceTiming.RETURN_RESERVED_NEW,
+            PitTyreServiceTiming.cancellationReturn(false, true));
+        assertEquals(PitTyreServiceTiming.RETURN_REMOVED_OLD,
+            PitTyreServiceTiming.cancellationReturn(true, true));
+    }
 }

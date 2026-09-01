@@ -38,6 +38,7 @@ public final class SurveyRouteRuntime {
     }
 
     public static void recordMovement(OpenwheelCarEntity car) {
+        PitLaneSurveyRuntime.recordMovement(car);
         if (!(car.level() instanceof ServerLevel) || !(car.getControllingPassenger() instanceof ServerPlayer player)) return;
         Recorder recorder = RECORDERS.get(player.getUUID());
         if (recorder == null || !recorder.recording || !recorder.dimensionId.equals(player.level().dimension().identifier().toString())) return;

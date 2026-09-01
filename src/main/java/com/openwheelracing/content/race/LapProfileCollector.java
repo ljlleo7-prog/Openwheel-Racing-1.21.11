@@ -28,6 +28,8 @@ public final class LapProfileCollector {
     private boolean[] filled = new boolean[0];
     private final SurveyRouteLocalizer.State localizerState = new SurveyRouteLocalizer.State();
     private SurveyRouteLocalizer.Result previous;
+    private double previousSampleGameTime = Double.NaN;
+    private SurveyRouteLapRepair.Candidate pendingLapRepair;
     private Latest latest = Latest.inactive();
     private double prefixStartDistance = Double.NaN;
     private double unwrappedProgress;
@@ -70,14 +72,22 @@ public final class LapProfileCollector {
             headingResidualMilliRad[startIndex] = clampSigned((int) Math.round(wrapRadians(headingRadians - routeHeading) * 1000.0), 700);
             filled[startIndex] = true;
             previous = current;
+            previousSampleGameTime = gameTime;
             return;
         }
         double start = previous.best().get().distanceAlongRoute();
         double delta = distance - start;
-        if (delta < -route.length() * 0.5) delta += route.length();
+        boolean wrapped = delta < -route.length() * 0.5;
+        if (wrapped) delta += route.length();
         if (delta <= 0.0 || delta > MAX_FORWARD_STEP) {
             previous = current;
+            previousSampleGameTime = gameTime;
             return;
+        }
+        if (wrapped && Double.isFinite(previousSampleGameTime)) {
+            double maximumRoundTripDistance = Math.min(MAX_FORWARD_STEP, Math.max(3.5, speedKmh / 72.0 * 2.0 + 1.0));
+            SurveyRouteLapRepair.detect(start, previousSampleGameTime, distance, gameTime, route.length(), unwrappedProgress,
+                maximumRoundTripDistance).ifPresent(candidate -> pendingLapRepair = candidate);
         }
         unwrappedProgress += delta;
         int startElapsed = timeMillisAtPrevious(gameTime, elapsed);
@@ -96,6 +106,7 @@ public final class LapProfileCollector {
             filled[index] = true;
         }
         previous = current;
+        previousSampleGameTime = gameTime;
     }
 
     public OWRLapProfiles.BestLapProfile finish(String dimensionId, UUID trackId, String driverName, long lapRecordId, int lapMillis, long gameTime) {
@@ -174,6 +185,11 @@ public final class LapProfileCollector {
     }
 
     public Latest latest() { return latest; }
+    public java.util.Optional<SurveyRouteLapRepair.Candidate> pollLapRepair() {
+        SurveyRouteLapRepair.Candidate candidate = pendingLapRepair;
+        pendingLapRepair = null;
+        return java.util.Optional.ofNullable(candidate);
+    }
     public SurveyRoute route() { return route; }
     public double coverage() {
         if (filled.length == 0) return 0.0;
@@ -192,6 +208,8 @@ public final class LapProfileCollector {
         headingResidualMilliRad = new int[0];
         filled = new boolean[0];
         previous = null;
+        previousSampleGameTime = Double.NaN;
+        pendingLapRepair = null;
         latest = Latest.inactive();
         prefixStartDistance = Double.NaN;
         unwrappedProgress = 0.0;

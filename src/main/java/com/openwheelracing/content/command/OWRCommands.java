@@ -25,6 +25,8 @@ import com.openwheelracing.content.track.TrackStewardingGeometryBuilder;
 import com.openwheelracing.content.track.survey.SurveyRoute;
 import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
 import com.openwheelracing.content.track.survey.TrackSurveyData;
+import com.openwheelracing.content.track.survey.PitLaneSurveyData;
+import com.openwheelracing.content.track.survey.PitLaneSurveyRuntime;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.registry.OWREntities;
 import net.minecraft.commands.CommandSourceStack;
@@ -137,6 +139,21 @@ public final class OWRCommands {
                     .then(Commands.literal("clear").executes(OWRCommands::clearSurvey))
                     .then(Commands.literal("show").executes(OWRCommands::showSurvey))
                     .then(Commands.literal("hide").executes(OWRCommands::hideSurvey)))
+                .then(Commands.literal("pit-lane")
+                    .then(Commands.literal("entry-here")
+                        .executes(context -> setPitLimitHere(context, TrackDefinition.StewardLineType.PIT_LIMIT_START, 8))
+                        .then(Commands.argument("width", IntegerArgumentType.integer(1, 64))
+                            .executes(context -> setPitLimitHere(context, TrackDefinition.StewardLineType.PIT_LIMIT_START, IntegerArgumentType.getInteger(context, "width")))))
+                    .then(Commands.literal("exit-here")
+                        .executes(context -> setPitLimitHere(context, TrackDefinition.StewardLineType.PIT_LIMIT_END, 8))
+                        .then(Commands.argument("width", IntegerArgumentType.integer(1, 64))
+                            .executes(context -> setPitLimitHere(context, TrackDefinition.StewardLineType.PIT_LIMIT_END, IntegerArgumentType.getInteger(context, "width")))))
+                    .then(Commands.literal("survey")
+                        .then(Commands.literal("start").executes(OWRCommands::startPitLaneSurvey))
+                        .then(Commands.literal("finish").executes(OWRCommands::finishPitLaneSurvey))
+                        .then(Commands.literal("cancel").executes(OWRCommands::cancelPitLaneSurvey))
+                        .then(Commands.literal("status").executes(OWRCommands::showPitLaneSurveyStatus))
+                        .then(Commands.literal("clear").executes(OWRCommands::clearPitLaneSurvey))))
                 .then(Commands.literal("centerline")
                     .then(Commands.literal("add-here")
                         .executes(context -> addCenterlinePoint(context, 8))
@@ -700,6 +717,58 @@ public final class OWRCommands {
         OWRNetwork.sendSurveyRouteOverlay(context.getSource().getPlayerOrException(), false, "", new UUID(0, 0), "", false, null);
         send(context, "Survey route overlay hidden.");
         return 1;
+    }
+
+    private static int setPitLimitHere(CommandContext<CommandSourceStack> context, TrackDefinition.StewardLineType type, int width) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        TrackDefinition.StartFinishLine line = lineAtPlayer(player, width);
+        return upsertStewardLine(context, createStewardLine(context, type, 1, line.left(), line.right()));
+    }
+
+    private static int startPitLaneSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        if (!(player.getVehicle() instanceof OpenwheelCarEntity car) || car.getControllingPassenger() != player) {
+            send(context, "Drive an open-wheel car before starting a pit-lane survey.");
+            return 0;
+        }
+        TrackDefinition track = activeOrDefaultTrack(context);
+        if (!PitLaneSurveyRuntime.start(player, car, track)) {
+            send(context, "A pit-lane survey is already active.");
+            return 0;
+        }
+        send(context, "Pit-lane survey started. Drive from the pit entry line through the exit line, then finish the survey.");
+        return 1;
+    }
+
+    private static int finishPitLaneSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        PitLaneSurveyRuntime.Finish finish = PitLaneSurveyRuntime.finish(context.getSource().getPlayerOrException());
+        send(context, finish.message() + " (samples=" + finish.samples() + ").");
+        return finish.success() ? finish.samples() : 0;
+    }
+
+    private static int cancelPitLaneSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        boolean cancelled = PitLaneSurveyRuntime.cancel(context.getSource().getPlayerOrException());
+        send(context, cancelled ? "Pit-lane survey cancelled." : "No active pit-lane survey.");
+        return cancelled ? 1 : 0;
+    }
+
+    private static int showPitLaneSurveyStatus(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        Optional<PitLaneSurveyRuntime.Status> recording = PitLaneSurveyRuntime.status(context.getSource().getPlayerOrException());
+        if (recording.isPresent()) {
+            send(context, "Pit-lane survey recording " + recording.get().trackName() + ": samples=" + recording.get().samples() + ".");
+            return recording.get().samples();
+        }
+        TrackDefinition track = activeOrDefaultTrack(context);
+        Optional<PitLaneSurveyData.Route> route = PitLaneSurveyData.get(context.getSource().getLevel()).get(track.trackId());
+        send(context, route.map(value -> "Saved pit-lane survey: samples=" + value.points().size() + ".").orElse("No saved pit-lane survey."));
+        return route.map(value -> value.points().size()).orElse(0);
+    }
+
+    private static int clearPitLaneSurvey(CommandContext<CommandSourceStack> context) {
+        TrackDefinition track = activeOrDefaultTrack(context);
+        boolean cleared = PitLaneSurveyData.get(context.getSource().getLevel()).clear(track.trackId());
+        send(context, cleared ? "Pit-lane survey cleared." : "No saved pit-lane survey.");
+        return cleared ? 1 : 0;
     }
 
     private static int setWheelInputAllowed(CommandContext<CommandSourceStack> context, boolean allowed) {

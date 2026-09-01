@@ -385,8 +385,12 @@
   "container.openwheelracing.flag_light": "Flag Light Configuration",
   "container.openwheelracing.start_light": "Starting Light Configuration",
   "container.openwheelracing.pit_light": "Pit Light Configuration",
-  "screen.openwheelracing.race_light.auto_detect": "Detect sector",
-  "screen.openwheelracing.race_light.flag_status": "Sector %s / mini %s (%s)",
+  "screen.openwheelracing.race_light.auto_detect": "Detect route",
+  "screen.openwheelracing.race_light.flag_status": "Route %sm · %s%% (%s)",
+  "screen.openwheelracing.race_light.unassigned": "No surveyed route nearby",
+  "screen.openwheelracing.race_light.primary": "Use recommended",
+  "screen.openwheelracing.race_light.secondary": "Use alternative",
+  "screen.openwheelracing.race_light.candidate": "Candidate %s: %sm",
   "screen.openwheelracing.race_light.start_order": "Red light order: %s of 5",
   "screen.openwheelracing.race_light.pit_mode": "Pit mode: %s",
   "screen.openwheelracing.race_light.pit.entry": "Entry",
@@ -394,7 +398,7 @@
   "screen.openwheelracing.race_light.pit.weather": "Weather",
   "screen.openwheelracing.race_director.start_lights": "Start lights",
   "screen.openwheelracing.race_director.lights_out": "Lights out",
-  "screen.openwheelracing.race_director.auto_flags": "Auto flags",
+  "screen.openwheelracing.race_director.auto_flags": "Toggle auto yellow",
   "screen.openwheelracing.race_director.sector_yellow": "Y",
   "screen.openwheelracing.race_director.sector_clear": "X"
 }

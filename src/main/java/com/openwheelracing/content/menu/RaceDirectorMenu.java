@@ -9,6 +9,8 @@ import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.content.race.TeamCarRow;
+import com.openwheelracing.content.race.PitLanePenaltyData;
+import com.openwheelracing.content.race.PitLanePenaltyRow;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.TrackMapAutoDetector;
@@ -39,6 +41,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private boolean archiveMode;
     private int lastRaceControlRevision = Integer.MIN_VALUE;
     private int lastLapRecordsRevision = Integer.MIN_VALUE;
+    private int lastPitPenaltyRevision = Integer.MIN_VALUE;
     private int lastMapRevision = Integer.MIN_VALUE;
     private int lastMapScanScannedChunks = -1;
     private int lastMapScanDetectedCells = -1;
@@ -144,6 +147,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         sendTelemetry(serverPlayer, serverLevel);
         OWRRaceControlState controlState = OWRRaceControlState.get(serverLevel);
         OWRLapRecords records = OWRLapRecords.get(serverLevel);
+        PitLanePenaltyData pitPenalties = PitLanePenaltyData.get(serverLevel);
         TrackMapSnapshot map = trackMap(serverLevel);
         var moisture = TrackMoistureTelemetryService.snapshot(serverLevel);
         boolean surfaceDue = lastMoistureSurfaceSendTick == Long.MIN_VALUE
@@ -165,11 +169,13 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             && !mapChanged
             && !scanUpdate
             && controlState.getRevision() == lastRaceControlRevision
-            && records.getRevision() == lastLapRecordsRevision) {
+            && records.getRevision() == lastLapRecordsRevision
+            && pitPenalties.revision() == lastPitPenaltyRevision) {
             return;
         }
         lastRaceControlRevision = controlState.getRevision();
         lastLapRecordsRevision = records.getRevision();
+        lastPitPenaltyRevision = pitPenalties.revision();
         lastMapRevision = map.revision();
         lastMapScanScannedChunks = scanProgress.running() ? scanProgress.scannedChunks() : -1;
         lastMapScanDetectedCells = scanProgress.running() ? scanProgress.detectedCells() : -1;
@@ -215,7 +221,8 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             mapScan.detectedCells(),
             TrackMoistureTelemetryService.snapshot(level),
             laps,
-            senseTeamCars(level)
+            senseTeamCars(level),
+            PitLanePenaltyData.get(level).pending().stream().map(PitLanePenaltyRow::from).toList()
         );
     }
 

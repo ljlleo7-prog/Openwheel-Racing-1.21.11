@@ -78,6 +78,7 @@
 - Correct next inputs during the final two ticks are buffered. Starting earlier interrupts unfinished work and rolls the current operation back by two ticks once per phase; invalid-sequence inputs are rejected without a griefable penalty.
 - The new tyre set is reserved when installation starts. Compound, type, wear, and temperatures apply only when installation completes. The removed tyre set retains its remaining life and returns to the technician after lowering, or drops beside the car if it cannot be returned.
 - Service state persists across chunk/world reloads, and another technician can take over a waiting operation if the original technician disconnects.
+- Any player can deliberately crouch-right-click with an empty hand to perform an emergency jack release. It refunds whichever tyre set is not fitted and lets an empty car be picked up immediately, guaranteeing that no technician UUID or missing tool can deadlock the car.
 
 ## Acceptance Criteria
 

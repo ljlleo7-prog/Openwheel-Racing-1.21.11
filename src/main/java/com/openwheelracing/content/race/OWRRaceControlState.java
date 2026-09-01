@@ -190,7 +190,13 @@ public class OWRRaceControlState extends SavedData {
         return switch (mode) { case ENTRY -> pitEntrySignal; case EXIT -> pitExitSignal; case WEATHER -> pitWeatherSignal; };
     }
     public RaceSignal signalForGlobalFlag() {
-        return switch (globalFlag) { case GREEN -> RaceSignal.GREEN; case YELLOW, SAFETY_CAR, VIRTUAL_SAFETY_CAR -> RaceSignal.YELLOW; case RED -> RaceSignal.RED; };
+        return switch (globalFlag) {
+            case GREEN -> RaceSignal.GREEN;
+            case YELLOW -> RaceSignal.YELLOW;
+            case RED -> RaceSignal.RED;
+            case SAFETY_CAR -> RaceSignal.SAFETY_CAR;
+            case VIRTUAL_SAFETY_CAR -> RaceSignal.VIRTUAL_SAFETY_CAR;
+        };
     }
     private SignalSettings signalSettings() {
         return new SignalSettings(sectorFlags, driverFlags, autoFlagging, startPhase, pitEntrySignal.ordinal(), pitExitSignal.ordinal(), pitWeatherSignal.ordinal());

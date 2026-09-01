@@ -119,6 +119,36 @@
     "facing=west,signal=purple": {
       "model": "openwheelracing:block/starting_light_purple",
       "y": 270
+    },
+    "facing=north,signal=safety_car": {
+      "model": "openwheelracing:block/starting_light_yellow"
+    },
+    "facing=north,signal=virtual_safety_car": {
+      "model": "openwheelracing:block/starting_light_yellow"
+    },
+    "facing=east,signal=safety_car": {
+      "model": "openwheelracing:block/starting_light_yellow",
+      "y": 90
+    },
+    "facing=east,signal=virtual_safety_car": {
+      "model": "openwheelracing:block/starting_light_yellow",
+      "y": 90
+    },
+    "facing=south,signal=safety_car": {
+      "model": "openwheelracing:block/starting_light_yellow",
+      "y": 180
+    },
+    "facing=south,signal=virtual_safety_car": {
+      "model": "openwheelracing:block/starting_light_yellow",
+      "y": 180
+    },
+    "facing=west,signal=safety_car": {
+      "model": "openwheelracing:block/starting_light_yellow",
+      "y": 270
+    },
+    "facing=west,signal=virtual_safety_car": {
+      "model": "openwheelracing:block/starting_light_yellow",
+      "y": 270
     }
   }
 }

@@ -1236,6 +1236,10 @@ public final class OWRNetwork {
             for (TeamCarRow row : snapshot.teamCars()) {
                 TeamCarRow.encode(row, buffer);
             }
+            buffer.writeVarInt(snapshot.pendingPitPenalties().size());
+            for (com.openwheelracing.content.race.PitLanePenaltyRow row : snapshot.pendingPitPenalties()) {
+                com.openwheelracing.content.race.PitLanePenaltyRow.encode(row, buffer);
+            }
         }
 
         private static RaceDirectorSnapshotMessage decode(FriendlyByteBuf buffer) {
@@ -1276,11 +1280,16 @@ public final class OWRNetwork {
             for (int index = 0; index < carCount; index++) {
                 teamCars.add(TeamCarRow.decode(buffer));
             }
+            int penaltyCount = buffer.readVarInt();
+            java.util.ArrayList<com.openwheelracing.content.race.PitLanePenaltyRow> penalties = new java.util.ArrayList<>(penaltyCount);
+            for (int index = 0; index < penaltyCount; index++) {
+                penalties.add(com.openwheelracing.content.race.PitLanePenaltyRow.decode(buffer));
+            }
             return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, autoShiftingAllowed,
                 minimumValidLapTicks, raceLapLimit, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj,
                 maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier,
                 activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, trackMap, trackMapScanRunning,
-                trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, trackMoisture, laps, teamCars));
+                trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, trackMoisture, laps, teamCars, penalties));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {

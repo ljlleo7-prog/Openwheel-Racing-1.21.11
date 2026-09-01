@@ -22,10 +22,13 @@ import com.openwheelracing.content.race.LapTimingScope;
 import com.openwheelracing.content.race.OWRLapProfiles;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.OWRRaceControlState;
+import com.openwheelracing.content.race.PitLanePenaltyData;
+import com.openwheelracing.content.race.PitLaneSpeedMath;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
 import com.openwheelracing.content.track.survey.TrackSurveyData;
+import com.openwheelracing.content.track.survey.PitLaneSurveyData;
 import com.openwheelracing.content.track.TrackGeometry;
 import com.openwheelracing.content.track.PlacedMarkerGateGeometry;
 import com.openwheelracing.network.OWRNetwork;
@@ -431,6 +434,11 @@ public class OpenwheelCarEntity extends Entity {
     private String lockedStartFinishGate = "";
     private double lockedStartFinishPlane = Double.NaN;
     private boolean lockedStartFinishAxisX;
+    private boolean pitLaneTimingActive;
+    private boolean pitLaneSpeedReported;
+    private double pitLaneTimingTicks;
+    private double pitLaneProjectedDistance;
+    private double pitLanePreviousProjection = Double.NaN;
     private long lastLowTyreWarningAt = -200L;
     private long lastDamageWarningAt = -200L;
     private long lastFrontUndersteerWarningAt = -200L;
@@ -2010,6 +2018,17 @@ public class OpenwheelCarEntity extends Entity {
     public InteractionResult interact(Player player, InteractionHand hand) {
         ItemStack heldStack = player.getItemInHand(hand);
         if (isTyreChangeInProgress()) {
+            if (player.isShiftKeyDown() && heldStack.isEmpty()) {
+                if (!level().isClientSide()) {
+                    emergencyReleaseTyreService(player);
+                    if (getPassengers().isEmpty()) {
+                        ItemStack item = createPickupItem();
+                        if (!player.addItem(item)) player.drop(item, false);
+                        discard();
+                    }
+                }
+                return InteractionResult.SUCCESS;
+            }
             if (!level().isClientSide()) handleTyreServiceInteraction(player, heldStack);
             return InteractionResult.SUCCESS;
         }
@@ -2461,6 +2480,35 @@ public class OpenwheelCarEntity extends Entity {
         newTyresReserved = false;
     }
 
+    private void emergencyReleaseTyreService(Player player) {
+        int phase = getTyreServicePhase();
+        boolean installationCompleted = phase == TYRE_PHASE_READY_LOWER || phase == TYRE_PHASE_LOWERING;
+        int tyreReturn = PitTyreServiceTiming.cancellationReturn(installationCompleted, newTyresReserved);
+        if (tyreReturn == PitTyreServiceTiming.RETURN_RESERVED_NEW) {
+            giveOrDropTyres(player, TyreItem.create(pendingTyreCompound,
+                com.openwheelracing.content.car.TyreType.fromId(pendingTyreType), 1, pendingTyreRemaining));
+        } else if (tyreReturn == PitTyreServiceTiming.RETURN_REMOVED_OLD) {
+            giveOrDropTyres(player, TyreItem.create(removedTyreCompound,
+                com.openwheelracing.content.car.TyreType.fromId(removedTyreType), 1, removedTyreRemaining));
+        }
+        entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
+        entityData.set(TYRE_SERVICE_PHASE, TYRE_PHASE_NONE);
+        entityData.set(TYRE_SERVICE_DURATION, 0);
+        entityData.set(PIT_STOP_TICKS, 0);
+        pitCrewPlayerId = null;
+        queuedTyreAction = TYRE_ACTION_NONE;
+        tyrePhaseSetbackApplied = false;
+        newTyresReserved = false;
+        level().playSound(null, getX(), getY(), getZ(), SoundEvents.METAL_PRESSURE_PLATE_CLICK_OFF, SoundSource.PLAYERS, 0.7f, 0.75f);
+        Component released = Component.literal("Emergency jack release — tyre service cancelled");
+        player.displayClientMessage(released, true);
+        messageDriver(released);
+    }
+
+    private void giveOrDropTyres(Player player, ItemStack tyres) {
+        if (!player.addItem(tyres) && level() instanceof ServerLevel serverLevel) spawnAtLocation(serverLevel, tyres);
+    }
+
     private ServerPlayer pitCrewPlayer() {
         return pitCrewPlayerId == null || level().getServer() == null ? null : level().getServer().getPlayerList().getPlayer(pitCrewPlayerId);
     }
@@ -2712,12 +2760,12 @@ public class OpenwheelCarEntity extends Entity {
             currentBox.maxY + offset.y,
             currentBox.maxZ + offset.z
         );
-        PlacedMarkerGateGeometry.Crossing best = null;
+        List<PlacedMarkerGateGeometry.Crossing> crossings = new java.util.ArrayList<>();
         for (PlacedMarkerGateGeometry.Gate gate : PlacedMarkerGateGeometry.merge(markers)) {
             double expansion = gate.type() == PlacedMarkerGateGeometry.MarkerType.START_FINISH
                 ? markerLateralSupport(gate.axis()) + MARKER_GATE_TOLERANCE
                 : 0.0;
-            Optional<PlacedMarkerGateGeometry.Crossing> crossing = PlacedMarkerGateGeometry.earliestCrossing(
+            crossings.addAll(PlacedMarkerGateGeometry.crossings(
                 beforeMove,
                 current,
                 beforeMove.y,
@@ -2726,21 +2774,44 @@ public class OpenwheelCarEntity extends Entity {
                 (currentBox.maxY - currentBox.minY) * 0.5,
                 List.of(gate),
                 expansion
-            );
-            if (crossing.isPresent() && (best == null || crossing.get().crossing().movementT() < best.crossing().movementT())) {
-                best = crossing.get();
+            ));
+        }
+        crossings.sort(java.util.Comparator.comparingDouble(value -> value.crossing().movementT()));
+        for (PlacedMarkerGateGeometry.Crossing crossing : crossings) {
+            Direction facing = gateFacing(crossing.gate());
+            BlockPos markerPosition = gateMarkerPosition(crossing.gate());
+            if (crossing.gate().type() == PlacedMarkerGateGeometry.MarkerType.START_FINISH) {
+                crossStartFinishLine(markerPosition, facing, crossing.crossing().movementT(), crossing.gate().key());
+            } else {
+                crossCheckpoint(markerPosition, facing);
             }
         }
-        if (best == null) {
+    }
+
+    private void repairMissedStartFinishFromSurvey() {
+        Optional<com.openwheelracing.content.race.SurveyRouteLapRepair.Candidate> repair = lapProfileCollector.pollLapRepair();
+        if (repair.isEmpty() || lapStartedAt < 0.0 || lastStartFinishTriggerAt == level().getGameTime()
+            || !(level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        Direction facing = gateFacing(best.gate());
-        BlockPos markerPosition = gateMarkerPosition(best.gate());
-        if (best.gate().type() == PlacedMarkerGateGeometry.MarkerType.START_FINISH) {
-            crossStartFinishLine(markerPosition, facing, best.crossing().movementT(), best.gate().key());
-        } else {
-            crossCheckpoint(markerPosition, facing);
+        // A real marker crossing resets the collector during scanVirtualMarkerLines, so a
+        // candidate can survive until here only when the placed marker was not dispatched.
+        Optional<TrackDefinition> activeTrack = TrackDefinitionsData.get(serverLevel)
+            .activeTrack(serverLevel.dimension().identifier().toString());
+        if (activeTrack.isEmpty() || activeTrack.get().startFinish().isEmpty()) {
+            return;
         }
+        TrackDefinition.StartFinishLine line = activeTrack.get().startFinish().orElseThrow();
+        BlockPos markerPosition = BlockPos.containing(
+            (line.left().x() + line.right().x()) * 0.5,
+            (line.left().y() + line.right().y()) * 0.5,
+            (line.left().z() + line.right().z()) * 0.5
+        );
+        var candidate = repair.orElseThrow();
+        boolean completed = completeLap(markerPosition, level().getGameTime(), candidate.detectedGameTime());
+        startLap(candidate.estimatedCrossingGameTime(), Component.literal(completed
+            ? "Lap timing repaired from surveyed route"
+            : "Lap restarted from surveyed route — cross all checkpoints"));
     }
 
     private double markerLateralSupport(PlacedMarkerGateGeometry.Axis axis) {
@@ -2811,6 +2882,102 @@ public class OpenwheelCarEntity extends Entity {
         if (crossed != null && bestCrossing != null) {
             recordStewardTimingSegment(serverLevel, player, track, segments, crossed, crossedIndex, bestCrossing.movementT());
         }
+    }
+
+    private void tickPitLaneTiming(Vec3 beforeMove) {
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        Optional<TrackDefinition> activeTrack = TrackDefinitionsData.get(serverLevel)
+            .activeTrack(serverLevel.dimension().identifier().toString());
+        if (activeTrack.isEmpty()) return;
+        TrackDefinition track = activeTrack.get();
+        Optional<PitLaneSurveyData.Route> route = PitLaneSurveyData.get(serverLevel).get(track.trackId());
+        if (route.isEmpty() || route.get().points().size() < 2) return;
+
+        Vec3 current = position();
+        Optional<TrackGeometry.LineCrossing> entryCrossing = pitLineCrossing(track, TrackDefinition.StewardLineType.PIT_LIMIT_START, beforeMove, current);
+        Optional<TrackGeometry.LineCrossing> exitCrossing = pitLineCrossing(track, TrackDefinition.StewardLineType.PIT_LIMIT_END, beforeMove, current);
+        boolean crossedEntry = entryCrossing.isPresent();
+        boolean crossedExit = exitCrossing.isPresent();
+        Optional<PitLaneSpeedMath.Projection> projection = PitLaneSpeedMath.project(route.get().points(),
+            new PitLaneSpeedMath.Point(current.x, current.y, current.z));
+
+        boolean newlySpawnedRecovery = tickCount <= 20 && projection.filter(value ->
+            value.horizontalDistance() <= PitLaneSpeedMath.RECOVERY_DISTANCE_METERS && Math.abs(value.verticalDelta()) <= 3.0).isPresent();
+        if (!pitLaneTimingActive && (crossedEntry || newlySpawnedRecovery)) {
+            pitLaneTimingActive = true;
+            pitLaneSpeedReported = false;
+            pitLaneTimingTicks = 0;
+            pitLaneProjectedDistance = 0.0;
+            pitLanePreviousProjection = Double.NaN;
+        }
+        if (!pitLaneTimingActive) return;
+
+        if (projection.isPresent()) {
+            Vec3 movement = current.subtract(beforeMove);
+            double instantKmh = PitLaneSpeedMath.projectedSpeedKmh(projection.get(), movement.x, movement.z);
+            double timingStart = entryCrossing.map(TrackGeometry.LineCrossing::movementT).orElse(0.0);
+            double timingEnd = exitCrossing.map(TrackGeometry.LineCrossing::movementT).orElse(1.0);
+            double timedFraction = Math.max(0.0, timingEnd - timingStart);
+            pitLaneTimingTicks += timedFraction;
+            pitLaneProjectedDistance += instantKmh / 72.0 * timedFraction;
+            double averageKmh = pitLaneTimingTicks <= 0 ? 0.0 : pitLaneProjectedDistance / pitLaneTimingTicks * 72.0;
+            repairMissedStartFinishFromPitRoute(track, route.get(), projection.get().distanceAlong());
+            pitLanePreviousProjection = projection.get().distanceAlong();
+            if (!pitLaneSpeedReported && instantKmh > PitLaneSpeedMath.INSTANT_LIMIT_KMH) {
+                reportPitLaneSpeeding(serverLevel, instantKmh, averageKmh, "instant speed above 85 km/h");
+            }
+            if (crossedExit && !pitLaneSpeedReported && averageKmh > PitLaneSpeedMath.AVERAGE_LIMIT_KMH) {
+                reportPitLaneSpeeding(serverLevel, instantKmh, averageKmh, "average speed above 80 km/h");
+            }
+        }
+        if (crossedExit) {
+            pitLaneTimingActive = false;
+            pitLaneTimingTicks = 0;
+            pitLaneProjectedDistance = 0.0;
+            pitLanePreviousProjection = Double.NaN;
+        }
+    }
+
+    private void repairMissedStartFinishFromPitRoute(TrackDefinition track, PitLaneSurveyData.Route route, double currentProjection) {
+        if (!Double.isFinite(pitLanePreviousProjection) || currentProjection <= pitLanePreviousProjection
+            || lapStartedAt < 0.0 || lastStartFinishTriggerAt == level().getGameTime() || track.startFinish().isEmpty()) return;
+        TrackDefinition.StartFinishLine line = track.startFinish().orElseThrow();
+        Optional<Double> crossingDistance = PitLaneSpeedMath.intersectionDistance(route.points(),
+            new PitLaneSpeedMath.Point(line.left().x(), line.left().y(), line.left().z()),
+            new PitLaneSpeedMath.Point(line.right().x(), line.right().y(), line.right().z()));
+        if (crossingDistance.isEmpty() || pitLanePreviousProjection > crossingDistance.get() || currentProjection < crossingDistance.get()) return;
+        double fraction = (crossingDistance.get() - pitLanePreviousProjection) / (currentProjection - pitLanePreviousProjection);
+        double detectedGameTime = level().getGameTime();
+        double estimatedCrossingGameTime = detectedGameTime - (1.0 - Math.max(0.0, Math.min(1.0, fraction)));
+        BlockPos markerPosition = BlockPos.containing(
+            (line.left().x() + line.right().x()) * 0.5,
+            (line.left().y() + line.right().y()) * 0.5,
+            (line.left().z() + line.right().z()) * 0.5);
+        boolean completed = completeLap(markerPosition, level().getGameTime(), detectedGameTime);
+        startLap(estimatedCrossingGameTime, Component.literal(completed
+            ? "Lap timing repaired from pit-lane survey"
+            : "Lap restarted from pit-lane survey — cross all checkpoints"));
+    }
+
+    private Optional<TrackGeometry.LineCrossing> pitLineCrossing(TrackDefinition track, TrackDefinition.StewardLineType type, Vec3 previous, Vec3 current) {
+        for (TrackDefinition.StewardLine line : track.stewardLines()) {
+            if (line.type() != type) continue;
+            Optional<TrackGeometry.LineCrossing> crossing = TrackGeometry.crossing(previous, current, line);
+            if (crossing.isEmpty()) continue;
+            Vec3 movement = current.subtract(previous);
+            if (movement.x * Math.cos(line.headingRadians()) + movement.z * Math.sin(line.headingRadians()) > 0.0) return crossing;
+        }
+        return Optional.empty();
+    }
+
+    private void reportPitLaneSpeeding(ServerLevel level, double instantKmh, double averageKmh, String reason) {
+        if (!(getControllingPassenger() instanceof ServerPlayer driver)) return;
+        pitLaneSpeedReported = true;
+        PitLanePenaltyData.get(level).report(driver.getUUID(), driver.getScoreboardName(), instantKmh, averageKmh,
+            level.getGameTime(), reason);
+        driver.connection.send(new ClientboundSetTitlesAnimationPacket(5, 45, 10));
+        driver.connection.send(new ClientboundSetTitleTextPacket(Component.literal("SPEEDING IN PIT LANE")));
+        driver.connection.send(new ClientboundSetSubtitleTextPacket(Component.literal("Potential penalty — awaiting Race Director verification")));
     }
 
     private List<TrackDefinition.StewardLine> timingSegments(TrackDefinition track) {
@@ -3922,6 +4089,8 @@ public class OpenwheelCarEntity extends Entity {
             lapProfileCollector.sample(new com.openwheelracing.content.track.survey.SurveyRouteModel.Point(getX(), getY(), getZ()), Math.toRadians(getYRot() + 90.0F), level().getGameTime(), actualMovement.horizontalDistance() * 72.0);
             scanVirtualMarkerLines(beforeMove, actualMovement);
             scanStewardTimingLines(beforeMove, actualMovement);
+            tickPitLaneTiming(beforeMove);
+            repairMissedStartFinishFromSurvey();
         }
 
 
@@ -4005,6 +4174,9 @@ public class OpenwheelCarEntity extends Entity {
 
     private Vec3 moveWithPreemptiveClimb(Vec3 requestedMovement) {
         Vec3 beforeMove = position();
+        if (barrierIntersectsMovement(beforeMove, requestedMovement)) {
+            return stopHorizontalAtEmptyShapeBlock(beforeMove, requestedMovement);
+        }
         Vec3 terrainMovement = terrainFollowingMovement(beforeMove, requestedMovement);
         if (terrainMovement != null) {
             if (emptyShapeBlockIntersectsMovement(beforeMove, terrainMovement)) {
@@ -4021,6 +4193,55 @@ public class OpenwheelCarEntity extends Entity {
         }
         move(MoverType.SELF, requestedMovement);
         return position().subtract(beforeMove);
+    }
+
+    private boolean barrierIntersectsMovement(Vec3 beforeMove, Vec3 movement) {
+        double horizontalDistance = movement.horizontalDistance();
+        if (horizontalDistance < 1.0E-6) {
+            return false;
+        }
+        int samples = Math.max(1, (int) Math.ceil(horizontalDistance / 0.20));
+        Vec3 originOffset = beforeMove.subtract(position());
+        for (int sample = 0; sample <= samples; sample++) {
+            double t = sample / (double) samples;
+            Vec3 offset = originOffset.add(movement.x * t, movement.y * t, movement.z * t);
+            for (CarComponentDefinition definition : COMPONENT_DEFINITIONS) {
+                AABB componentBox = definition.worldBox(this).move(offset).inflate(0.02);
+                if (barrierIntersects(componentBox, beforeMove, movement)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean barrierIntersects(AABB box, Vec3 carPosition, Vec3 movement) {
+        int x0 = (int) Math.floor(box.minX);
+        int x1 = (int) Math.floor(box.maxX - 1.0E-6);
+        int z0 = (int) Math.floor(box.minZ);
+        int z1 = (int) Math.floor(box.maxZ - 1.0E-6);
+        int y0 = (int) Math.floor(box.minY);
+        int y1 = (int) Math.floor(box.maxY - 1.0E-6);
+        for (int y = y0; y <= y1; y++) {
+            for (int x = x0; x <= x1; x++) {
+                for (int z = z0; z <= z1; z++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = level().getBlockState(pos);
+                    if (!state.is(OWRBlocks.BARRIER.get())) {
+                        continue;
+                    }
+                    Vec3 towardBarrier = Vec3.atCenterOf(pos).subtract(carPosition);
+                    if (movement.x * towardBarrier.x + movement.z * towardBarrier.z <= 0.0) {
+                        continue;
+                    }
+                    VoxelShape shape = state.getCollisionShape(level(), pos, CollisionContext.of(this));
+                    if (!shape.isEmpty() && shape.bounds().move(pos).intersects(box)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private Vec3 stopHorizontalAtEmptyShapeBlock(Vec3 beforeMove, Vec3 requestedMovement) {
@@ -4262,19 +4483,29 @@ public class OpenwheelCarEntity extends Entity {
             return;
         }
 
-        AABB sweptBox = sweptBoundingBox(beforeMove).inflate(0.18, 0.08, 0.18);
+        AABB sweptBox = sweptComponentBoundingBox(actualMovement).inflate(0.18, 0.08, 0.18);
+        AABB entitySearchBox = sweptBox.inflate(COMPONENT_BODY_HALF_LENGTH, 0.0, COMPONENT_BODY_HALF_LENGTH);
         Vec3 horizontalMovement = new Vec3(actualMovement.x, 0.0, actualMovement.z);
         long time = level().getGameTime();
         if (lastEntityImpactById.size() > 48) {
             lastEntityImpactById.entrySet().removeIf(entry -> time - entry.getValue() > 200L);
         }
 
-        for (Entity target : level().getEntities(this, sweptBox, this::canImpactEntity)) {
+        for (Entity target : level().getEntities(this, entitySearchBox, this::canImpactEntity)) {
             Long lastImpactAt = lastEntityImpactById.get(target.getId());
             if (lastImpactAt != null && time - lastImpactAt < ENTITY_IMPACT_COOLDOWN_TICKS) {
                 continue;
             }
-            if (!target.getBoundingBox().inflate(0.08).intersects(sweptBox)) {
+            ComponentContact componentContact = null;
+            if (target instanceof OpenwheelCarEntity otherCar) {
+                if (!componentBoundingBox(otherCar).intersects(sweptBox)) {
+                    continue;
+                }
+                componentContact = firstComponentContact(otherCar, actualMovement);
+                if (componentContact == null) {
+                    continue;
+                }
+            } else if (!target.getBoundingBox().inflate(0.08).intersects(sweptBox)) {
                 continue;
             }
 
@@ -4290,16 +4521,19 @@ public class OpenwheelCarEntity extends Entity {
             playCollisionSound((float) Math.max(0.6, resolvedSpeed * (carTarget ? 18.0 : 12.0)), carTarget);
             float carSeverity = (float) Math.max(0.0, (resolvedSpeed - ENTITY_IMPACT_SOFT_SPEED) * (carTarget ? ENTITY_IMPACT_OTHER_CAR_DAMAGE : ENTITY_IMPACT_CAR_DAMAGE));
             if (carSeverity > 0.0f) {
-                addComponentDamage(classifyEntityImpactComponent(target, horizontalMovement), carSeverity);
+                addComponentDamage(componentContact == null
+                    ? classifyEntityImpactComponent(target, horizontalMovement)
+                    : componentContact.ownComponent(), carSeverity);
                 playImpactFeedback(carSeverity);
             }
 
             if (target instanceof OpenwheelCarEntity otherCar) {
                 float otherSeverity = (float) Math.max(0.0, (resolvedSpeed - ENTITY_IMPACT_SOFT_SPEED) * ENTITY_IMPACT_OTHER_CAR_DAMAGE);
                 if (otherSeverity > 0.0f) {
-                    otherCar.addComponentDamage(otherCar.classifyEntityImpactComponent(this, normal.scale(-resolvedSpeed)), otherSeverity);
+                    otherCar.addComponentDamage(componentContact.otherComponent(), otherSeverity);
                     otherCar.playImpactFeedback(otherSeverity);
                 }
+                otherCar.lastEntityImpactById.put(getId(), time);
             } else if (target instanceof LivingEntity livingEntity) {
                 float targetDamage = (float) Math.max(1.0, (resolvedSpeed - ENTITY_IMPACT_MIN_SPEED) * ENTITY_IMPACT_LIVING_DAMAGE);
                 livingEntity.hurtServer(serverLevel, damageSources().flyIntoWall(), targetDamage);
@@ -4311,6 +4545,47 @@ public class OpenwheelCarEntity extends Entity {
                 return;
             }
         }
+    }
+
+    private ComponentContact firstComponentContact(OpenwheelCarEntity otherCar, Vec3 actualMovement) {
+        ComponentContact best = null;
+        for (CarComponentDefinition own : damageableComponentDefinitions()) {
+            ModularCollisionGeometry.Rectangle ownCurrent = own.worldRectangle(this);
+            ModularCollisionGeometry.Rectangle ownStart = new ModularCollisionGeometry.Rectangle(
+                ownCurrent.centerX() - actualMovement.x, ownCurrent.centerZ() - actualMovement.z,
+                ownCurrent.rightX(), ownCurrent.rightZ(), ownCurrent.forwardX(), ownCurrent.forwardZ(),
+                ownCurrent.halfWidth(), ownCurrent.halfLength());
+            for (CarComponentDefinition other : otherCar.damageableComponentDefinitions()) {
+                double time = ModularCollisionGeometry.firstContactTime(
+                    ownStart, actualMovement.x, actualMovement.z, other.worldRectangle(otherCar));
+                if (!Double.isFinite(time)) {
+                    continue;
+                }
+                double priority = componentPriority(own.component) + componentPriority(other.component);
+                if (best == null || time < best.time() - 1.0E-7
+                        || Math.abs(time - best.time()) <= 1.0E-7 && priority < best.priority()) {
+                    best = new ComponentContact(own.component, other.component, time, priority);
+                }
+            }
+        }
+        return best;
+    }
+
+    private AABB sweptComponentBoundingBox(Vec3 movement) {
+        AABB current = componentBoundingBox(this);
+        return current.minmax(current.move(-movement.x, -movement.y, -movement.z));
+    }
+
+    private static AABB componentBoundingBox(OpenwheelCarEntity car) {
+        AABB result = COMPONENT_DEFINITIONS_WITH_ENGINE[0].worldBox(car);
+        for (int i = 1; i < COMPONENT_DEFINITIONS_WITH_ENGINE.length; i++) {
+            result = result.minmax(COMPONENT_DEFINITIONS_WITH_ENGINE[i].worldBox(car));
+        }
+        return result;
+    }
+
+    private record ComponentContact(CarDamageComponent ownComponent, CarDamageComponent otherComponent,
+                                    double time, double priority) {
     }
 
     private boolean canImpactEntity(Entity entity) {
@@ -4465,7 +4740,10 @@ public class OpenwheelCarEntity extends Entity {
     private Vec3 nearbyBarrierNormal() {
         Vec3 normal = Vec3.ZERO;
         Vec3 carCenter = position();
-        for (BlockPos pos : BlockPos.betweenClosed(blockPosition().offset(-1, 0, -1), blockPosition().offset(1, 2, 1))) {
+        AABB searchBox = componentBoundingBox(this).inflate(0.35, 0.25, 0.35);
+        BlockPos min = BlockPos.containing(searchBox.minX, searchBox.minY, searchBox.minZ);
+        BlockPos max = BlockPos.containing(searchBox.maxX, searchBox.maxY, searchBox.maxZ);
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
             if (level().getBlockState(pos).is(OWRBlocks.BARRIER.get())) {
                 Vec3 away = carCenter.subtract(Vec3.atCenterOf(pos));
                 away = new Vec3(away.x, 0.0, away.z);
@@ -5373,6 +5651,14 @@ public class OpenwheelCarEntity extends Entity {
             Vec3 forward = Vec3.directionFromRotation(0.0f, car.getYRot());
             Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
             return car.position().add(right.scale(localX)).add(forward.scale(localZ)).add(0.0, COMPONENT_BOX_CENTER_Y, 0.0);
+        }
+
+        private ModularCollisionGeometry.Rectangle worldRectangle(OpenwheelCarEntity car) {
+            Vec3 center = worldCenter(car);
+            Vec3 forward = Vec3.directionFromRotation(0.0f, car.getYRot());
+            Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
+            return new ModularCollisionGeometry.Rectangle(center.x, center.z,
+                right.x, right.z, forward.x, forward.z, halfWidth, halfLength);
         }
     }
 
