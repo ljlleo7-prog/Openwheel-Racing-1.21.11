@@ -115,6 +115,7 @@ public final class OpenwheelRacing {
         }
         OWRNetwork.sendRankingBoard(serverPlayer, level);
         OWRNetwork.sendRaceFlag(serverPlayer, level, false);
+        OWRNetwork.sendVehiclePhysicsPreset(serverPlayer);
         LiveRaceTimingService.sendCurrent(serverPlayer);
         OWRNetwork.sendSurveyRouteOverlay(serverPlayer, false, "", new java.util.UUID(0L, 0L), "", false, null);
         OWRNetwork.syncVisibleLiveries(serverPlayer);

@@ -1,6 +1,7 @@
 package com.openwheelracing.client.sound;
 
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
+import com.openwheelracing.content.entity.VehiclePhysicsPresetState;
 import com.openwheelracing.registry.OWRSoundEvents;
 import net.minecraft.client.resources.sounds.AbstractTickableSoundInstance;
 import net.minecraft.sounds.SoundSource;
@@ -91,8 +92,18 @@ final class CarTyreSoundInstance extends AbstractTickableSoundInstance {
         float slip = car.getTyreSlipIntensity();
         float speed = Mth.clamp(car.getSpeedKmh() / 45.0f, 0.0f, 1.0f);
         float distance = (float) listenerPosition.distanceTo(position);
-        volume = slip <= 0.03f ? 0.0f : wheel.volumeMultiplier * Mth.clamp((slip - 0.03f) / 0.97f, 0.0f, 1.0f) * (0.25f + speed * 0.75f) * CarSoundPhysics.attenuation(distance);
-        pitch = CarSoundPhysics.doppler(Mth.clamp(1.55f + slip * 0.65f + wheel.pitchOffset, 1.3f, 2.0f), position, previousSourcePosition, listenerPosition);
+        if (!VehiclePhysicsPresetState.clientPreset().isDynamic()) {
+            volume = slip <= 0.03f ? 0.0f : wheel.volumeMultiplier * Mth.clamp((slip - 0.03f) / 0.97f, 0.0f, 1.0f) * (0.25f + speed * 0.75f) * CarSoundPhysics.attenuation(distance);
+            pitch = CarSoundPhysics.doppler(Mth.clamp(1.55f + slip * 0.65f + wheel.pitchOffset, 1.3f, 2.0f), position, previousSourcePosition, listenerPosition);
+            return;
+        }
+        float kineticScrubSpeed = Math.max(0.0f,
+            wheel.scrubSpeed(car) - (float) com.openwheelracing.content.entity.VehiclePhysics.KINETIC_SCRUB_SPEED_THRESHOLD);
+        float scrub = Mth.clamp(kineticScrubSpeed / 18.0f, 0.0f, 1.0f);
+        float audibleSlip = Math.max(slip, scrub);
+        float soundSpeed = Math.max(speed, scrub);
+        volume = audibleSlip <= 0.03f ? 0.0f : wheel.volumeMultiplier * Mth.clamp((audibleSlip - 0.03f) / 0.97f, 0.0f, 1.0f) * (0.25f + soundSpeed * 0.75f) * CarSoundPhysics.attenuation(distance);
+        pitch = CarSoundPhysics.doppler(Mth.clamp(1.35f + audibleSlip * 0.65f + wheel.pitchOffset, 1.3f, 2.0f), position, previousSourcePosition, listenerPosition);
     }
 
     private enum Wheel {
@@ -111,6 +122,15 @@ final class CarTyreSoundInstance extends AbstractTickableSoundInstance {
             this.lengthOffset = lengthOffset;
             this.volumeMultiplier = volumeMultiplier;
             this.pitchOffset = pitchOffset;
+        }
+
+        private float scrubSpeed(OpenwheelCarEntity car) {
+            return switch (this) {
+                case FRONT_LEFT -> car.getTyreScrubSpeedFlMetersPerSecond();
+                case FRONT_RIGHT -> car.getTyreScrubSpeedFrMetersPerSecond();
+                case REAR_LEFT -> car.getTyreScrubSpeedRlMetersPerSecond();
+                case REAR_RIGHT -> car.getTyreScrubSpeedRrMetersPerSecond();
+            };
         }
     }
 }

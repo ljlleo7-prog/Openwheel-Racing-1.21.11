@@ -28,6 +28,30 @@ public final class TrackVehicleDryingModel {
         return Math.min(0.95, Math.max(0.0, chance));
     }
 
+    public static double dynamicDryingChance(int moistureLevel, TyreType tyreType,
+                                             double tyreTemperatureC,
+                                             double contactSpeedMetersPerSecond,
+                                             double scrubSpeedMetersPerSecond) {
+        int moisture = Math.max(0, Math.min(3, moistureLevel));
+        double temperature = clamp01((tyreTemperatureC - 20.0) / 100.0);
+        double contactSpeed = Math.max(0.0, contactSpeedMetersPerSecond);
+        double scrubSpeed = Math.max(0.0, scrubSpeedMetersPerSecond);
+        double distanceFactor = clamp01(contactSpeed / 70.0);
+        if (distanceFactor <= 0.0) return 0.0;
+
+        double temperatureMultiplier = 0.75 + 1.10 * temperature;
+        double scrubMultiplier = 1.0 + 2.50 * clamp01(scrubSpeed / 25.0);
+        double contactChance = MOISTURE_BASE_CHANCE[moisture]
+            * TYRE_TYPE_MULTIPLIER[tyreType.id()]
+            * temperatureMultiplier
+            * distanceFactor
+            * scrubMultiplier;
+        double boiling = smoothstep(clamp01((tyreTemperatureC - 90.0) / 15.0));
+        double boilingChance = 0.95 * distanceFactor;
+        double chance = contactChance + (boilingChance - contactChance) * boiling;
+        return Math.min(0.95, Math.max(0.0, chance));
+    }
+
     private static double clamp01(double value) {
         return Math.max(0.0, Math.min(1.0, value));
     }

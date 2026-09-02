@@ -24,6 +24,7 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 public final class RaceAutoFlagService {
     static final double TRACK_CONTACT_HORIZONTAL = 7.0;
     static final double TRACK_CONTACT_VERTICAL = 4.0;
+    static final double NEAR_TRACK_HAZARD_HORIZONTAL = 16.0;
     static final double MAX_DEPARTURE_RANGE = 64.0;
     static final double PREDICTION_TICKS = 20.0;
     static final int TRACK_STOPPED_TICKS = 20;
@@ -74,7 +75,7 @@ public final class RaceAutoFlagService {
 
     private static Hazard evaluate(ServerLevel level, OpenwheelCarEntity car, SurveyRouteModel route, CarState state) {
         SurveyRouteGeometry.Candidate current = nearestPhysical(route, car.position());
-        boolean touchingTrack = isTrackContact(current);
+        boolean touchingTrack = isTrackContact(current) && hasClearPath(level, car, projectedPosition(current));
         boolean stopped = car.getSpeedKmh() < 3.0F;
         if (car.getSpeedKmh() >= 15.0F) state.hasMovedAtSpeed = true;
 
@@ -97,6 +98,11 @@ public final class RaceAutoFlagService {
                     && (current == null || predicted.horizontalDistance() + 2.0 < current.horizontalDistance())) {
                 return new Hazard(predicted.distanceAlongRoute(), route.length(), HazardReason.PREDICTED_TRACK_ENTRY);
             }
+        }
+
+        if (state.hasMovedAtSpeed && stopped && state.stoppedTicks >= RUNOFF_STOPPED_TICKS
+                && isNearTrack(current) && hasClearPath(level, car, projectedPosition(current))) {
+            return new Hazard(current.distanceAlongRoute(), route.length(), HazardReason.STOPPED_NEAR_TRACK);
         }
 
         if (state.hasMovedAtSpeed && state.hasAnchor && state.stoppedTicks >= RUNOFF_STOPPED_TICKS
@@ -129,8 +135,18 @@ public final class RaceAutoFlagService {
     }
 
     private static boolean isTrackContact(SurveyRouteGeometry.Candidate candidate) {
-        return candidate != null && candidate.horizontalDistance() <= TRACK_CONTACT_HORIZONTAL
-            && Math.abs(candidate.verticalDelta()) <= TRACK_CONTACT_VERTICAL;
+        return candidate != null && RaceAutoFlagLogic.isWithinRouteEnvelope(candidate.horizontalDistance(), candidate.verticalDelta(),
+            TRACK_CONTACT_HORIZONTAL, TRACK_CONTACT_VERTICAL);
+    }
+
+    private static boolean isNearTrack(SurveyRouteGeometry.Candidate candidate) {
+        return candidate != null && RaceAutoFlagLogic.isWithinRouteEnvelope(candidate.horizontalDistance(), candidate.verticalDelta(),
+            NEAR_TRACK_HAZARD_HORIZONTAL, TRACK_CONTACT_VERTICAL);
+    }
+
+    private static Vec3 projectedPosition(SurveyRouteGeometry.Candidate candidate) {
+        SurveyRouteModel.Point position = candidate.projectedPosition();
+        return new Vec3(position.x(), position.y(), position.z());
     }
 
     /** Resolves whether a route-assigned light is upstream of any current automatic hazard. */
@@ -176,7 +192,7 @@ public final class RaceAutoFlagService {
         START_DUE.clear();
     }
 
-    enum HazardReason { TRACK_OBSTRUCTION, PREDICTED_TRACK_ENTRY, STRANDED_AFTER_DEPARTURE }
+    enum HazardReason { TRACK_OBSTRUCTION, PREDICTED_TRACK_ENTRY, STOPPED_NEAR_TRACK, STRANDED_AFTER_DEPARTURE }
     record Hazard(double routeDistance, double routeLength, HazardReason reason) { }
     private record RouteContext(SurveyRouteModel route) { }
     private static final class CarState {

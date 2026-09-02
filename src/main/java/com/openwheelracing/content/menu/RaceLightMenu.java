@@ -31,7 +31,7 @@ public class RaceLightMenu extends AbstractContainerMenu {
         this.light = light;
         this.access = light != null && light.getLevel() != null ? ContainerLevelAccess.create(light.getLevel(), light.getBlockPos()) : ContainerLevelAccess.NULL;
         this.data = data;
-        checkContainerDataCount(data, 9);
+        checkContainerDataCount(data, 10);
         addDataSlots(data);
     }
     private static ContainerData serverData(RaceLightBlockEntity light) {
@@ -46,14 +46,15 @@ public class RaceLightMenu extends AbstractContainerMenu {
                 case 6 -> light.isManualRouteChoice() ? 1 : 0;
                 case 7 -> light.getStartOrder();
                 case 8 -> light.getPitMode().ordinal();
+                case 9 -> light.getRouteDetectionRange();
                 default -> 0;
             }; }
             public void set(int i, int value) { }
-            public int getCount() { return 9; }
+            public int getCount() { return 10; }
         };
     }
     private static ContainerData clientData(Inventory inventory, BlockPos pos) {
-        SimpleContainerData data = new SimpleContainerData(9);
+        SimpleContainerData data = new SimpleContainerData(10);
         if (inventory.player.level().getBlockEntity(pos) instanceof RaceLightBlockEntity light) {
             data.set(0, light.getLightType().ordinal());
             data.set(1, light.hasRouteAssignment() ? 1 : 0);
@@ -64,6 +65,7 @@ public class RaceLightMenu extends AbstractContainerMenu {
             data.set(6, light.isManualRouteChoice() ? 1 : 0);
             data.set(7, light.getStartOrder());
             data.set(8, light.getPitMode().ordinal());
+            data.set(9, light.getRouteDetectionRange());
         }
         return data;
     }
@@ -77,11 +79,13 @@ public class RaceLightMenu extends AbstractContainerMenu {
     public boolean hasSecondaryRouteCandidate() { return data.get(3) >= 0; }
     public int getStartOrder() { return data.get(7); }
     public PitLightMode getPitMode() { return PitLightMode.fromOrdinal(data.get(8)); }
+    public int getRouteDetectionRange() { return data.get(9); }
     @Override public boolean clickMenuButton(Player player, int button) {
         if (light == null) return false;
         if (button == 0) light.autoDetectSector();
         else if (button == 1) light.chooseRouteCandidate(false); else if (button == 2) light.chooseRouteCandidate(true);
         else if (button == 5) light.setStartOrder(light.getStartOrder() - 1); else if (button == 6) light.setStartOrder(light.getStartOrder() + 1);
+        else if (button >= 100 && button <= 100 + RaceLightBlockEntity.MAX_ROUTE_DETECTION_RANGE) light.setRouteDetectionRange(button - 100);
         else if (button >= 10 && button <= 12) light.setPitMode(PitLightMode.fromOrdinal(button - 10)); else return false;
         broadcastChanges(); return true;
     }

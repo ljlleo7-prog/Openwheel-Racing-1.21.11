@@ -56,4 +56,30 @@ class PitLaneSpeedMathTest {
 
         assertEquals(8.0, distance, 1.0E-9);
     }
+
+    @Test
+    void predictsEntryArrivalFromHorizontalDirectionalSpeed() {
+        PitLaneSpeedMath.Approach approach = PitLaneSpeedMath.entryApproach(ROUTE,
+            new PitLaneSpeedMath.Point(-40.0, 50.0, 25.0), 1.0, 0.0).orElseThrow();
+
+        assertEquals(2.0, approach.secondsToEntry(), 1.0E-9);
+        assertEquals(72.0, approach.projectedSpeedKmh(), 1.0E-9);
+    }
+
+    @Test
+    void doesNotPredictEntryWhenMovingAway() {
+        assertTrue(PitLaneSpeedMath.entryApproach(ROUTE,
+            new PitLaneSpeedMath.Point(-10.0, 0.0, 0.0), -1.0, 0.0).isEmpty());
+    }
+
+    @Test
+    void threeSecondVisibilityBoundaryUsesDirectionalProjection() {
+        PitLaneSpeedMath.Approach atBoundary = PitLaneSpeedMath.entryApproach(ROUTE,
+            new PitLaneSpeedMath.Point(-60.0, 100.0, 100.0), 1.0, 0.0).orElseThrow();
+        PitLaneSpeedMath.Approach outside = PitLaneSpeedMath.entryApproach(ROUTE,
+            new PitLaneSpeedMath.Point(-61.0, -100.0, -100.0), 1.0, 0.0).orElseThrow();
+
+        assertEquals(3.0, atBoundary.secondsToEntry(), 1.0E-9);
+        assertTrue(outside.secondsToEntry() > 3.0);
+    }
 }

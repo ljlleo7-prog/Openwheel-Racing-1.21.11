@@ -39,4 +39,25 @@ class TrackVehicleDryingModelTest {
         double chance = TrackVehicleDryingModel.dryingChance(2, TyreType.SLICK, 105.0, 120.0, 0.0);
         assertTrue(chance >= 0.94, "hot contact chance=" + chance);
     }
+
+    @Test
+    void dynamicStationaryTyreCannotDryTrackFromTemperatureAlone() {
+        double chance = TrackVehicleDryingModel.dynamicDryingChance(
+            1, TyreType.SLICK, 200.0, 0.0, 0.0);
+
+        assertTrue(chance == 0.0, "stationary chance=" + chance);
+    }
+
+    @Test
+    void dynamicDryingScalesWithDistanceAndWheelspin() {
+        double slowRolling = TrackVehicleDryingModel.dynamicDryingChance(
+            2, TyreType.INTERMEDIATE, 80.0, 10.0, 0.0);
+        double fastRolling = TrackVehicleDryingModel.dynamicDryingChance(
+            2, TyreType.INTERMEDIATE, 80.0, 40.0, 0.0);
+        double fastSpinning = TrackVehicleDryingModel.dynamicDryingChance(
+            2, TyreType.INTERMEDIATE, 80.0, 40.0, 25.0);
+
+        assertTrue(fastRolling > slowRolling * 3.5);
+        assertTrue(fastSpinning > fastRolling * 3.0);
+    }
 }

@@ -37,4 +37,20 @@ class WheelSpeedSynchronizationTest {
         assertTrue(VehiclePhysics.wheelSpeedSynchronization(
             -10.0 / 0.33, 0.33, 30.0).directionMismatch());
     }
+
+    @Test
+    void wheelspinReportingIsNotCappedAtTwoHundredPercent() {
+        VehiclePhysics.WheelSpeedSynchronization sync = VehiclePhysics.wheelSpeedSynchronization(
+            120.0 / 0.33, 0.33, 30.0);
+
+        assertEquals(3.0, sync.relativeDifference(), 1.0E-12);
+    }
+
+    @Test
+    void classicWheelspinReportingRetainsTwoHundredPercentCap() {
+        VehiclePhysics.WheelSpeedSynchronization sync = VehiclePhysics.wheelSpeedSynchronization(
+            120.0 / 0.33, 0.33, 30.0, true);
+
+        assertEquals(2.0, sync.relativeDifference(), 1.0E-12);
+    }
 }

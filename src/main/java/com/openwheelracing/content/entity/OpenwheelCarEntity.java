@@ -29,6 +29,7 @@ import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
 import com.openwheelracing.content.track.survey.TrackSurveyData;
 import com.openwheelracing.content.track.survey.PitLaneSurveyData;
+import com.openwheelracing.content.track.survey.PitLaneSurveyRuntime;
 import com.openwheelracing.content.track.TrackGeometry;
 import com.openwheelracing.content.track.PlacedMarkerGateGeometry;
 import com.openwheelracing.network.OWRNetwork;
@@ -100,6 +101,10 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Float> TYRE_WEAR_RL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_WEAR_RR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_SLIP = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_SCRUB_SPEED_FL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_SCRUB_SPEED_FR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_SCRUB_SPEED_RL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> TYRE_SCRUB_SPEED_RR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_TEMPERATURE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_TEMPERATURE_FL = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> TYRE_TEMPERATURE_FR = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
@@ -117,6 +122,10 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Boolean> CHECKPOINT_ARMED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Integer> PIT_STOP_TICKS = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> PIT_SERVICE_KIND = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Boolean> PIT_LANE_ACTIVE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> PIT_LANE_HUD_VISIBLE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Float> PIT_LANE_AVERAGE_SPEED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> PIT_LANE_PROJECTED_SPEED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Integer> TYRE_SERVICE_PHASE = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> TYRE_SERVICE_DURATION = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> ABS_ENABLED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
@@ -439,6 +448,7 @@ public class OpenwheelCarEntity extends Entity {
     private double pitLaneTimingTicks;
     private double pitLaneProjectedDistance;
     private double pitLanePreviousProjection = Double.NaN;
+    private int pitLaneHudLingerTicks;
     private long lastLowTyreWarningAt = -200L;
     private long lastDamageWarningAt = -200L;
     private long lastFrontUndersteerWarningAt = -200L;
@@ -791,6 +801,10 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(TYRE_WEAR_RL, 0.0f);
         builder.define(TYRE_WEAR_RR, 0.0f);
         builder.define(TYRE_SLIP, 0.0f);
+        builder.define(TYRE_SCRUB_SPEED_FL, 0.0f);
+        builder.define(TYRE_SCRUB_SPEED_FR, 0.0f);
+        builder.define(TYRE_SCRUB_SPEED_RL, 0.0f);
+        builder.define(TYRE_SCRUB_SPEED_RR, 0.0f);
         builder.define(TYRE_TEMPERATURE, (float) TYRE_INITIAL_TEMPERATURE_C);
         builder.define(TYRE_TEMPERATURE_FL, (float) TYRE_INITIAL_TEMPERATURE_C);
         builder.define(TYRE_TEMPERATURE_FR, (float) TYRE_INITIAL_TEMPERATURE_C);
@@ -808,6 +822,10 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(CHECKPOINT_ARMED, false);
         builder.define(PIT_STOP_TICKS, 0);
         builder.define(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
+        builder.define(PIT_LANE_ACTIVE, false);
+        builder.define(PIT_LANE_HUD_VISIBLE, false);
+        builder.define(PIT_LANE_AVERAGE_SPEED, 0.0f);
+        builder.define(PIT_LANE_PROJECTED_SPEED, 0.0f);
         builder.define(TYRE_SERVICE_PHASE, TYRE_PHASE_NONE);
         builder.define(TYRE_SERVICE_DURATION, 0);
         builder.define(ABS_ENABLED, false);
@@ -1037,6 +1055,11 @@ public class OpenwheelCarEntity extends Entity {
         return entityData.get(SPEED);
     }
 
+    public boolean isPitLaneTimingActive() { return entityData.get(PIT_LANE_ACTIVE); }
+    public boolean isPitLaneHudVisible() { return entityData.get(PIT_LANE_HUD_VISIBLE); }
+    public float getPitLaneAverageSpeedKmh() { return entityData.get(PIT_LANE_AVERAGE_SPEED); }
+    public float getPitLaneProjectedSpeedKmh() { return entityData.get(PIT_LANE_PROJECTED_SPEED); }
+
     public float getDamagePercent() {
         return entityData.get(DAMAGE);
     }
@@ -1132,6 +1155,11 @@ public class OpenwheelCarEntity extends Entity {
     public float getTyreSlipIntensity() {
         return entityData.get(TYRE_SLIP);
     }
+
+    public float getTyreScrubSpeedFlMetersPerSecond() { return entityData.get(TYRE_SCRUB_SPEED_FL); }
+    public float getTyreScrubSpeedFrMetersPerSecond() { return entityData.get(TYRE_SCRUB_SPEED_FR); }
+    public float getTyreScrubSpeedRlMetersPerSecond() { return entityData.get(TYRE_SCRUB_SPEED_RL); }
+    public float getTyreScrubSpeedRrMetersPerSecond() { return entityData.get(TYRE_SCRUB_SPEED_RR); }
 
     public float getTyreTemperatureCelsius() {
         return (getTyreTemperatureFlCelsius() + getTyreTemperatureFrCelsius() + getTyreTemperatureRlCelsius() + getTyreTemperatureRrCelsius()) * 0.25f;
@@ -2888,18 +2916,30 @@ public class OpenwheelCarEntity extends Entity {
         if (!(level() instanceof ServerLevel serverLevel)) return;
         Optional<TrackDefinition> activeTrack = TrackDefinitionsData.get(serverLevel)
             .activeTrack(serverLevel.dimension().identifier().toString());
-        if (activeTrack.isEmpty()) return;
+        if (activeTrack.isEmpty()) {
+            entityData.set(PIT_LANE_ACTIVE, false);
+            entityData.set(PIT_LANE_HUD_VISIBLE, false);
+            return;
+        }
         TrackDefinition track = activeTrack.get();
-        Optional<PitLaneSurveyData.Route> route = PitLaneSurveyData.get(serverLevel).get(track.trackId());
-        if (route.isEmpty() || route.get().points().size() < 2) return;
-
         Vec3 current = position();
         Optional<TrackGeometry.LineCrossing> entryCrossing = pitLineCrossing(track, TrackDefinition.StewardLineType.PIT_LIMIT_START, beforeMove, current);
         Optional<TrackGeometry.LineCrossing> exitCrossing = pitLineCrossing(track, TrackDefinition.StewardLineType.PIT_LIMIT_END, beforeMove, current);
+        if (entryCrossing.isPresent()) PitLaneSurveyRuntime.onEntry(this);
+        if (exitCrossing.isPresent()) PitLaneSurveyRuntime.onExit(this);
+        Optional<PitLaneSurveyData.Route> route = PitLaneSurveyData.get(serverLevel).get(track.trackId());
+        if (route.isEmpty() || route.get().points().size() < 2) {
+            entityData.set(PIT_LANE_ACTIVE, false);
+            entityData.set(PIT_LANE_HUD_VISIBLE, false);
+            entityData.set(PIT_LANE_AVERAGE_SPEED, 0.0f);
+            entityData.set(PIT_LANE_PROJECTED_SPEED, 0.0f);
+            return;
+        }
         boolean crossedEntry = entryCrossing.isPresent();
         boolean crossedExit = exitCrossing.isPresent();
         Optional<PitLaneSpeedMath.Projection> projection = PitLaneSpeedMath.project(route.get().points(),
             new PitLaneSpeedMath.Point(current.x, current.y, current.z));
+        Vec3 movement = current.subtract(beforeMove);
 
         boolean newlySpawnedRecovery = tickCount <= 20 && projection.filter(value ->
             value.horizontalDistance() <= PitLaneSpeedMath.RECOVERY_DISTANCE_METERS && Math.abs(value.verticalDelta()) <= 3.0).isPresent();
@@ -2909,11 +2949,32 @@ public class OpenwheelCarEntity extends Entity {
             pitLaneTimingTicks = 0;
             pitLaneProjectedDistance = 0.0;
             pitLanePreviousProjection = Double.NaN;
+            entityData.set(PIT_LANE_ACTIVE, true);
+            entityData.set(PIT_LANE_HUD_VISIBLE, true);
+            pitLaneHudLingerTicks = 0;
         }
-        if (!pitLaneTimingActive) return;
+        if (!pitLaneTimingActive) {
+            Optional<PitLaneSpeedMath.Approach> approach = PitLaneSpeedMath.entryApproach(route.get().points(),
+                new PitLaneSpeedMath.Point(current.x, current.y, current.z), movement.x, movement.z)
+                .filter(value -> value.secondsToEntry() <= 3.0);
+            if (approach.isPresent()) {
+                entityData.set(PIT_LANE_HUD_VISIBLE, true);
+                entityData.set(PIT_LANE_ACTIVE, false);
+                entityData.set(PIT_LANE_AVERAGE_SPEED, 0.0f);
+                entityData.set(PIT_LANE_PROJECTED_SPEED, (float) approach.get().projectedSpeedKmh());
+            } else if (pitLaneHudLingerTicks > 0) {
+                pitLaneHudLingerTicks--;
+                entityData.set(PIT_LANE_HUD_VISIBLE, true);
+                entityData.set(PIT_LANE_ACTIVE, false);
+            } else {
+                entityData.set(PIT_LANE_HUD_VISIBLE, false);
+                entityData.set(PIT_LANE_AVERAGE_SPEED, 0.0f);
+                entityData.set(PIT_LANE_PROJECTED_SPEED, 0.0f);
+            }
+            return;
+        }
 
         if (projection.isPresent()) {
-            Vec3 movement = current.subtract(beforeMove);
             double instantKmh = PitLaneSpeedMath.projectedSpeedKmh(projection.get(), movement.x, movement.z);
             double timingStart = entryCrossing.map(TrackGeometry.LineCrossing::movementT).orElse(0.0);
             double timingEnd = exitCrossing.map(TrackGeometry.LineCrossing::movementT).orElse(1.0);
@@ -2921,6 +2982,8 @@ public class OpenwheelCarEntity extends Entity {
             pitLaneTimingTicks += timedFraction;
             pitLaneProjectedDistance += instantKmh / 72.0 * timedFraction;
             double averageKmh = pitLaneTimingTicks <= 0 ? 0.0 : pitLaneProjectedDistance / pitLaneTimingTicks * 72.0;
+            entityData.set(PIT_LANE_PROJECTED_SPEED, (float) instantKmh);
+            entityData.set(PIT_LANE_AVERAGE_SPEED, (float) averageKmh);
             repairMissedStartFinishFromPitRoute(track, route.get(), projection.get().distanceAlong());
             pitLanePreviousProjection = projection.get().distanceAlong();
             if (!pitLaneSpeedReported && instantKmh > PitLaneSpeedMath.INSTANT_LIMIT_KMH) {
@@ -2935,6 +2998,9 @@ public class OpenwheelCarEntity extends Entity {
             pitLaneTimingTicks = 0;
             pitLaneProjectedDistance = 0.0;
             pitLanePreviousProjection = Double.NaN;
+            entityData.set(PIT_LANE_ACTIVE, false);
+            entityData.set(PIT_LANE_HUD_VISIBLE, true);
+            pitLaneHudLingerTicks = 60;
         }
     }
 
@@ -2963,9 +3029,9 @@ public class OpenwheelCarEntity extends Entity {
         for (TrackDefinition.StewardLine line : track.stewardLines()) {
             if (line.type() != type) continue;
             Optional<TrackGeometry.LineCrossing> crossing = TrackGeometry.crossing(previous, current, line);
-            if (crossing.isEmpty()) continue;
-            Vec3 movement = current.subtract(previous);
-            if (movement.x * Math.cos(line.headingRadians()) + movement.z * Math.sin(line.headingRadians()) > 0.0) return crossing;
+            // PIT_LIMIT_START and PIT_LIMIT_END already encode the transition meaning.
+            // Do not reject legacy lines whose add-here heading was stored 180 degrees reversed.
+            if (crossing.isPresent()) return crossing;
         }
         return Optional.empty();
     }
@@ -3276,6 +3342,10 @@ public class OpenwheelCarEntity extends Entity {
             rearDrivelineSpeedBlocksPerTick(actualMovement.horizontalDistance()),
             getGear(), gearTopSpeed(getGear(), setup), 0.0, false, false));
         entityData.set(TYRE_SLIP, 0.0f);
+        entityData.set(TYRE_SCRUB_SPEED_FL, 0.0f);
+        entityData.set(TYRE_SCRUB_SPEED_FR, 0.0f);
+        entityData.set(TYRE_SCRUB_SPEED_RL, 0.0f);
+        entityData.set(TYRE_SCRUB_SPEED_RR, 0.0f);
         previousHorizontalSpeed = requestedMovement.horizontalDistance();
     }
 
@@ -3283,6 +3353,7 @@ public class OpenwheelCarEntity extends Entity {
                               boolean steeringAngleProvided, boolean debugMovement) {
 
         VehicleProfile profile = vehicleProfile();
+        boolean dynamicPhysics = VehiclePhysicsPresetState.current(level()).isDynamic();
         double carMassKg = profile.massKg();
         double wheelbase = profile.wheelbase();
         double trackWidth = profile.trackWidth();
@@ -3508,6 +3579,10 @@ public class OpenwheelCarEntity extends Entity {
         double finalDragForce = 0.0;
         double finalFrontSaturation = 0.0;
         double finalRearSaturation = 0.0;
+        double finalFlScrubSpeed = 0.0;
+        double finalFrScrubSpeed = 0.0;
+        double finalRlScrubSpeed = 0.0;
+        double finalRrScrubSpeed = 0.0;
         double cdACoefficient = setup.cdACoefficient();
         double clACoefficient = setup.clACoefficient();
         double tyreMuCoefficient = setup.tyreMuCoefficient();
@@ -3743,17 +3818,17 @@ public class OpenwheelCarEntity extends Entity {
                 double baseTractionTarget = Math.sqrt(Math.max(0.0,
                     square(Math.max(VehiclePhysics.BASE_GRIP_ENVELOPE, speedAdjustedTractionEnvelope)) - square(rearLatUse)));
                 rlLongRequest = VehiclePhysics.tractionControlledDriveRequest(
-                    rlLongRequest, rlLongLimit * baseTractionTarget, 1.0);
+                    rlLongRequest, rlLongLimit * baseTractionTarget, 1.0, dynamicPhysics);
                 rrLongRequest = VehiclePhysics.tractionControlledDriveRequest(
-                    rrLongRequest, rrLongLimit * baseTractionTarget, 1.0);
+                    rrLongRequest, rrLongLimit * baseTractionTarget, 1.0, dynamicPhysics);
             }
             if (keyboardSteering && isTractionControlEnabled()) {
                 double configuredTractionTarget = Math.sqrt(Math.max(0.0,
                     square(speedAdjustedTractionEnvelope) - square(rearLatUse)));
                 rlLongRequest = VehiclePhysics.tractionControlledDriveRequest(
-                    rlLongRequest, rlLongLimit * configuredTractionTarget, speedAdjustedTractionStrength);
+                    rlLongRequest, rlLongLimit * configuredTractionTarget, speedAdjustedTractionStrength, dynamicPhysics);
                 rrLongRequest = VehiclePhysics.tractionControlledDriveRequest(
-                    rrLongRequest, rrLongLimit * configuredTractionTarget, speedAdjustedTractionStrength);
+                    rrLongRequest, rrLongLimit * configuredTractionTarget, speedAdjustedTractionStrength, dynamicPhysics);
             }
             WheelForces flForces = calculateWheelForces(
                 -halfTrackWidth, frontAxleDistance, steeringAngle - FRONT_TOE_OUT,
@@ -3765,7 +3840,7 @@ public class OpenwheelCarEntity extends Entity {
                 VehiclePhysics.gripEnvelopeForInputSource(keyboardSteering,
                     brakeFront > 0.0 ? activeAbsEnvelope : VehiclePhysics.BASE_GRIP_ENVELOPE),
                 brakeFront > 0.0, steeringReleased,
-                relaxedFlLatForce, wheelAngularSpeedFl, wheelAngularSpeedsInitialized);
+                relaxedFlLatForce, wheelAngularSpeedFl, wheelAngularSpeedsInitialized, dynamicPhysics);
             WheelForces frForces = calculateWheelForces(
                 halfTrackWidth, frontAxleDistance, steeringAngle + FRONT_TOE_OUT,
                 velocityLong, velocityLat, yawRate,
@@ -3776,7 +3851,7 @@ public class OpenwheelCarEntity extends Entity {
                 VehiclePhysics.gripEnvelopeForInputSource(keyboardSteering,
                     brakeFront > 0.0 ? activeAbsEnvelope : VehiclePhysics.BASE_GRIP_ENVELOPE),
                 brakeFront > 0.0, steeringReleased,
-                relaxedFrLatForce, wheelAngularSpeedFr, wheelAngularSpeedsInitialized);
+                relaxedFrLatForce, wheelAngularSpeedFr, wheelAngularSpeedsInitialized, dynamicPhysics);
             WheelForces rlForces = calculateWheelForces(
                 -halfTrackWidth, -rearAxleDistance, REAR_TOE_IN,
                 velocityLong, velocityLat, yawRate,
@@ -3789,7 +3864,7 @@ public class OpenwheelCarEntity extends Entity {
                     brake > 0.0 ? activeAbsEnvelope
                         : rearForceEnvelope),
                 brakeRear > 0.0, steeringReleased,
-                relaxedRlLatForce, wheelAngularSpeedRl, wheelAngularSpeedsInitialized);
+                relaxedRlLatForce, wheelAngularSpeedRl, wheelAngularSpeedsInitialized, dynamicPhysics);
             WheelForces rrForces = calculateWheelForces(
                 halfTrackWidth, -rearAxleDistance, -REAR_TOE_IN,
                 velocityLong, velocityLat, yawRate,
@@ -3802,7 +3877,7 @@ public class OpenwheelCarEntity extends Entity {
                     brake > 0.0 ? activeAbsEnvelope
                         : rearForceEnvelope),
                 brakeRear > 0.0, steeringReleased,
-                relaxedRrLatForce, wheelAngularSpeedRr, wheelAngularSpeedsInitialized);
+                relaxedRrLatForce, wheelAngularSpeedRr, wheelAngularSpeedsInitialized, dynamicPhysics);
             relaxedFlLatForce = flForces.relaxedLateralForce();
             relaxedFrLatForce = frForces.relaxedLateralForce();
             relaxedRlLatForce = rlForces.relaxedLateralForce();
@@ -3886,6 +3961,10 @@ public class OpenwheelCarEntity extends Entity {
             finalFrSlipAngle = frForces.slipAngle();
             finalRlSlipAngle = rlForces.slipAngle();
             finalRrSlipAngle = rrForces.slipAngle();
+            finalFlScrubSpeed = Math.abs(wheelAngularSpeedFl * WHEEL_RADIUS_METERS - flForces.patchLongitudinalSpeed());
+            finalFrScrubSpeed = Math.abs(wheelAngularSpeedFr * WHEEL_RADIUS_METERS - frForces.patchLongitudinalSpeed());
+            finalRlScrubSpeed = Math.abs(wheelAngularSpeedRl * WHEEL_RADIUS_METERS - rlForces.patchLongitudinalSpeed());
+            finalRrScrubSpeed = Math.abs(wheelAngularSpeedRr * WHEEL_RADIUS_METERS - rrForces.patchLongitudinalSpeed());
             debugFlPatchLongitudinalSpeed = flForces.patchLongitudinalSpeed();
             debugFrPatchLongitudinalSpeed = frForces.patchLongitudinalSpeed();
             debugRlPatchLongitudinalSpeed = rlForces.patchLongitudinalSpeed();
@@ -4028,12 +4107,14 @@ public class OpenwheelCarEntity extends Entity {
                 brakeFrontBias,
                 maxBrakeForce,
                 requestedNegativeErsEnergyJoules / PHYSICS_DT,
-                new WheelWearSample(finalFlDemand, finalFlSlipAngle, finalFlLongForce, finalFlLatForce, finalFlLoad),
-                new WheelWearSample(finalFrDemand, finalFrSlipAngle, finalFrLongForce, finalFrLatForce, finalFrLoad),
-                new WheelWearSample(finalRlDemand, finalRlSlipAngle, finalRlLongForce, finalRlLatForce, finalRlLoad),
-                new WheelWearSample(finalRrDemand, finalRrSlipAngle, finalRrLongForce, finalRrLatForce, finalRrLoad)
+                new WheelWearSample(finalFlDemand, finalFlSlipAngle, finalFlLongForce, finalFlLatForce, finalFlLoad, dynamicPhysics ? finalFlScrubSpeed : 0.0),
+                new WheelWearSample(finalFrDemand, finalFrSlipAngle, finalFrLongForce, finalFrLatForce, finalFrLoad, dynamicPhysics ? finalFrScrubSpeed : 0.0),
+                new WheelWearSample(finalRlDemand, finalRlSlipAngle, finalRlLongForce, finalRlLatForce, finalRlLoad, dynamicPhysics ? finalRlScrubSpeed : 0.0),
+                new WheelWearSample(finalRrDemand, finalRrSlipAngle, finalRrLongForce, finalRrLatForce, finalRrLoad, dynamicPhysics ? finalRrScrubSpeed : 0.0)
             );
-            evaporateWheelContactWater(flContact, frContact, rlContact, rrContact, speedMetersPerSecond, tyreSlip);
+            evaporateWheelContactWater(flContact, frContact, rlContact, rrContact,
+                speedMetersPerSecond, tyreSlip, dynamicPhysics,
+                finalFlScrubSpeed, finalFrScrubSpeed, finalRlScrubSpeed, finalRrScrubSpeed);
         }
 
         forward = Vec3.directionFromRotation(0.0f, getYRot());
@@ -4106,12 +4187,29 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(RPM, rpm);
         harvestErsFromBraking(horizontalSpeed, newSpeed, brake, surface);
         entityData.set(TYRE_SLIP, (float) Math.max(0.0, Math.min(1.0, tyreSlip)));
+        entityData.set(TYRE_SCRUB_SPEED_FL, dynamicPhysics ? (float) finalFlScrubSpeed : 0.0f);
+        entityData.set(TYRE_SCRUB_SPEED_FR, dynamicPhysics ? (float) finalFrScrubSpeed : 0.0f);
+        entityData.set(TYRE_SCRUB_SPEED_RL, dynamicPhysics ? (float) finalRlScrubSpeed : 0.0f);
+        entityData.set(TYRE_SCRUB_SPEED_RR, dynamicPhysics ? (float) finalRrScrubSpeed : 0.0f);
         previousHorizontalSpeed = horizontalSpeed;
     }
 
     private void evaporateWheelContactWater(Vec3 fl, Vec3 fr, Vec3 rl, Vec3 rr,
-                                            double speedMetersPerSecond, double slip) {
+                                            double speedMetersPerSecond, double slip,
+                                            boolean dynamicPhysics,
+                                            double flScrubSpeed, double frScrubSpeed,
+                                            double rlScrubSpeed, double rrScrubSpeed) {
         if (!(level() instanceof ServerLevel serverLevel)) return;
+        if (dynamicPhysics) {
+            evaporateDynamicWheelContactWater(serverLevel,
+                new Vec3[] {rl, rr, fl, fr},
+                new double[] {tyreTemperatureRlC, tyreTemperatureRrC, tyreTemperatureFlC, tyreTemperatureFrC},
+                new double[] {rlScrubSpeed, rrScrubSpeed, flScrubSpeed, frScrubSpeed},
+                new double[] {wheelAngularSpeedRl, wheelAngularSpeedRr, wheelAngularSpeedFl, wheelAngularSpeedFr},
+                new double[] {debugRlPatchLongitudinalSpeed, debugRrPatchLongitudinalSpeed,
+                    debugFlPatchLongitudinalSpeed, debugFrPatchLongitudinalSpeed});
+            return;
+        }
         Vec3[] contacts = {fl, fr, rl, rr};
         double[] temperatures = {tyreTemperatureFlC, tyreTemperatureFrC, tyreTemperatureRlC, tyreTemperatureRrC};
         long first = Long.MIN_VALUE;
@@ -4128,6 +4226,27 @@ public class OpenwheelCarEntity extends Entity {
                 moisture.level(), getTyreType(), temperatures[i], speedMetersPerSecond * 3.6, slip);
             if (serverLevel.random.nextDouble() < dryingChance
                     && com.openwheelracing.content.block.TrackDryingBudget.dryOneStage(serverLevel, pos)) accepted++;
+        }
+    }
+
+    private void evaporateDynamicWheelContactWater(ServerLevel serverLevel, Vec3[] contacts,
+                                                    double[] temperatures, double[] scrubSpeeds,
+                                                    double[] angularSpeeds, double[] patchSpeeds) {
+        java.util.Set<Long> visited = new java.util.HashSet<>();
+        for (int i = 0; i < contacts.length; i++) {
+            BlockPos pos = BlockPos.containing(
+                contacts[i].x, getBoundingBox().minY - 0.05, contacts[i].z);
+            if (!visited.add(pos.asLong())) continue;
+            com.openwheelracing.content.block.TrackMoisture moisture =
+                com.openwheelracing.content.block.WettableTrack.moisture(serverLevel.getBlockState(pos));
+            if (moisture == com.openwheelracing.content.block.TrackMoisture.DRY) continue;
+            double wheelSurfaceSpeed = Math.abs(angularSpeeds[i] * WHEEL_RADIUS_METERS);
+            double effectiveContactSpeed = Math.max(wheelSurfaceSpeed, Math.abs(patchSpeeds[i]));
+            double dryingChance = com.openwheelracing.content.block.TrackVehicleDryingModel.dynamicDryingChance(
+                moisture.level(), getTyreType(), temperatures[i], effectiveContactSpeed, scrubSpeeds[i]);
+            if (serverLevel.random.nextDouble() < dryingChance) {
+                com.openwheelracing.content.block.TrackDryingBudget.dryOneStage(serverLevel, pos);
+            }
         }
     }
 
@@ -5197,7 +5316,7 @@ public class OpenwheelCarEntity extends Entity {
             double longitudinalLimit, double lateralLimit,
             double relaxationLength, double dt, double carSpeed,
             double forceEnvelope, boolean braking, boolean steeringReleased, double previousRelaxedLateralForce,
-            double previousWheelAngularSpeed, boolean wheelAngularSpeedInitialized) {
+            double previousWheelAngularSpeed, boolean wheelAngularSpeedInitialized, boolean dynamicPhysics) {
         VehiclePhysics.WheelPatchVelocity patchVelocity = VehiclePhysics.wheelPatchVelocity(
             velocityLong, velocityLat, yawRate, localX, localZ, steerAngle);
         double wheelLongVelocity = patchVelocity.longitudinal();
@@ -5208,19 +5327,21 @@ public class OpenwheelCarEntity extends Entity {
         double wheelAngularSpeed = wheelAngularSpeedInitialized
             ? previousWheelAngularSpeed
             : wheelLongVelocity / WHEEL_RADIUS_METERS;
-        double targetLongitudinalSlip = longitudinalSlipRatio(
-            longitudinalRequest, longitudinalStiffness, longitudinalLimit);
         double slipReferenceSpeed = Math.max(3.0, Math.abs(wheelLongVelocity));
-        double targetWheelAngularSpeed = (wheelLongVelocity + targetLongitudinalSlip * slipReferenceSpeed)
-            / WHEEL_RADIUS_METERS;
-        if (braking) {
-            targetWheelAngularSpeed = VehiclePhysics.brakingWheelAngularTarget(
-                wheelLongVelocity, WHEEL_RADIUS_METERS, slipReferenceSpeed, Math.abs(targetLongitudinalSlip));
+        if (!dynamicPhysics || braking) {
+            double targetLongitudinalSlip = longitudinalSlipRatio(
+                longitudinalRequest, longitudinalStiffness, longitudinalLimit);
+            double targetWheelAngularSpeed = (wheelLongVelocity + targetLongitudinalSlip * slipReferenceSpeed)
+                / WHEEL_RADIUS_METERS;
+            if (braking) {
+                targetWheelAngularSpeed = VehiclePhysics.brakingWheelAngularTarget(
+                    wheelLongVelocity, WHEEL_RADIUS_METERS, slipReferenceSpeed, Math.abs(targetLongitudinalSlip));
+            }
+            double wheelResponseTime = WHEEL_ROTATIONAL_INERTIA * slipReferenceSpeed
+                / Math.max(1.0, longitudinalStiffness * WHEEL_RADIUS_METERS * WHEEL_RADIUS_METERS);
+            double wheelResponseGain = 1.0 - Math.exp(-dt / Math.max(0.005, wheelResponseTime));
+            wheelAngularSpeed += (targetWheelAngularSpeed - wheelAngularSpeed) * wheelResponseGain;
         }
-        double wheelResponseTime = WHEEL_ROTATIONAL_INERTIA * slipReferenceSpeed
-            / Math.max(1.0, longitudinalStiffness * WHEEL_RADIUS_METERS * WHEEL_RADIUS_METERS);
-        double wheelResponseGain = 1.0 - Math.exp(-dt / Math.max(0.005, wheelResponseTime));
-        wheelAngularSpeed += (targetWheelAngularSpeed - wheelAngularSpeed) * wheelResponseGain;
         double longitudinalSlip = VehiclePhysics.kinematicLongitudinalSlip(
             wheelAngularSpeed, WHEEL_RADIUS_METERS, wheelLongVelocity);
         double longitudinalForce = pacejkaLongitudinalForce(longitudinalSlip, longitudinalStiffness, longitudinalLimit);
@@ -5238,6 +5359,11 @@ public class OpenwheelCarEntity extends Entity {
         longitudinalForce = VehiclePhysics.softCombinedLongitudinalLimit(
             longitudinalForce, relaxedLateralForce, longitudinalLimit, lateralLimit, 1.0, forceEnvelope);
         TyreForces combined = applyCombinedSlip(longitudinalForce, relaxedLateralForce, longitudinalLimit, lateralLimit);
+        if (dynamicPhysics && !braking) {
+            wheelAngularSpeed = VehiclePhysics.drivenWheelAngularSpeed(
+                wheelAngularSpeed, longitudinalRequest, combined.longitudinal(),
+                wheelLongVelocity, WHEEL_RADIUS_METERS, WHEEL_ROTATIONAL_INERTIA, dt);
+        }
         VehiclePhysics.PlanarForce bodyForce = VehiclePhysics.wheelForceToBody(
             combined.longitudinal(), combined.lateral(), steerAngle);
         double bodyLongitudinalForce = bodyForce.longitudinal();
@@ -5271,7 +5397,8 @@ public class OpenwheelCarEntity extends Entity {
     private record WheelForces(double bodyLongitudinalForce, double bodyLateralForce, double demand, double slipAngle,
                                double relaxedLateralForce, double yawMoment, double wheelAngularSpeed,
                                double patchLongitudinalSpeed) {}
-    private record WheelWearSample(double demand, double slipAngle, double longitudinalForce, double lateralForce, double normalLoad) {}
+    private record WheelWearSample(double demand, double slipAngle, double longitudinalForce, double lateralForce,
+                                   double normalLoad, double longitudinalScrubSpeed) {}
     private record WheelThermalUpdate(double surfaceTemperatureC, double carcassTemperatureC, double slipExposure) {}
 
     private static double combinedSlipDemand(double longitudinalForce, double lateralForce, double longitudinalLimit, double lateralLimit) {
@@ -5813,7 +5940,9 @@ public class OpenwheelCarEntity extends Entity {
         double lateralNearSaturation = wheelLateralNearSaturation(sample);
         double nearSaturationHeat = Math.abs(sample.lateralForce) * lateralNearSaturation * lateralNearSaturation * speedMetersPerSecond * 0.55 * compoundNearSaturationHeatGain * VehiclePhysics.TYRE_SLIP_HEAT_FRACTION * WetTyrePhysics.loadHeatMultiplier(moisture);
         double slipHeat = VehiclePhysics.tyreSlipHeatPowerWatts(sample.longitudinalForce, sample.lateralForce, sample.normalLoad, speedMetersPerSecond, sample.demand, sample.slipAngle) * WetTyrePhysics.scrubHeatMultiplier(moisture);
-        return rollingHeat + nearSaturationHeat + slipHeat;
+        double longitudinalScrubHeat = VehiclePhysics.tyreLongitudinalScrubHeatPowerWatts(
+            sample.longitudinalForce, sample.longitudinalScrubSpeed) * WetTyrePhysics.scrubHeatMultiplier(moisture);
+        return rollingHeat + nearSaturationHeat + slipHeat + longitudinalScrubHeat;
     }
 
     private static double wheelCoolingDelta(double temperatureC, double speedMetersPerSecond, double surfaceCoolingMultiplier, double stationaryCoolingMultiplier, double windCoolingMultiplier) {

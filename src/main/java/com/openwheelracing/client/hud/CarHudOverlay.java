@@ -5,6 +5,7 @@ import com.openwheelracing.client.map.CircuitMapRenderer;
 import com.openwheelracing.client.map.ClientTrackMapCache;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.entity.VehiclePhysics;
+import com.openwheelracing.content.entity.VehiclePhysicsPresetState;
 import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.RaceFlagMode;
 import com.openwheelracing.content.race.timing.RaceGap;
@@ -41,6 +42,7 @@ public final class CarHudOverlay {
         if (settings.showDrivingHud) {
             renderGlobalFlagMarker(graphics);
             renderLapDeltaBar(graphics, font);
+            renderPitLaneTiming(graphics, font, car);
             renderLiveTiming(graphics, font, car);
             renderPrimaryHud(graphics, font, car);
             renderCarStatus(graphics, font, car);
@@ -161,6 +163,27 @@ public final class CarHudOverlay {
         if (!flash.isBlank()) {
             graphics.drawString(font, flash, (graphics.guiWidth() - font.width(flash)) / 2, y + 30, 0xFFFFFFFF, true);
         }
+    }
+
+    private static void renderPitLaneTiming(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {
+        if (!car.isPitLaneHudVisible()) return;
+        int center = graphics.guiWidth() / 2;
+        int y = 52;
+        int spacing = 68;
+        float average = car.getPitLaneAverageSpeedKmh();
+        float current = car.getPitLaneProjectedSpeedKmh();
+        boolean inPit = car.isPitLaneTimingActive();
+        int averageColor = average <= 0.0f ? 0xFF66717D : average <= 80.0f ? 0xFF45D483 : average <= 85.0f ? 0xFFFFD34E : 0xFFFF5C5C;
+        int currentColor = current <= 80.0f ? 0xFF45D483 : current <= 85.0f ? 0xFFFFD34E : 0xFFFF5C5C;
+        int statusColor = inPit ? 0xFF58A6FF : 0xFF66717D;
+        drawPitValue(graphics, font, average > 0.0f ? Integer.toString(Math.round(average)) : "--", "AVG", center - spacing, y, averageColor);
+        drawPitValue(graphics, font, Integer.toString(Math.round(current)), "CUR", center, y, currentColor);
+        drawPitValue(graphics, font, inPit ? "IN PIT" : "OUT", "STAT", center + spacing, y, statusColor);
+    }
+
+    private static void drawPitValue(GuiGraphics graphics, Font font, String value, String label, int centerX, int y, int color) {
+        drawScaledText(graphics, font, value, centerX, y, value.length() > 4 ? 1.30f : 1.65f, color, true);
+        graphics.drawString(font, label, centerX - font.width(label) / 2, y + 17, 0xFF9AA6B2, true);
     }
 
     private static void renderPrimaryHud(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {
@@ -625,7 +648,8 @@ public final class CarHudOverlay {
                                            int x, int y, int width, double referenceSpeed,
                                            double angularSpeed, double patchSpeed) {
         VehiclePhysics.WheelSpeedSynchronization sync = VehiclePhysics.wheelSpeedSynchronization(
-            angularSpeed, VehiclePhysics.NOMINAL_WHEEL_RADIUS_METERS, patchSpeed);
+            angularSpeed, VehiclePhysics.NOMINAL_WHEEL_RADIUS_METERS, patchSpeed,
+            !VehiclePhysicsPresetState.clientPreset().isDynamic());
         int barX = x + 16;
         int barWidth = width - 16;
         int roadFill = (int) Math.round(barWidth * Math.min(1.0, Math.abs(sync.patchSpeed()) / referenceSpeed));

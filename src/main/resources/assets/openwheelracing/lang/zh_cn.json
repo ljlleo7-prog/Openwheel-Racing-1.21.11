@@ -386,6 +386,7 @@
   "container.openwheelracing.start_light": "发车灯配置",
   "container.openwheelracing.pit_light": "维修区信号灯配置",
   "screen.openwheelracing.race_light.auto_detect": "检测路线",
+  "screen.openwheelracing.race_light.detection_range": "检测范围：%s 格",
   "screen.openwheelracing.race_light.flag_status": "路线 %s米 · %s%%（%s）",
   "screen.openwheelracing.race_light.unassigned": "附近没有勘测路线",
   "screen.openwheelracing.race_light.primary": "使用推荐位置",

@@ -2,6 +2,8 @@ package com.openwheelracing.network;
 
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.entity.VehiclePhysics;
+import com.openwheelracing.content.entity.VehiclePhysicsPreset;
+import com.openwheelracing.content.entity.VehiclePhysicsPresetState;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.car.PrototypeCarSetup;
@@ -62,7 +64,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "15";
+    private static final String PROTOCOL = "16";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -126,6 +128,7 @@ public final class OWRNetwork {
         registrar.playToClient(LiveLapDeltaHudMessage.TYPE, codec(LiveLapDeltaHudMessage::encode, LiveLapDeltaHudMessage::decode), LiveLapDeltaHudMessage::handle);
         registrar.playToClient(MonitorTelemetryMessage.TYPE, codec(MonitorTelemetryMessage::encode, MonitorTelemetryMessage::decode), MonitorTelemetryMessage::handle);
         registrar.playToClient(LiveRaceTimingSnapshotMessage.TYPE, codec(LiveRaceTimingSnapshotMessage::encode, LiveRaceTimingSnapshotMessage::decode), LiveRaceTimingSnapshotMessage::handle);
+        registrar.playToClient(VehiclePhysicsPresetMessage.TYPE, codec(VehiclePhysicsPresetMessage::encode, VehiclePhysicsPresetMessage::decode), VehiclePhysicsPresetMessage::handle);
     }
 
     public static void sendDriveInputAck(ServerPlayer player, OpenwheelCarEntity car) {
@@ -976,6 +979,20 @@ public final class OWRNetwork {
 
     public static void sendCommandFeedback(ServerPlayer player, String message) {
         PacketDistributor.sendToPlayer(player, new CommandFeedbackMessage(message));
+    }
+
+    public static void sendVehiclePhysicsPreset(ServerPlayer player) {
+        VehiclePhysicsPreset preset = VehiclePhysicsPresetState.get(
+            ((ServerLevel) player.level()).getServer()).preset();
+        PacketDistributor.sendToPlayer(player, new VehiclePhysicsPresetMessage(preset.ordinal()));
+    }
+
+    public static void broadcastVehiclePhysicsPreset(net.minecraft.server.MinecraftServer server) {
+        VehiclePhysicsPresetMessage message = new VehiclePhysicsPresetMessage(
+            VehiclePhysicsPresetState.get(server).preset().ordinal());
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            PacketDistributor.sendToPlayer(player, message);
+        }
     }
 
     public static void sendStewardLineOverlay(ServerPlayer player, boolean visible, TrackDefinition track, int revision) {
@@ -2097,6 +2114,33 @@ public final class OWRNetwork {
 
         private static void handle(CommandFeedbackMessage message, IPayloadContext context) {
             context.enqueueWork(() -> applyCommandFeedback(message));
+        }
+    }
+
+    public record VehiclePhysicsPresetMessage(int preset) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<VehiclePhysicsPresetMessage> TYPE = payloadType("vehicle_physics_preset_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(VehiclePhysicsPresetMessage message, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(message.preset);
+        }
+
+        private static VehiclePhysicsPresetMessage decode(FriendlyByteBuf buffer) {
+            return new VehiclePhysicsPresetMessage(buffer.readVarInt());
+        }
+
+        private static void handle(VehiclePhysicsPresetMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                VehiclePhysicsPreset[] values = VehiclePhysicsPreset.values();
+                VehiclePhysicsPreset preset = message.preset >= 0 && message.preset < values.length
+                    ? values[message.preset]
+                    : VehiclePhysicsPreset.DYNAMIC;
+                VehiclePhysicsPresetState.setClientPreset(preset);
+            });
         }
     }
 

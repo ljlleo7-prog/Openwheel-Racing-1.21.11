@@ -12,6 +12,16 @@ class TyreThermalModelTest {
     private static final double ROLLING_RESISTANCE = 0.014;
 
     @Test
+    void freeSpinningTyreHeatEqualsReactionForceTimesScrubSpeed() {
+        assertEquals(1_500.0 * (8.0 - VehiclePhysics.KINETIC_SCRUB_SPEED_THRESHOLD),
+            VehiclePhysics.tyreLongitudinalScrubHeatPowerWatts(1_500.0, 8.0), 1.0E-12);
+        assertEquals(1_500.0 * (8.0 - VehiclePhysics.KINETIC_SCRUB_SPEED_THRESHOLD),
+            VehiclePhysics.tyreLongitudinalScrubHeatPowerWatts(-1_500.0, -8.0), 1.0E-12);
+        assertEquals(0.0,
+            VehiclePhysics.tyreLongitudinalScrubHeatPowerWatts(1_500.0, 0.5), 1.0E-12);
+    }
+
+    @Test
     void dynamicAmbientControlsCoolingFloor() {
         double rainyCooling = VehiclePhysics.tyreCoolingDeltaC(40.0, 30.0, 1.0, 20.0);
         double sunnyCooling = VehiclePhysics.tyreCoolingDeltaC(40.0, 30.0, 1.0, 36.0);

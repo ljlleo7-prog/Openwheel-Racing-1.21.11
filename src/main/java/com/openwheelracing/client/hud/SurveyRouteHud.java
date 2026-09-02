@@ -20,7 +20,10 @@ public final class SurveyRouteHud {
             int warningX = (graphics.guiWidth() - mc.font.width(warning)) / 2;
             graphics.drawString(mc.font, warning, warningX, 28, 0xFFFF3030, true);
         }
-        String title = SurveyRouteOverlay.recording() ? "SURVEY REC " : SurveyRouteOverlay.nodeCount() == 0 ? "SURVEY ARMED " : "SURVEY ";
+        boolean pitSurvey = SurveyRouteOverlay.trackName().startsWith("PIT ");
+        String title = SurveyRouteOverlay.recording() ? (pitSurvey ? "PIT SURVEY REC " : "SURVEY REC ")
+            : pitSurvey && SurveyRouteOverlay.rawCount() > 0 ? "PIT SURVEY SAVED "
+            : SurveyRouteOverlay.nodeCount() == 0 ? "SURVEY ARMED " : "SURVEY ";
         graphics.drawString(mc.font, title + SurveyRouteOverlay.trackName(), 8, y, 0xFFFFFFFF, true);
         y += 11;
         graphics.drawString(mc.font, "raw=" + SurveyRouteOverlay.rawCount() + " nodes=" + SurveyRouteOverlay.nodeCount() + " length=" + Math.round(SurveyRouteOverlay.length()) + "m", 8, y, 0xFFB8C2CC, true);

@@ -26,4 +26,11 @@ class RaceAutoFlagServiceTest {
 
         assertTrue(landedOnNewBranch < oldBranchAcrossGap);
     }
+
+    @Test
+    void nearRouteEnvelopeIncludesNearbyStoppedCarButHonorsVerticalLimit() {
+        assertTrue(RaceAutoFlagLogic.isWithinRouteEnvelope(12.0, 2.0, 16.0, 4.0));
+        assertFalse(RaceAutoFlagLogic.isWithinRouteEnvelope(17.0, 2.0, 16.0, 4.0));
+        assertFalse(RaceAutoFlagLogic.isWithinRouteEnvelope(12.0, 5.0, 16.0, 4.0));
+    }
 }

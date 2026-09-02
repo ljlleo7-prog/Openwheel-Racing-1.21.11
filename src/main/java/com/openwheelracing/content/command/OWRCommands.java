@@ -28,6 +28,8 @@ import com.openwheelracing.content.track.survey.TrackSurveyData;
 import com.openwheelracing.content.track.survey.PitLaneSurveyData;
 import com.openwheelracing.content.track.survey.PitLaneSurveyRuntime;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
+import com.openwheelracing.content.entity.VehiclePhysicsPreset;
+import com.openwheelracing.content.entity.VehiclePhysicsPresetState;
 import com.openwheelracing.registry.OWREntities;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -68,6 +70,14 @@ public final class OWRCommands {
                         .executes(context -> setWheelInputAllowed(context, false)))
                     .then(Commands.literal("status")
                         .executes(OWRCommands::showWheelInputStatus))))
+            .then(Commands.literal("physics")
+                .then(Commands.literal("preset")
+                    .then(Commands.literal("classic")
+                        .executes(context -> setVehiclePhysicsPreset(context, VehiclePhysicsPreset.CLASSIC)))
+                    .then(Commands.literal("dynamic")
+                        .executes(context -> setVehiclePhysicsPreset(context, VehiclePhysicsPreset.DYNAMIC)))
+                    .then(Commands.literal("status")
+                        .executes(OWRCommands::showVehiclePhysicsPreset))))
             .then(Commands.literal("race")
                 .then(Commands.literal("timing")
                     .then(Commands.literal("resume").executes(OWRCommands::resumeRaceTiming))
@@ -221,6 +231,23 @@ public final class OWRCommands {
                 .then(Commands.literal("ai")
                     .then(Commands.literal("generate")
                         .executes(OWRCommands::generateAiLine)))));
+    }
+
+    private static int setVehiclePhysicsPreset(CommandContext<CommandSourceStack> context,
+                                               VehiclePhysicsPreset preset) {
+        VehiclePhysicsPresetState state = VehiclePhysicsPresetState.get(context.getSource().getServer());
+        boolean changed = state.setPreset(preset);
+        OWRNetwork.broadcastVehiclePhysicsPreset(context.getSource().getServer());
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Vehicle physics preset: " + preset.name().toLowerCase(java.util.Locale.ROOT)
+                + (changed ? " (applied globally)" : " (already active)")), true);
+        return 1;
+    }
+
+    private static int showVehiclePhysicsPreset(CommandContext<CommandSourceStack> context) {
+        VehiclePhysicsPreset preset = VehiclePhysicsPresetState.get(context.getSource().getServer()).preset();
+        send(context, "Vehicle physics preset: " + preset.name().toLowerCase(java.util.Locale.ROOT));
+        return 1;
     }
 
     private static int startPhysicsLog(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -722,7 +749,13 @@ public final class OWRCommands {
     private static int setPitLimitHere(CommandContext<CommandSourceStack> context, TrackDefinition.StewardLineType type, int width) throws CommandSyntaxException {
         ServerPlayer player = context.getSource().getPlayerOrException();
         TrackDefinition.StartFinishLine line = lineAtPlayer(player, width);
-        return upsertStewardLine(context, createStewardLine(context, type, 1, line.left(), line.right()));
+        TrackDefinition.Point3 left = raiseStewardLinePoint(line.left());
+        TrackDefinition.Point3 right = raiseStewardLinePoint(line.right());
+        TrackDefinition track = activeOrDefaultTrack(context);
+        Vec3 center = new Vec3((left.x() + right.x()) * 0.5, (left.y() + right.y()) * 0.5, (left.z() + right.z()) * 0.5);
+        double distance = TrackGeometry.sample(track, center).map(TrackGeometry.ProgressSample::distanceAlongTrack).orElse(0.0);
+        return upsertStewardLine(context, new TrackDefinition.StewardLine(type, 1, type.displayName() + " 1",
+            left, right, line.headingRadians(), distance));
     }
 
     private static int startPitLaneSurvey(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -736,7 +769,7 @@ public final class OWRCommands {
             send(context, "A pit-lane survey is already active.");
             return 0;
         }
-        send(context, "Pit-lane survey started. Drive from the pit entry line through the exit line, then finish the survey.");
+        send(context, "Pit-lane survey armed. Recording starts at pit entry and saves automatically at pit exit.");
         return 1;
     }
 
@@ -755,7 +788,7 @@ public final class OWRCommands {
     private static int showPitLaneSurveyStatus(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         Optional<PitLaneSurveyRuntime.Status> recording = PitLaneSurveyRuntime.status(context.getSource().getPlayerOrException());
         if (recording.isPresent()) {
-            send(context, "Pit-lane survey recording " + recording.get().trackName() + ": samples=" + recording.get().samples() + ".");
+            send(context, "Pit-lane survey " + (recording.get().recording() ? "recording " : "armed ") + recording.get().trackName() + ": samples=" + recording.get().samples() + ".");
             return recording.get().samples();
         }
         TrackDefinition track = activeOrDefaultTrack(context);

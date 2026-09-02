@@ -4,6 +4,8 @@ import com.openwheelracing.content.car.PrototypeCarSetup;
 
 public final class VehiclePhysics {
     static final double BASE_GRIP_ENVELOPE = 1.06;
+    static final double MIN_TRACTION_CONTROL_OUTPUT_FRACTION = 0.30;
+    public static final double KINETIC_SCRUB_SPEED_THRESHOLD = 0.75;
     public static final double KMH_PER_BLOCK_PER_TICK = 72.0;
     public static final double SPEED_TO_BLOCKS_PER_TICK = 1.0 / KMH_PER_BLOCK_PER_TICK;
     public static final double PIT_SPEED_LIMIT_KMH = 79.0;
@@ -151,14 +153,24 @@ public final class VehiclePhysics {
     public static WheelSpeedSynchronization wheelSpeedSynchronization(double wheelAngularSpeed,
                                                                        double wheelRadius,
                                                                        double patchLongitudinalSpeed) {
+        return wheelSpeedSynchronization(wheelAngularSpeed, wheelRadius, patchLongitudinalSpeed, false);
+    }
+
+    public static WheelSpeedSynchronization wheelSpeedSynchronization(double wheelAngularSpeed,
+                                                                       double wheelRadius,
+                                                                       double patchLongitudinalSpeed,
+                                                                       boolean capAtClassicTelemetryLimit) {
         double surfaceSpeed = wheelAngularSpeed * Math.max(0.0, wheelRadius);
         double reference = Math.max(3.0, Math.abs(patchLongitudinalSpeed));
         double relativeDifference = (Math.abs(surfaceSpeed) - Math.abs(patchLongitudinalSpeed)) / reference;
         boolean directionMismatch = Math.abs(surfaceSpeed) > 0.5
             && Math.abs(patchLongitudinalSpeed) > 0.5
             && Math.signum(surfaceSpeed) != Math.signum(patchLongitudinalSpeed);
+        double reportedDifference = capAtClassicTelemetryLimit
+            ? clamp(relativeDifference, -2.0, 2.0)
+            : relativeDifference;
         return new WheelSpeedSynchronization(surfaceSpeed, patchLongitudinalSpeed,
-            clamp(relativeDifference, -2.0, 2.0), directionMismatch);
+            reportedDifference, directionMismatch);
     }
 
     static double drivenAxleSpeedMetersPerSecond(double leftWheelAngularSpeed,
@@ -186,9 +198,33 @@ public final class VehiclePhysics {
         return rollingDirection * targetSurfaceSpeed / wheelRadius;
     }
 
+    static double drivenWheelAngularSpeed(double wheelAngularSpeed, double requestedForce,
+                                          double tyreForce, double patchLongitudinalSpeed,
+                                          double wheelRadius, double rotationalInertia, double dt) {
+        if (rotationalInertia <= 0.0 || dt <= 0.0) return wheelAngularSpeed;
+        double radius = Math.max(0.0, wheelRadius);
+        double drivenSpeed = wheelAngularSpeed + requestedForce * radius / rotationalInertia * dt;
+        double patchAngularSpeed = radius > 0.0 ? patchLongitudinalSpeed / radius : drivenSpeed;
+        double relativeSpeed = drivenSpeed - patchAngularSpeed;
+        double reactionDelta = tyreForce * radius / rotationalInertia * dt;
+        if (relativeSpeed != 0.0 && Math.signum(reactionDelta) == Math.signum(relativeSpeed)
+                && Math.abs(reactionDelta) > Math.abs(relativeSpeed)) {
+            reactionDelta = relativeSpeed;
+        }
+        return drivenSpeed - reactionDelta;
+    }
+
     static double tractionControlledDriveRequest(double request, double limit, double strength) {
+        return tractionControlledDriveRequest(request, limit, strength, true);
+    }
+
+    static double tractionControlledDriveRequest(double request, double limit, double strength,
+                                                 boolean retainMinimumOutput) {
         if (request <= 0.0) return request;
-        double limited = Math.min(request, Math.max(0.0, limit));
+        double minimumOutput = retainMinimumOutput
+            ? request * MIN_TRACTION_CONTROL_OUTPUT_FRACTION
+            : 0.0;
+        double limited = Math.min(request, Math.max(minimumOutput, Math.max(0.0, limit)));
         return request + (limited - request) * clamp(strength, 0.0, 1.0);
     }
 
@@ -534,6 +570,13 @@ public final class VehiclePhysics {
 
     public static double tyreRollingHeatPowerWatts(double normalLoad, double speedMetersPerSecond, double rollingResistance) {
         return Math.max(0.0, rollingResistance * normalLoad * Math.max(0.0, speedMetersPerSecond) * TYRE_ROLLING_RESISTANCE_HEAT_FRACTION);
+    }
+
+    public static double tyreLongitudinalScrubHeatPowerWatts(double longitudinalReactionForce,
+                                                             double longitudinalScrubSpeed) {
+        double kineticScrubSpeed = Math.max(0.0,
+            Math.abs(longitudinalScrubSpeed) - KINETIC_SCRUB_SPEED_THRESHOLD);
+        return Math.abs(longitudinalReactionForce) * kineticScrubSpeed;
     }
 
     public static double tyreLateralNearSaturation(double lateralForce, double normalLoad) {

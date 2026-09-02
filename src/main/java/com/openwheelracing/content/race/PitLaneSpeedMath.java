@@ -62,6 +62,23 @@ public final class PitLaneSpeedMath {
         return Optional.empty();
     }
 
+    public static Optional<Approach> entryApproach(List<Point> points, Point position, double movementX, double movementZ) {
+        if (points.size() < 2) return Optional.empty();
+        Point entry = points.getFirst();
+        Point next = points.get(1);
+        double dx = next.x() - entry.x();
+        double dz = next.z() - entry.z();
+        double length = Math.hypot(dx, dz);
+        if (length <= 1.0E-6) return Optional.empty();
+        double tangentX = dx / length;
+        double tangentZ = dz / length;
+        double signedDistance = (position.x() - entry.x()) * tangentX + (position.z() - entry.z()) * tangentZ;
+        double forwardBlocksPerTick = movementX * tangentX + movementZ * tangentZ;
+        if (signedDistance >= 0.0 || forwardBlocksPerTick <= 1.0E-6) return Optional.empty();
+        double seconds = -signedDistance / (forwardBlocksPerTick * 20.0);
+        return Optional.of(new Approach(seconds, forwardBlocksPerTick * 72.0));
+    }
+
     private static double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -75,4 +92,6 @@ public final class PitLaneSpeedMath {
             return horizontalDistance * horizontalDistance + verticalDelta * verticalDelta;
         }
     }
+
+    public record Approach(double secondsToEntry, double projectedSpeedKmh) {}
 }

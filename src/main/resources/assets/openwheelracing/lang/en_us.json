@@ -386,6 +386,7 @@
   "container.openwheelracing.start_light": "Starting Light Configuration",
   "container.openwheelracing.pit_light": "Pit Light Configuration",
   "screen.openwheelracing.race_light.auto_detect": "Detect route",
+  "screen.openwheelracing.race_light.detection_range": "Detection range: %s blocks",
   "screen.openwheelracing.race_light.flag_status": "Route %sm · %s%% (%s)",
   "screen.openwheelracing.race_light.unassigned": "No surveyed route nearby",
   "screen.openwheelracing.race_light.primary": "Use recommended",

@@ -29,7 +29,9 @@ import org.jspecify.annotations.Nullable;
 
 public class RaceLightBlockEntity extends BlockEntity implements MenuProvider {
     public static final int FLAG_FLASH_HALF_PERIOD_TICKS = 5;
-    private static final double MAX_ASSIGNMENT_HORIZONTAL = 16.0;
+    public static final int MIN_ROUTE_DETECTION_RANGE = 4;
+    public static final int MAX_ROUTE_DETECTION_RANGE = 64;
+    public static final int DEFAULT_ROUTE_DETECTION_RANGE = 16;
     private static final double MAX_ASSIGNMENT_VERTICAL = 4.0;
     private static final double DISTINCT_ROUTE_DISTANCE = 20.0;
     private final RaceLightType type;
@@ -43,6 +45,7 @@ public class RaceLightBlockEntity extends BlockEntity implements MenuProvider {
     private int assignmentConfidence;
     private boolean manualRouteChoice;
     private String assignedRouteId = "";
+    private int routeDetectionRange = DEFAULT_ROUTE_DETECTION_RANGE;
     private int startOrder = 1;
     private PitLightMode pitMode = PitLightMode.ENTRY;
 
@@ -62,12 +65,17 @@ public class RaceLightBlockEntity extends BlockEntity implements MenuProvider {
     public double getAssignedRouteDistance() { return assignedRouteDistance; }
     public int getAssignmentConfidence() { return assignmentConfidence; }
     public boolean isManualRouteChoice() { return manualRouteChoice; }
+    public int getRouteDetectionRange() { return routeDetectionRange; }
     public int getStartOrder() { return startOrder; }
     public PitLightMode getPitMode() { return pitMode; }
     public void setSector(int value) { sector = Math.max(0, value); automaticSector = false; setChanged(); }
     public void setMinisector(int value) { minisector = Math.max(-1, value); automaticSector = false; setChanged(); }
     public void setStartOrder(int value) { startOrder = Math.max(1, Math.min(5, value)); setChanged(); }
     public void setPitMode(PitLightMode value) { pitMode = value == null ? PitLightMode.ENTRY : value; setChanged(); }
+    public void setRouteDetectionRange(int value) {
+        routeDetectionRange = Math.max(MIN_ROUTE_DETECTION_RANGE, Math.min(MAX_ROUTE_DETECTION_RANGE, value));
+        setChanged();
+    }
 
     public void autoDetectSector() {
         detectRouteCandidates(false);
@@ -131,7 +139,7 @@ public class RaceLightBlockEntity extends BlockEntity implements MenuProvider {
         SurveyRouteModel model = route.toModel();
         SurveyRouteModel.Point position = new SurveyRouteModel.Point(worldPosition.getX() + 0.5, worldPosition.getY() + 0.5, worldPosition.getZ() + 0.5);
         java.util.List<SurveyRouteGeometry.Candidate> candidates = SurveyRouteGeometry.candidates(model, position, 0.0, -1, model.nodes().size()).stream()
-            .filter(candidate -> candidate.horizontalDistance() <= MAX_ASSIGNMENT_HORIZONTAL && Math.abs(candidate.verticalDelta()) <= MAX_ASSIGNMENT_VERTICAL)
+            .filter(candidate -> candidate.horizontalDistance() <= routeDetectionRange && Math.abs(candidate.verticalDelta()) <= MAX_ASSIGNMENT_VERTICAL)
             .sorted(java.util.Comparator.comparingDouble(candidate -> candidate.horizontalDistance() * candidate.horizontalDistance() + candidate.verticalDelta() * candidate.verticalDelta()))
             .toList();
         if (candidates.isEmpty()) {
@@ -187,6 +195,7 @@ public class RaceLightBlockEntity extends BlockEntity implements MenuProvider {
         output.putDouble("AssignedRouteDistance", assignedRouteDistance); output.putDouble("AssignedRouteLength", assignedRouteLength);
         output.putInt("AssignmentConfidence", assignmentConfidence); output.putBoolean("ManualRouteChoice", manualRouteChoice);
         output.putString("AssignedRouteId", assignedRouteId);
+        output.putInt("RouteDetectionRange", routeDetectionRange);
         output.putInt("StartOrder", startOrder); output.putInt("PitMode", pitMode.ordinal());
     }
     @Override protected void loadAdditional(ValueInput input) {
@@ -197,6 +206,8 @@ public class RaceLightBlockEntity extends BlockEntity implements MenuProvider {
         assignedRouteDistance = input.getDoubleOr("AssignedRouteDistance", -1.0); assignedRouteLength = input.getDoubleOr("AssignedRouteLength", 0.0);
         assignmentConfidence = input.getIntOr("AssignmentConfidence", 0); manualRouteChoice = input.getBooleanOr("ManualRouteChoice", false);
         assignedRouteId = input.getStringOr("AssignedRouteId", "");
+        routeDetectionRange = Math.max(MIN_ROUTE_DETECTION_RANGE, Math.min(MAX_ROUTE_DETECTION_RANGE,
+            input.getIntOr("RouteDetectionRange", DEFAULT_ROUTE_DETECTION_RANGE)));
         pitMode = PitLightMode.fromOrdinal(input.getIntOr("PitMode", 0));
     }
     @Override public Component getDisplayName() { return Component.translatable("container.openwheelracing." + type.name().toLowerCase() + "_light"); }
