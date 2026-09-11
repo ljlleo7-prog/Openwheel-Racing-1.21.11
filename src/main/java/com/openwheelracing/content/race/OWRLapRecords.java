@@ -122,10 +122,24 @@ public class OWRLapRecords extends SavedData {
 
     public void startNewSession(String name) {
         long sessionId = Math.max(nextSessionId, activeSessionId + 1L);
+        activateSession(sessionId, name);
+    }
+
+    public void activateSession(long sessionId, String name) {
+        if (sessionId <= 0L) {
+            throw new IllegalArgumentException("sessionId must be positive");
+        }
         activeSessionId = sessionId;
         activeSessionName = sanitizeSessionName(name, "Session " + sessionId);
-        nextSessionId = sessionId + 1L;
+        nextSessionId = Math.max(nextSessionId, sessionId + 1L);
         markChanged();
+    }
+
+    public List<LapRecord> getValidSessionLaps(long sessionId) {
+        return laps.stream()
+            .filter(lap -> lap.sessionId() == sessionId && !lap.invalidated() && lap.lapMillis() > 0)
+            .sorted(Comparator.comparingLong(LapRecord::completedGameTime).thenComparingLong(LapRecord::id))
+            .toList();
     }
 
     public int getLapCount() {

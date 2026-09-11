@@ -68,6 +68,40 @@ Operators can inspect or recover the live timing service with:
 /owr race timing resume
 ```
 
+### Configurable GP weekends
+
+GP weekends are persistent, server-authoritative events tied to the active track. A draft may contain any number of
+practice sessions, up to one qualifying session, an optional sprint, and a main race. The session `type` values are
+`practice`, `qualifying`, `sprint`, and `race`; `format` accepts `timed`, `one_shot`, `two_shot`, or `laps` as appropriate.
+Grid sources are `entry`, `previous`, or `manual`.
+
+The complete `add` argument order is: GP name, type, format, session name, duration seconds, lap limit, countdown
+seconds, qualifying grace seconds, locked Minecraft world time, and grid source. Use zero for a limit that does not
+apply to that format. For example:
+
+```text
+/owr gp create "Monaco GP"
+/owr gp register "Monaco GP" PlayerOne P1
+/owr gp add "Monaco GP" practice timed "FP1" 1200 0 0 0 1000 entry
+/owr gp add "Monaco GP" qualifying two_shot "Qualifying" 900 0 0 120 6000 entry
+/owr gp add "Monaco GP" race laps "Grand Prix" 0 20 5 0 12000 previous
+/owr gp open "Monaco GP"
+/owr gp control "Monaco GP" advance
+```
+
+Practice and qualifying start from `open`. Sprint and race sessions follow `advance -> stage -> countdown`; the
+configured countdown advances the start lights and releases the field automatically on one server tick (`start` is
+also available after a zero/expired countdown).
+Every session then follows `finish -> provisional -> official`; use `advance` explicitly for the next session and
+`complete` after the final official result. Other control actions are `suspend`, `resume`, and `abandon`. Inspect the
+persisted schedule, clock, suspension reason, and result revision with `/owr gp status "Monaco GP"`.
+An `entry` or `previous` grid is materialized automatically during `stage`. For a manual grid, set every registered
+display code in order first, for example `/owr gp grid "Monaco GP" P1 P2 P3`.
+
+Only registered entries appear in weekend classification. Active clocks freeze when the server becomes empty and
+recover suspended after a restart; returning players never resume them automatically. Each session's configured
+world time remains locked independently of its sporting clock.
+
 The Gradle wrapper is included, so a separate Gradle installation is not required.
 
 ## Getting started

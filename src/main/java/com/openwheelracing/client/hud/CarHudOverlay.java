@@ -53,7 +53,7 @@ public final class CarHudOverlay {
         }
 
         if (settings.showRankingHud) {
-            if (LiveRaceTimingClient.active()) {
+            if (LiveRaceTimingClient.active() || LiveRaceTimingClient.hasWeekendSession()) {
                 renderRaceTimingTower(graphics, font, minecraft.player.getUUID());
             } else {
                 renderRankingBoard(graphics, font);
@@ -498,17 +498,30 @@ public final class CarHudOverlay {
         int start = localIndex < 0 ? 0 : Math.max(0, Math.min(localIndex - 3, allRows.size() - 8));
         List<RaceTimingRow> rows = allRows.stream().skip(start).limit(8).toList();
         int panelWidth = 166;
-        int headerHeight = 19;
+        int headerHeight = LiveRaceTimingClient.snapshot().weekendName().isBlank() ? 19 : 40;
         int rowHeight = 10;
         int panelHeight = headerHeight + Math.max(1, rows.size()) * rowHeight + 4;
         int px = 8;
         int py = 8;
         graphics.fill(px, py, px + panelWidth, py + panelHeight, 0xB8142638);
         graphics.fill(px, py, px + panelWidth, py + 1, 0xAA55718B);
-        String session = fit(font, LiveRaceTimingClient.snapshot().sessionName(), 112);
-        graphics.drawString(font, session, px + 6, py + 3, 0xFFE8E8E8, false);
+        var snapshot = LiveRaceTimingClient.snapshot();
+        String session = fit(font, snapshot.sessionName().isBlank() ? snapshot.sessionType() : snapshot.sessionName(), panelWidth - 12);
         String raceProgress = raceProgressLabel(allRows);
-        graphics.drawString(font, raceProgress, px + panelWidth - 6 - font.width(raceProgress), py + 3, 0xFF7EE787, false);
+        if (snapshot.weekendName().isBlank()) {
+            graphics.drawString(font, session, px + 6, py + 3, 0xFFE8E8E8, false);
+            graphics.drawString(font, raceProgress, px + panelWidth - 6 - font.width(raceProgress), py + 3, 0xFF7EE787, false);
+        } else {
+            drawScaledText(graphics, font, session, px + panelWidth / 2, py + 3, 1.25f, 0xFFFFFFFF, true);
+            String weekend = fit(font, snapshot.weekendName(), panelWidth - 16);
+            drawScaledText(graphics, font, weekend, px + panelWidth / 2, py + 17, 0.82f, 0xFFAEBCCC, false);
+            graphics.fill(px + 5, py + 29, px + panelWidth - 5, py + 30, 0x6655718B);
+            String type = snapshot.sessionType().replace('_', ' ')
+                + (snapshot.active() ? "" : " · " + snapshot.suspensionReason().replace('_', ' '));
+            type = fit(font, type, 94);
+            graphics.drawString(font, type, px + 6, py + 30, 0xFF8394A7, false);
+            graphics.drawString(font, raceProgress, px + panelWidth - 6 - font.width(raceProgress), py + 30, 0xFF7EE787, false);
+        }
         if (rows.isEmpty()) {
             graphics.drawString(font, Component.translatable("hud.openwheelracing.race.no_cars").getString(), px + 6, py + headerHeight + 1, 0xFF777777, false);
             return;

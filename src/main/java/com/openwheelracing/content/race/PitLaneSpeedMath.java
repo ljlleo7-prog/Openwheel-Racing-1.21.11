@@ -7,6 +7,7 @@ public final class PitLaneSpeedMath {
     public static final double INSTANT_LIMIT_KMH = 85.0;
     public static final double AVERAGE_LIMIT_KMH = 80.0;
     public static final double RECOVERY_DISTANCE_METERS = 3.0;
+    public static final double MAX_ENTRY_APPROACH_DISTANCE_METERS = 300.0;
 
     private PitLaneSpeedMath() {
     }
@@ -66,6 +67,9 @@ public final class PitLaneSpeedMath {
         if (points.size() < 2) return Optional.empty();
         Point entry = points.getFirst();
         Point next = points.get(1);
+        if (Math.hypot(position.x() - entry.x(), position.z() - entry.z()) > MAX_ENTRY_APPROACH_DISTANCE_METERS) {
+            return Optional.empty();
+        }
         double dx = next.x() - entry.x();
         double dz = next.z() - entry.z();
         double length = Math.hypot(dx, dz);

@@ -112,4 +112,26 @@ class LongitudinalWheelDynamicsTest {
         assertEquals(0.245, VehiclePhysics.lowSpeedTractionControlStrength(16.5, 0.35), 1.0E-12);
         assertEquals(0.35, VehiclePhysics.lowSpeedTractionControlStrength(25.0, 0.35), 1.0E-12);
     }
+
+    @Test
+    void nearStationarySettlingIsSmoothAndFadesWithSpeed() {
+        double stoppedGain = VehiclePhysics.nearStationarySettlingGain(0.0, 0.0125);
+        double creepingGain = VehiclePhysics.nearStationarySettlingGain(0.45, 0.0125);
+        double rollingGain = VehiclePhysics.nearStationarySettlingGain(1.5, 0.0125);
+
+        assertTrue(stoppedGain > creepingGain);
+        assertTrue(creepingGain > rollingGain);
+        assertTrue(stoppedGain < 1.0);
+        assertEquals(0.0, VehiclePhysics.nearStationarySettlingGain(2.0, 0.0125), 1.0E-12);
+    }
+
+    @Test
+    void blockedContactSettlingScalesWithBlockedMotion() {
+        double partialContact = VehiclePhysics.blockedContactSettlingGain(0.45, 0.05);
+        double fullContact = VehiclePhysics.blockedContactSettlingGain(1.0, 0.05);
+
+        assertTrue(partialContact > 0.0);
+        assertTrue(fullContact > partialContact);
+        assertEquals(0.0, VehiclePhysics.blockedContactSettlingGain(0.0, 0.05), 1.0E-12);
+    }
 }

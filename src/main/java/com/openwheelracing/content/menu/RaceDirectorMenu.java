@@ -11,6 +11,9 @@ import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.content.race.TeamCarRow;
 import com.openwheelracing.content.race.PitLanePenaltyData;
 import com.openwheelracing.content.race.PitLanePenaltyRow;
+import com.openwheelracing.content.race.OWRGrandPrixRegistry;
+import com.openwheelracing.content.race.weekend.GrandPrixWeekend;
+import com.openwheelracing.content.race.weekend.GrandPrixWeekendInfo;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.TrackMapAutoDetector;
@@ -47,6 +50,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private int lastMapScanDetectedCells = -1;
     private int lastMoistureRevision = Integer.MIN_VALUE;
     private long lastMoistureSurfaceSendTick = Long.MIN_VALUE;
+    private long lastGrandPrixSendTick = Long.MIN_VALUE;
     private int telemetryCarId = -1;
     private long lastTelemetrySendTick = Long.MIN_VALUE;
     private UUID lastTelemetryDriverId = new UUID(0L, 0L);
@@ -152,6 +156,8 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         var moisture = TrackMoistureTelemetryService.snapshot(serverLevel);
         boolean surfaceDue = lastMoistureSurfaceSendTick == Long.MIN_VALUE
             || serverLevel.getGameTime() - lastMoistureSurfaceSendTick >= 600L;
+        boolean grandPrixDue = lastGrandPrixSendTick == Long.MIN_VALUE
+            || serverLevel.getGameTime() - lastGrandPrixSendTick >= 10L;
         if (moisture.revision() != lastMoistureRevision || surfaceDue) {
             lastMoistureRevision = moisture.revision();
             if (surfaceDue) lastMoistureSurfaceSendTick = serverLevel.getGameTime();
@@ -170,7 +176,8 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             && !scanUpdate
             && controlState.getRevision() == lastRaceControlRevision
             && records.getRevision() == lastLapRecordsRevision
-            && pitPenalties.revision() == lastPitPenaltyRevision) {
+            && pitPenalties.revision() == lastPitPenaltyRevision
+            && !grandPrixDue) {
             return;
         }
         lastRaceControlRevision = controlState.getRevision();
@@ -179,6 +186,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
         lastMapRevision = map.revision();
         lastMapScanScannedChunks = scanProgress.running() ? scanProgress.scannedChunks() : -1;
         lastMapScanDetectedCells = scanProgress.running() ? scanProgress.detectedCells() : -1;
+        if (grandPrixDue) lastGrandPrixSendTick = serverLevel.getGameTime();
         OWRNetwork.sendRaceDirectorSnapshot(serverPlayer, createSnapshot(serverLevel));
     }
 
@@ -222,8 +230,19 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             TrackMoistureTelemetryService.snapshot(level),
             laps,
             senseTeamCars(level),
-            PitLanePenaltyData.get(level).pending().stream().map(PitLanePenaltyRow::from).toList()
+            PitLanePenaltyData.get(level).pending().stream().map(PitLanePenaltyRow::from).toList(),
+            grandPrixInfo(level)
         );
+    }
+
+    private GrandPrixWeekendInfo grandPrixInfo(ServerLevel level) {
+        String dimensionId = level.dimension().identifier().toString();
+        List<GrandPrixWeekend> weekends = OWRGrandPrixRegistry.get(level.getServer()).weekends().stream()
+            .filter(weekend -> weekend.dimensionId().equals(dimensionId)).toList();
+        GrandPrixWeekend selected = weekends.stream()
+            .filter(weekend -> weekend.state() == GrandPrixWeekend.EventState.OPEN).findFirst()
+            .orElseGet(() -> weekends.isEmpty() ? null : weekends.getFirst());
+        return selected == null ? GrandPrixWeekendInfo.empty() : GrandPrixWeekendInfo.from(selected, level.getGameTime());
     }
 
     public void setTelemetryCarId(int entityId) {

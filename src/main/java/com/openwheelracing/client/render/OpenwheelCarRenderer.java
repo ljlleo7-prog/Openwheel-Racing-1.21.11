@@ -69,7 +69,9 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
     @Override
     public void extractRenderState(OpenwheelCarEntity car, CarRenderState state, float partialTick) {
         super.extractRenderState(car, state, partialTick);
-        state.yRot = car.getYRot(partialTick);
+        Minecraft minecraft = Minecraft.getInstance();
+        boolean localCar = minecraft.player != null && minecraft.player.getVehicle() == car;
+        state.yRot = RemoteCarRenderPose.apply(car, state, partialTick, localCar);
         state.frontWheelSteerDegrees = car.getFrontWheelSteerDegrees();
         state.lightCoords = 15728880;
         state.tyreCompound = car.getTyreCompound();

@@ -369,6 +369,7 @@ public class OpenwheelCarEntity extends Entity {
     private static final double WHEEL_RADIUS_METERS = VehiclePhysics.NOMINAL_WHEEL_RADIUS_METERS;
     private static final double WHEEL_ROTATIONAL_INERTIA = 1.20;
     private static final double STATIC_TYRE_SPEED_THRESHOLD = 1.5;
+    private static final double SAND_DRIVE_RELEASE_SPEED = 0.35;
     private static final double TYRE_INITIAL_TEMPERATURE_C = 75.0;
     private static final double TYRE_AMBIENT_TEMPERATURE_C = VehiclePhysics.TYRE_AMBIENT_TEMPERATURE_C;
     private static final double TYRE_WEAR_BASE_RATE = 0.000030;
@@ -436,6 +437,8 @@ public class OpenwheelCarEntity extends Entity {
     private double lastClimbDelta;
     private double lastGroundSnapDelta;
     private double lastTerrainPositionCorrectionY;
+    private Vec3 preemptiveBarrierNormal = Vec3.ZERO;
+    private Vec3 preemptiveBarrierVelocity = Vec3.ZERO;
     private double lapStartedAt = -1.0;
     private final LapProfileCollector lapProfileCollector = new LapProfileCollector();
     private long lastStartFinishMarker;
@@ -3439,13 +3442,6 @@ public class OpenwheelCarEntity extends Entity {
             brakeFrontBias = stabilityInputs.frontBrakeBias();
         }
         boolean canApplyDrive = gear != NEUTRAL_GEAR && throttle > 0.0;
-        if (speedMetersPerSecond < 0.35 && !canApplyDrive && brake == 0.0) {
-            velocityLong = 0.0;
-            velocityLat = 0.0;
-            yawRate = 0.0;
-            steeringAngle = 0.0;
-            resetTyreRelaxation();
-        }
         boolean launchClutch = throttle > 0.0 && (gear == 1 || gear == REVERSE_GEAR) && horizontalSpeed < LAUNCH_CLUTCH_SPEED;
         boolean clutchReleasing = clutchReleaseTicks > 0 && gear != NEUTRAL_GEAR;
         double drivelineSpeedBlocksPerTick = rearDrivelineSpeedBlocksPerTick(horizontalSpeed);
@@ -3518,7 +3514,6 @@ public class OpenwheelCarEntity extends Entity {
 
         boolean liftInputConfirmedThisTick = updateLiftAndCoastConfirmation(throttle, brake);
         double previousKineticEnergy = 0.5 * carMassKg * (velocityLong * velocityLong + velocityLat * velocityLat) + 0.5 * yawInertia * yawRate * yawRate;
-        double previousVelocityLong = velocityLong;
         double yawDelta = 0.0;
         double driveWorkJoules = 0.0;
         double requestedIceDriveEnergyJoules = 0.0;
@@ -3625,14 +3620,15 @@ public class OpenwheelCarEntity extends Entity {
 
             double subSpeedBlocksPerTick = subSpeed / 20.0;
             double driveDirection = gear == REVERSE_GEAR ? -1.0 : gear > NEUTRAL_GEAR ? 1.0 : 0.0;
+            boolean boggedInSand = surface == SurfaceProfile.SAND && subSpeed > SAND_DRIVE_RELEASE_SPEED;
             double subDriveForceRequest = driveDirection != 0.0 && throttle > 0.0
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
-                    && subSpeedBlocksPerTick < pitSpeedLimit
+                    && subSpeedBlocksPerTick < pitSpeedLimit && !boggedInSand
                 ? driveDirection * power * throttle / Math.max(MIN_POWER_SPEED, Math.abs(velocityLong))
                 : 0.0;
             if (clutchReleasing && driveDirection != 0.0
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
-                    && subSpeedBlocksPerTick < pitSpeedLimit) {
+                    && subSpeedBlocksPerTick < pitSpeedLimit && !boggedInSand) {
                 double releaseT = clutchReleaseTicks / (double) CLUTCH_RELEASE_TICKS;
                 double storedPower = combustionPowerWatts(Math.max(engineRpm, clutchReleaseRpm)) * profile.powerMultiplier() * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
                 double clutchForce = driveDirection * storedPower * releaseT / MIN_POWER_SPEED;
@@ -3660,7 +3656,7 @@ public class OpenwheelCarEntity extends Entity {
             }
             if (driveDirection > 0.0 && ersPower.powerWatts() != 0.0
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
-                    && subSpeedBlocksPerTick < pitSpeedLimit) {
+                    && subSpeedBlocksPerTick < pitSpeedLimit && !boggedInSand) {
                 pendingErsDriveForce = ersPower.powerWatts() / Math.max(MIN_POWER_SPEED, Math.abs(velocityLong));
             }
 
@@ -4014,21 +4010,12 @@ public class OpenwheelCarEntity extends Entity {
             yawRate *= energyScale;
             yawDelta *= energyScale;
         }
-        if (gear == REVERSE_GEAR && throttle > 0.0) {
-            double reverseTopMetersPerSecond = gearTopSpeed * 20.0;
-            double reverseTyreWearGrip = Math.max(0.45, (rlTyreWearFactor + rrTyreWearFactor) * 0.5);
-            double reverseGrip = Math.max(MIN_SURFACE_MU, surface.grip * tyreMuCoefficient * reverseTyreWearGrip);
-            double reverseAcceleration = GRAVITY * asphaltMuLongitudinal * reverseGrip * 0.28 * throttle * PHYSICS_DT;
-            double reverseVelocityFloor = previousVelocityLong - reverseAcceleration;
-            velocityLong = Math.max(-reverseTopMetersPerSecond, Math.min(velocityLong, reverseVelocityFloor));
-            if (brake == 0.0 && velocityLong > -reverseTopMetersPerSecond) {
-                velocityLong = Math.min(velocityLong, previousVelocityLong - reverseAcceleration * 0.45);
-            }
-        }
-        if (steerInput == 0.0 && Math.abs(velocityLat) < 0.08 && Math.abs(yawRate) < 0.025) {
-            velocityLat = 0.0;
-            yawRate = 0.0;
-            resetTyreRelaxation();
+        if (!canApplyDrive && brake == 0.0) {
+            double settlingGain = VehiclePhysics.nearStationarySettlingGain(
+                Math.hypot(velocityLong, velocityLat), PHYSICS_DT);
+            velocityLong *= 1.0 - settlingGain * 0.35;
+            velocityLat *= 1.0 - settlingGain * 0.70;
+            yawRate *= 1.0 - settlingGain * 0.85;
         }
         debugVelocityLong = velocityLong;
         debugVelocityLat = velocityLat;
@@ -4159,6 +4146,7 @@ public class OpenwheelCarEntity extends Entity {
         if (actualMovement != unclampedActualMovement) {
             logMovementWarning("actual movement clamped", beforeMove, unclampedActualMovement, actualMovement, throttle, brake, steering, surface);
         }
+        reconcileBlockedContactRotation(delta, actualMovement);
         double requestedActualDelta = Math.abs(unclampedActualMovement.horizontalDistance() - delta.horizontalDistance());
         if (requestedActualDelta > 1.0 && unclampedActualMovement.horizontalDistance() > MAX_REASONABLE_MOVEMENT_BLOCKS_PER_TICK) {
             logMovementWarning("movement/collision discrepancy", beforeMove, delta, unclampedActualMovement, throttle, brake, steering, surface);
@@ -4192,6 +4180,23 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(TYRE_SCRUB_SPEED_RL, dynamicPhysics ? (float) finalRlScrubSpeed : 0.0f);
         entityData.set(TYRE_SCRUB_SPEED_RR, dynamicPhysics ? (float) finalRrScrubSpeed : 0.0f);
         previousHorizontalSpeed = horizontalSpeed;
+    }
+
+    private void reconcileBlockedContactRotation(Vec3 requestedMovement, Vec3 actualMovement) {
+        if (!horizontalCollision) {
+            return;
+        }
+        double requestedDistance = requestedMovement.horizontalDistance();
+        if (requestedDistance < 1.0E-5) {
+            return;
+        }
+        double actualDistance = actualMovement.horizontalDistance();
+        double blockedFraction = 1.0 - actualDistance / requestedDistance;
+        if (blockedFraction <= 1.0E-4) {
+            return;
+        }
+        double settlingGain = VehiclePhysics.blockedContactSettlingGain(blockedFraction, PHYSICS_DT);
+        yawRate *= 1.0 - settlingGain;
     }
 
     private void evaporateWheelContactWater(Vec3 fl, Vec3 fr, Vec3 rl, Vec3 rr,
@@ -4293,8 +4298,17 @@ public class OpenwheelCarEntity extends Entity {
 
     private Vec3 moveWithPreemptiveClimb(Vec3 requestedMovement) {
         Vec3 beforeMove = position();
-        if (barrierIntersectsMovement(beforeMove, requestedMovement)) {
-            return stopHorizontalAtEmptyShapeBlock(beforeMove, requestedMovement);
+        preemptiveBarrierNormal = Vec3.ZERO;
+        preemptiveBarrierVelocity = Vec3.ZERO;
+        BarrierContact barrierContact = firstBarrierContact(beforeMove, requestedMovement);
+        if (barrierContact != null) {
+            preemptiveBarrierNormal = barrierContact.normal();
+            preemptiveBarrierVelocity = new Vec3(requestedMovement.x, 0.0, requestedMovement.z);
+            horizontalCollision = true;
+            double travel = Math.max(0.0, barrierContact.time() - 1.0E-4);
+            Vec3 movementToContact = requestedMovement.scale(travel);
+            setPos(beforeMove.x + movementToContact.x, beforeMove.y + movementToContact.y, beforeMove.z + movementToContact.z);
+            return movementToContact;
         }
         Vec3 terrainMovement = terrainFollowingMovement(beforeMove, requestedMovement);
         if (terrainMovement != null) {
@@ -4314,33 +4328,19 @@ public class OpenwheelCarEntity extends Entity {
         return position().subtract(beforeMove);
     }
 
-    private boolean barrierIntersectsMovement(Vec3 beforeMove, Vec3 movement) {
-        double horizontalDistance = movement.horizontalDistance();
-        if (horizontalDistance < 1.0E-6) {
-            return false;
+    private BarrierContact firstBarrierContact(Vec3 beforeMove, Vec3 movement) {
+        if (movement.horizontalDistanceSqr() < 1.0E-12) {
+            return null;
         }
-        int samples = Math.max(1, (int) Math.ceil(horizontalDistance / 0.20));
-        Vec3 originOffset = beforeMove.subtract(position());
-        for (int sample = 0; sample <= samples; sample++) {
-            double t = sample / (double) samples;
-            Vec3 offset = originOffset.add(movement.x * t, movement.y * t, movement.z * t);
-            for (CarComponentDefinition definition : COMPONENT_DEFINITIONS) {
-                AABB componentBox = definition.worldBox(this).move(offset).inflate(0.02);
-                if (barrierIntersects(componentBox, beforeMove, movement)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private boolean barrierIntersects(AABB box, Vec3 carPosition, Vec3 movement) {
-        int x0 = (int) Math.floor(box.minX);
-        int x1 = (int) Math.floor(box.maxX - 1.0E-6);
-        int z0 = (int) Math.floor(box.minZ);
-        int z1 = (int) Math.floor(box.maxZ - 1.0E-6);
-        int y0 = (int) Math.floor(box.minY);
-        int y1 = (int) Math.floor(box.maxY - 1.0E-6);
+        AABB currentBounds = componentBoundingBox(this).move(beforeMove.subtract(position()));
+        AABB sweptBounds = currentBounds.minmax(currentBounds.move(movement));
+        int x0 = (int) Math.floor(sweptBounds.minX);
+        int x1 = (int) Math.floor(sweptBounds.maxX - 1.0E-6);
+        int z0 = (int) Math.floor(sweptBounds.minZ);
+        int z1 = (int) Math.floor(sweptBounds.maxZ - 1.0E-6);
+        int y0 = (int) Math.floor(sweptBounds.minY);
+        int y1 = (int) Math.floor(sweptBounds.maxY - 1.0E-6);
+        BarrierContact best = null;
         for (int y = y0; y <= y1; y++) {
             for (int x = x0; x <= x1; x++) {
                 for (int z = z0; z <= z1; z++) {
@@ -4349,18 +4349,59 @@ public class OpenwheelCarEntity extends Entity {
                     if (!state.is(OWRBlocks.BARRIER.get())) {
                         continue;
                     }
-                    Vec3 towardBarrier = Vec3.atCenterOf(pos).subtract(carPosition);
-                    if (movement.x * towardBarrier.x + movement.z * towardBarrier.z <= 0.0) {
+                    VoxelShape shape = state.getCollisionShape(level(), pos, CollisionContext.of(this));
+                    if (shape.isEmpty()) {
                         continue;
                     }
-                    VoxelShape shape = state.getCollisionShape(level(), pos, CollisionContext.of(this));
-                    if (!shape.isEmpty() && shape.bounds().move(pos).intersects(box)) {
-                        return true;
+                    AABB barrierBox = shape.bounds().move(pos);
+                    ModularCollisionGeometry.Rectangle barrierRectangle = new ModularCollisionGeometry.Rectangle(
+                        (barrierBox.minX + barrierBox.maxX) * 0.5,
+                        (barrierBox.minZ + barrierBox.maxZ) * 0.5,
+                        1.0, 0.0, 0.0, 1.0,
+                        barrierBox.getXsize() * 0.5, barrierBox.getZsize() * 0.5);
+                    for (CarComponentDefinition definition : COMPONENT_DEFINITIONS) {
+                        AABB componentBox = definition.worldBox(this).move(beforeMove.subtract(position()));
+                        AABB sweptComponentBox = componentBox.minmax(componentBox.move(movement));
+                        if (sweptComponentBox.maxY <= barrierBox.minY || sweptComponentBox.minY >= barrierBox.maxY) {
+                            continue;
+                        }
+                        ModularCollisionGeometry.Rectangle component = definition.worldRectangle(this);
+                        component = new ModularCollisionGeometry.Rectangle(
+                            component.centerX() + beforeMove.x - getX(), component.centerZ() + beforeMove.z - getZ(),
+                            component.rightX(), component.rightZ(), component.forwardX(), component.forwardZ(),
+                            component.halfWidth(), component.halfLength());
+                        double time = ModularCollisionGeometry.firstContactTime(
+                            component, movement.x, movement.z, barrierRectangle);
+                        if (!Double.isFinite(time) || best != null && time >= best.time() - 1.0E-7) {
+                            continue;
+                        }
+                        Vec3 normal = barrierContactNormal(component, movement, time, barrierBox);
+                        if (movement.x * normal.x + movement.z * normal.z < -1.0E-8) {
+                            best = new BarrierContact(normal, time);
+                        }
                     }
                 }
             }
         }
-        return false;
+        return best;
+    }
+
+    private static Vec3 barrierContactNormal(ModularCollisionGeometry.Rectangle component, Vec3 movement,
+                                             double time, AABB barrierBox) {
+        double centerX = component.centerX() + movement.x * time;
+        double centerZ = component.centerZ() + movement.z * time;
+        double toMinX = Math.abs(centerX - barrierBox.minX);
+        double toMaxX = Math.abs(centerX - barrierBox.maxX);
+        double toMinZ = Math.abs(centerZ - barrierBox.minZ);
+        double toMaxZ = Math.abs(centerZ - barrierBox.maxZ);
+        double nearest = Math.min(Math.min(toMinX, toMaxX), Math.min(toMinZ, toMaxZ));
+        if (nearest == toMinX) return new Vec3(-1.0, 0.0, 0.0);
+        if (nearest == toMaxX) return new Vec3(1.0, 0.0, 0.0);
+        if (nearest == toMinZ) return new Vec3(0.0, 0.0, -1.0);
+        return new Vec3(0.0, 0.0, 1.0);
+    }
+
+    private record BarrierContact(Vec3 normal, double time) {
     }
 
     private Vec3 stopHorizontalAtEmptyShapeBlock(Vec3 beforeMove, Vec3 requestedMovement) {
@@ -4566,31 +4607,40 @@ public class OpenwheelCarEntity extends Entity {
 
     private void tickImpactDamage() {
         if (horizontalCollision && previousHorizontalSpeed > 0.08) {
-            Vec3 barrierNormal = nearbyBarrierNormal();
+            boolean preemptiveBarrierImpact = preemptiveBarrierNormal.lengthSqr() > 0.0;
+            Vec3 barrierNormal = preemptiveBarrierImpact ? preemptiveBarrierNormal : nearbyBarrierNormal();
             boolean barrierImpact = barrierNormal.lengthSqr() > 0.0;
             if (!barrierImpact && isClimbLikeCollision()) {
                 return;
             }
-            double approachFactor = barrierImpact ? barrierApproachFactor(barrierNormal) : 1.0;
+            Vec3 impactVelocity = preemptiveBarrierImpact ? preemptiveBarrierVelocity : getDeltaMovement();
+            double approachFactor = barrierImpact ? barrierApproachFactor(barrierNormal, impactVelocity) : 1.0;
             float soundSeverity = (float) Math.max(0.6, previousHorizontalSpeed * (barrierImpact ? 9.0 * approachFactor : 14.0));
             if (previousHorizontalSpeed <= 0.28) {
                 playCollisionSound(soundSeverity, true);
+                clearPreemptiveBarrierImpact();
                 return;
             }
 
             float severity = (float) ((previousHorizontalSpeed - 0.28) * (barrierImpact ? 14.0 * approachFactor : 40.0));
-            Vec3 impactDirection = barrierImpact ? barrierNormal.scale(-1.0) : getDeltaMovement();
-            CarDamageComponent component = classifyBlockImpactComponent(impactDirection, getDeltaMovement());
+            Vec3 impactDirection = barrierImpact ? barrierNormal.scale(-1.0) : impactVelocity;
+            CarDamageComponent component = classifyBlockImpactComponent(impactDirection, impactVelocity);
             addComponentDamage(component, severity);
             playImpactFeedback(Math.max(severity, soundSeverity));
             if (barrierImpact) {
-                setDeltaMovement(bounceFromBarrier(getDeltaMovement(), barrierNormal, approachFactor));
+                setDeltaMovement(bounceFromBarrier(impactVelocity, barrierNormal, approachFactor));
             } else {
                 setDeltaMovement(getDeltaMovement().scale(0.15));
             }
 
             destroyIfChassisFailed();
         }
+        clearPreemptiveBarrierImpact();
+    }
+
+    private void clearPreemptiveBarrierImpact() {
+        preemptiveBarrierNormal = Vec3.ZERO;
+        preemptiveBarrierVelocity = Vec3.ZERO;
     }
 
     private void handleEntityImpacts(Vec3 beforeMove, Vec3 actualMovement) {
@@ -4874,8 +4924,7 @@ public class OpenwheelCarEntity extends Entity {
         return normal.lengthSqr() > 1.0E-4 ? normal.normalize() : Vec3.ZERO;
     }
 
-    private double barrierApproachFactor(Vec3 barrierNormal) {
-        Vec3 velocity = getDeltaMovement();
+    private double barrierApproachFactor(Vec3 barrierNormal, Vec3 velocity) {
         Vec3 horizontalVelocity = new Vec3(velocity.x, 0.0, velocity.z);
         if (horizontalVelocity.lengthSqr() < 1.0E-6) {
             return 0.25;
@@ -4887,13 +4936,14 @@ public class OpenwheelCarEntity extends Entity {
     private Vec3 bounceFromBarrier(Vec3 velocity, Vec3 barrierNormal, double approachFactor) {
         Vec3 horizontalVelocity = new Vec3(velocity.x, 0.0, velocity.z);
         double intoBarrier = horizontalVelocity.dot(barrierNormal);
-        Vec3 reflected = horizontalVelocity;
-        if (intoBarrier < 0.0) {
-            reflected = horizontalVelocity.subtract(barrierNormal.scale(1.55 * intoBarrier));
+        if (intoBarrier >= 0.0) {
+            return velocity;
         }
-        double retainedSpeed = 0.35 + (1.0 - approachFactor) * 0.45;
-        reflected = reflected.scale(retainedSpeed);
-        return new Vec3(reflected.x, velocity.y, reflected.z);
+        Vec3 tangent = horizontalVelocity.subtract(barrierNormal.scale(intoBarrier)).scale(0.82);
+        double restitution = 0.42 + approachFactor * 0.12;
+        Vec3 outward = barrierNormal.scale(-intoBarrier * restitution);
+        Vec3 bounced = tangent.add(outward);
+        return new Vec3(bounced.x, Math.min(0.0, velocity.y), bounced.z);
     }
 
     private void destroyIntoMaterials(ServerLevel serverLevel) {
@@ -5363,6 +5413,11 @@ public class OpenwheelCarEntity extends Entity {
             wheelAngularSpeed = VehiclePhysics.drivenWheelAngularSpeed(
                 wheelAngularSpeed, longitudinalRequest, combined.longitudinal(),
                 wheelLongVelocity, WHEEL_RADIUS_METERS, WHEEL_ROTATIONAL_INERTIA, dt);
+            if (Math.abs(longitudinalRequest) < 1.0 && carSpeed < STATIC_TYRE_SPEED_THRESHOLD) {
+                double settlingGain = VehiclePhysics.nearStationarySettlingGain(carSpeed, dt);
+                double rollingWheelSpeed = wheelLongVelocity / WHEEL_RADIUS_METERS;
+                wheelAngularSpeed += (rollingWheelSpeed - wheelAngularSpeed) * settlingGain;
+            }
         }
         VehiclePhysics.PlanarForce bodyForce = VehiclePhysics.wheelForceToBody(
             combined.longitudinal(), combined.lateral(), steerAngle);

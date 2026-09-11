@@ -401,5 +401,21 @@
   "screen.openwheelracing.race_director.lights_out": "Lights out",
   "screen.openwheelracing.race_director.auto_flags": "Toggle auto yellow",
   "screen.openwheelracing.race_director.sector_yellow": "Y",
-  "screen.openwheelracing.race_director.sector_clear": "X"
+  "screen.openwheelracing.race_director.sector_clear": "X",
+  "screen.openwheelracing.gp_weekend.open": "GP Weekend",
+  "screen.openwheelracing.gp_weekend.title": "Grand Prix Weekend Control",
+  "screen.openwheelracing.gp_weekend.none": "No GP weekend is configured in this dimension.",
+  "screen.openwheelracing.gp_weekend.schedule": "SESSION SCHEDULE",
+  "screen.openwheelracing.gp_weekend.controls": "WEEKEND CONTROL",
+  "screen.openwheelracing.gp_weekend.active": "ACTIVE SESSION",
+  "screen.openwheelracing.gp_weekend.advance": "Advance",
+  "screen.openwheelracing.gp_weekend.stage": "Stage grid",
+  "screen.openwheelracing.gp_weekend.countdown": "Countdown",
+  "screen.openwheelracing.gp_weekend.start": "Start",
+  "screen.openwheelracing.gp_weekend.suspend": "Suspend",
+  "screen.openwheelracing.gp_weekend.resume": "Resume",
+  "screen.openwheelracing.gp_weekend.finish": "Finish",
+  "screen.openwheelracing.gp_weekend.provisional": "Provisional",
+  "screen.openwheelracing.gp_weekend.official": "Officialize",
+  "screen.openwheelracing.gp_weekend.complete": "Complete GP"
 }

@@ -56,7 +56,9 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     }
 
     public static void applySnapshot(RaceDirectorSnapshot snapshot) {
-        if (Minecraft.getInstance().screen instanceof RaceDirectorScreen screen) {
+        if (Minecraft.getInstance().screen instanceof GrandPrixWeekendScreen weekendScreen) {
+            weekendScreen.applySnapshot(snapshot);
+        } else if (Minecraft.getInstance().screen instanceof RaceDirectorScreen screen) {
             screen.menu.applySnapshot(snapshot);
             if (screen.selectedLapId != -1L && screen.selectedRow() == null) {
                 screen.selectedLapId = -1L;
@@ -66,6 +68,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             }
             screen.rebuildWidgets();
         }
+    }
+
+    void applySnapshotFromWeekend(RaceDirectorSnapshot snapshot) {
+        menu.applySnapshot(snapshot);
     }
 
     public static void applyMoistureSnapshot(com.openwheelracing.content.race.TrackMoistureSnapshot snapshot) {
@@ -89,6 +95,11 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         }
         if (menu.showsBoard()) {
             addBoardWidgets();
+        }
+        if (menu.getMonitorType() == com.openwheelracing.content.block.entity.RaceMonitorType.DIRECTOR) {
+            addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.gp_weekend.open"), button ->
+                Minecraft.getInstance().setScreen(new GrandPrixWeekendScreen(this, menu.getSnapshot().grandPrixWeekend())))
+                .bounds(leftPos + imageWidth - 98, topPos + 20, 88, 18).build());
         }
     }
 

@@ -401,5 +401,21 @@
   "screen.openwheelracing.race_director.lights_out": "熄灯发车",
   "screen.openwheelracing.race_director.auto_flags": "切换自动黄旗",
   "screen.openwheelracing.race_director.sector_yellow": "黄",
-  "screen.openwheelracing.race_director.sector_clear": "清"
+  "screen.openwheelracing.race_director.sector_clear": "清",
+  "screen.openwheelracing.gp_weekend.open": "大奖赛周末",
+  "screen.openwheelracing.gp_weekend.title": "大奖赛周末控制",
+  "screen.openwheelracing.gp_weekend.none": "当前维度尚未配置大奖赛周末。",
+  "screen.openwheelracing.gp_weekend.schedule": "赛程",
+  "screen.openwheelracing.gp_weekend.controls": "周末控制",
+  "screen.openwheelracing.gp_weekend.active": "当前赛段",
+  "screen.openwheelracing.gp_weekend.advance": "下一赛段",
+  "screen.openwheelracing.gp_weekend.stage": "赛车就位",
+  "screen.openwheelracing.gp_weekend.countdown": "开始倒计时",
+  "screen.openwheelracing.gp_weekend.start": "开始",
+  "screen.openwheelracing.gp_weekend.suspend": "暂停",
+  "screen.openwheelracing.gp_weekend.resume": "恢复",
+  "screen.openwheelracing.gp_weekend.finish": "结束",
+  "screen.openwheelracing.gp_weekend.provisional": "临时成绩",
+  "screen.openwheelracing.gp_weekend.official": "确认正式成绩",
+  "screen.openwheelracing.gp_weekend.complete": "结束大奖赛"
 }

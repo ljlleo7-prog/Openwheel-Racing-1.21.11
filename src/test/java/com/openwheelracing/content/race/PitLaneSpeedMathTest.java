@@ -73,6 +73,14 @@ class PitLaneSpeedMathTest {
     }
 
     @Test
+    void predictsEntryOnlyWithinThreeHundredHorizontalMeters() {
+        assertTrue(PitLaneSpeedMath.entryApproach(ROUTE,
+            new PitLaneSpeedMath.Point(-60.0, 0.0, Math.sqrt(86_400.0)), 1.0, 0.0).isPresent());
+        assertTrue(PitLaneSpeedMath.entryApproach(ROUTE,
+            new PitLaneSpeedMath.Point(-60.0, 0.0, 294.0), 1.0, 0.0).isEmpty());
+    }
+
+    @Test
     void threeSecondVisibilityBoundaryUsesDirectionalProjection() {
         PitLaneSpeedMath.Approach atBoundary = PitLaneSpeedMath.entryApproach(ROUTE,
             new PitLaneSpeedMath.Point(-60.0, 100.0, 100.0), 1.0, 0.0).orElseThrow();

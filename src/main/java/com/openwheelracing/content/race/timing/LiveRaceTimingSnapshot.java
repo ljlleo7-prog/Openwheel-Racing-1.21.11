@@ -8,6 +8,8 @@ public record LiveRaceTimingSnapshot(
     String suspensionReason,
     long sessionId,
     String sessionName,
+    String weekendName,
+    String sessionType,
     UUID trackId,
     UUID routeId,
     long revision,
@@ -23,6 +25,8 @@ public record LiveRaceTimingSnapshot(
     public LiveRaceTimingSnapshot {
         suspensionReason = suspensionReason == null ? "" : suspensionReason;
         sessionName = sessionName == null ? "" : sessionName;
+        weekendName = weekendName == null ? "" : weekendName;
+        sessionType = sessionType == null ? "" : sessionType;
         trackId = trackId == null ? ZERO_UUID : trackId;
         routeId = routeId == null ? ZERO_UUID : routeId;
         rows = List.copyOf(rows);
@@ -42,8 +46,16 @@ public record LiveRaceTimingSnapshot(
             rows, recentPositionChanges, 0, -1L);
     }
 
+    public LiveRaceTimingSnapshot(boolean active, String suspensionReason, long sessionId, String sessionName, UUID trackId,
+                                  UUID routeId, long revision, long serverTick, double routeLengthMeters,
+                                  List<RaceTimingRow> rows, List<RacePositionChange> recentPositionChanges,
+                                  int lapLimit, long remainingRaceTicks) {
+        this(active, suspensionReason, sessionId, sessionName, "", "", trackId, routeId, revision, serverTick,
+            routeLengthMeters, rows, recentPositionChanges, lapLimit, remainingRaceTicks);
+    }
+
     public static LiveRaceTimingSnapshot inactive(long revision, long serverTick, String reason) {
-        return new LiveRaceTimingSnapshot(false, reason, 0L, "", ZERO_UUID, ZERO_UUID, revision, serverTick, 0.0,
+        return new LiveRaceTimingSnapshot(false, reason, 0L, "", "", "", ZERO_UUID, ZERO_UUID, revision, serverTick, 0.0,
             List.of(), List.of(), 0, -1L);
     }
 }

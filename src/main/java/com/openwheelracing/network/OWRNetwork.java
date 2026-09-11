@@ -1,5 +1,6 @@
 package com.openwheelracing.network;
 
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.entity.VehiclePhysics;
 import com.openwheelracing.content.entity.VehiclePhysicsPreset;
@@ -54,6 +55,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
@@ -64,7 +66,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "16";
+    private static final String PROTOCOL = "17";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -106,6 +108,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorCycleConditionModifierMessage.TYPE, codec(RaceDirectorCycleConditionModifierMessage::encode, RaceDirectorCycleConditionModifierMessage::decode), RaceDirectorCycleConditionModifierMessage::handle);
         registrar.playToServer(RaceDirectorStartSessionMessage.TYPE, codec(RaceDirectorStartSessionMessage::encode, RaceDirectorStartSessionMessage::decode), RaceDirectorStartSessionMessage::handle);
         registrar.playToServer(RaceDirectorRefreshSessionMessage.TYPE, codec(RaceDirectorRefreshSessionMessage::encode, RaceDirectorRefreshSessionMessage::decode), RaceDirectorRefreshSessionMessage::handle);
+        registrar.playToServer(RaceDirectorGrandPrixControlMessage.TYPE, codec(RaceDirectorGrandPrixControlMessage::encode, RaceDirectorGrandPrixControlMessage::decode), RaceDirectorGrandPrixControlMessage::handle);
         registrar.playToServer(RaceDirectorSetArchiveModeMessage.TYPE, codec(RaceDirectorSetArchiveModeMessage::encode, RaceDirectorSetArchiveModeMessage::decode), RaceDirectorSetArchiveModeMessage::handle);
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
         registrar.playToServer(TeamTerminalSenseCarsMessage.TYPE, codec(TeamTerminalSenseCarsMessage::encode, TeamTerminalSenseCarsMessage::decode), TeamTerminalSenseCarsMessage::handle);
@@ -1082,6 +1085,8 @@ public final class OWRNetwork {
             buffer.writeUtf(snapshot.suspensionReason(), 80);
             buffer.writeLong(snapshot.sessionId());
             buffer.writeUtf(snapshot.sessionName(), 80);
+            buffer.writeUtf(snapshot.weekendName(), 80);
+            buffer.writeUtf(snapshot.sessionType(), 24);
             buffer.writeUUID(snapshot.trackId());
             buffer.writeUUID(snapshot.routeId());
             buffer.writeLong(snapshot.revision());
@@ -1106,6 +1111,8 @@ public final class OWRNetwork {
             String reason = buffer.readUtf(80);
             long sessionId = buffer.readLong();
             String sessionName = buffer.readUtf(80);
+            String weekendName = buffer.readUtf(80);
+            String sessionType = buffer.readUtf(24);
             UUID trackId = buffer.readUUID();
             UUID routeId = buffer.readUUID();
             long revision = buffer.readLong();
@@ -1123,7 +1130,8 @@ public final class OWRNetwork {
             for (int index = 0; index < changeCount; index++) {
                 changes.add(decodePositionChange(buffer));
             }
-            return new LiveRaceTimingSnapshotMessage(new LiveRaceTimingSnapshot(active, reason, sessionId, sessionName, trackId, routeId,
+            return new LiveRaceTimingSnapshotMessage(new LiveRaceTimingSnapshot(active, reason, sessionId, sessionName,
+                weekendName, sessionType, trackId, routeId,
                 revision, serverTick, routeLength, rows, changes, lapLimit, remainingRaceTicks));
         }
 
@@ -1257,6 +1265,7 @@ public final class OWRNetwork {
             for (com.openwheelracing.content.race.PitLanePenaltyRow row : snapshot.pendingPitPenalties()) {
                 com.openwheelracing.content.race.PitLanePenaltyRow.encode(row, buffer);
             }
+            snapshot.grandPrixWeekend().encode(buffer);
         }
 
         private static RaceDirectorSnapshotMessage decode(FriendlyByteBuf buffer) {
@@ -1302,11 +1311,14 @@ public final class OWRNetwork {
             for (int index = 0; index < penaltyCount; index++) {
                 penalties.add(com.openwheelracing.content.race.PitLanePenaltyRow.decode(buffer));
             }
+            com.openwheelracing.content.race.weekend.GrandPrixWeekendInfo grandPrixWeekend =
+                com.openwheelracing.content.race.weekend.GrandPrixWeekendInfo.decode(buffer);
             return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, autoShiftingAllowed,
                 minimumValidLapTicks, raceLapLimit, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj,
                 maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier,
                 activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, trackMap, trackMapScanRunning,
-                trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, trackMoisture, laps, teamCars, penalties));
+                trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, trackMoisture, laps, teamCars,
+                penalties, grandPrixWeekend));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {
@@ -1731,6 +1743,42 @@ public final class OWRNetwork {
                 if (player.level() instanceof ServerLevel serverLevel) {
                     broadcastRankingBoard(serverLevel.getServer(), serverLevel);
                 }
+            });
+        }
+    }
+
+    public record RaceDirectorGrandPrixControlMessage(String eventName, String action) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorGrandPrixControlMessage> TYPE = payloadType("race_director_grand_prix_control_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RaceDirectorGrandPrixControlMessage message, FriendlyByteBuf buffer) {
+            buffer.writeUtf(message.eventName, 80);
+            buffer.writeUtf(message.action, 24);
+        }
+
+        private static RaceDirectorGrandPrixControlMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorGrandPrixControlMessage(buffer.readUtf(80), buffer.readUtf(24));
+        }
+
+        private static void handle(RaceDirectorGrandPrixControlMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
+                    return;
+                }
+                String action = message.action.toLowerCase(java.util.Locale.ROOT);
+                if (!java.util.Set.of("advance", "stage", "countdown", "start", "suspend", "resume", "finish",
+                    "provisional", "official", "complete").contains(action)) {
+                    return;
+                }
+                String command = "owr gp control " + StringArgumentType.escapeIfRequired(message.eventName) + " " + action;
+                player.level().getServer().getCommands().performPrefixedCommand(
+                    player.createCommandSourceStack().withPermission(LevelBasedPermissionSet.MODERATOR), command);
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
             });
         }
     }

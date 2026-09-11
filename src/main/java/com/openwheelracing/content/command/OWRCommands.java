@@ -16,7 +16,11 @@ import com.openwheelracing.content.car.CarLivery;
 import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.OWRGrandPrixRegistry;
+import com.openwheelracing.content.race.OWRLapRecords;
+import com.openwheelracing.content.race.session.RaceSessionState;
+import com.openwheelracing.content.race.session.RaceSessionSuspensionReason;
 import com.openwheelracing.content.race.timing.LiveRaceTimingService;
+import com.openwheelracing.content.race.weekend.GrandPrixWeekend;
 import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
@@ -48,6 +52,9 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Set;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -89,6 +96,39 @@ public final class OWRCommands {
                 .then(Commands.literal("stop").executes(OWRCommands::stopPhysicsLog))
                 .then(Commands.literal("status").executes(OWRCommands::showPhysicsLogStatus)))
             .then(Commands.literal("gp")
+                .then(Commands.literal("create")
+                    .then(Commands.argument("gp", StringArgumentType.string()).executes(OWRCommands::createGrandPrixWeekend)))
+                .then(Commands.literal("delete")
+                    .then(Commands.argument("gp", StringArgumentType.string()).executes(OWRCommands::deleteGrandPrixWeekend)))
+                .then(Commands.literal("add")
+                    .then(Commands.argument("gp", StringArgumentType.string())
+                        .then(Commands.argument("type", StringArgumentType.word())
+                            .then(Commands.argument("format", StringArgumentType.word())
+                                .then(Commands.argument("name", StringArgumentType.string())
+                                    .then(Commands.argument("durationSeconds", IntegerArgumentType.integer(0, 86_400))
+                                        .then(Commands.argument("lapLimit", IntegerArgumentType.integer(0, 10_000))
+                                            .then(Commands.argument("countdownSeconds", IntegerArgumentType.integer(0, 600))
+                                                .then(Commands.argument("graceSeconds", IntegerArgumentType.integer(0, 3600))
+                                                    .then(Commands.argument("worldTime", IntegerArgumentType.integer(0, 23_999))
+                                                        .then(Commands.argument("gridSource", StringArgumentType.word())
+                                                            .executes(OWRCommands::addGrandPrixSession))))))))))))
+                .then(Commands.literal("remove")
+                    .then(Commands.argument("gp", StringArgumentType.string())
+                        .then(Commands.argument("index", IntegerArgumentType.integer(1)).executes(OWRCommands::removeGrandPrixSession))))
+                .then(Commands.literal("move")
+                    .then(Commands.argument("gp", StringArgumentType.string())
+                        .then(Commands.argument("from", IntegerArgumentType.integer(1))
+                            .then(Commands.argument("to", IntegerArgumentType.integer(1)).executes(OWRCommands::moveGrandPrixSession)))))
+                .then(Commands.literal("open")
+                    .then(Commands.argument("gp", StringArgumentType.string()).executes(OWRCommands::openGrandPrixWeekend)))
+                .then(Commands.literal("grid")
+                    .then(Commands.argument("gp", StringArgumentType.string())
+                        .then(Commands.argument("codes", StringArgumentType.greedyString()).executes(OWRCommands::setGrandPrixGrid))))
+                .then(Commands.literal("control")
+                    .then(Commands.argument("gp", StringArgumentType.string())
+                        .then(Commands.argument("action", StringArgumentType.word()).executes(OWRCommands::controlGrandPrixWeekend))))
+                .then(Commands.literal("status")
+                    .then(Commands.argument("gp", StringArgumentType.string()).executes(OWRCommands::showGrandPrixStatus)))
                 .then(Commands.literal("register")
                     .then(Commands.argument("gp", StringArgumentType.string())
                         .then(Commands.argument("player", EntityArgument.player())
@@ -305,6 +345,424 @@ public final class OWRCommands {
             return car;
         }
         throw EntityArgument.NO_ENTITIES_FOUND.create();
+    }
+
+    private static int createGrandPrixWeekend(CommandContext<CommandSourceStack> context) {
+        try {
+            String gpName = StringArgumentType.getString(context, "gp");
+            TrackDefinition track = activeOrDefaultTrack(context);
+            OWRGrandPrixRegistry registry = OWRGrandPrixRegistry.get(context.getSource().getServer());
+            GrandPrixWeekend weekend = registry.createWeekend(gpName, track.trackId(), dimensionId(context),
+                context.getSource().getLevel().getGameTime(), actorId(context), actorName(context));
+            send(context, "Created draft GP weekend " + weekend.name() + " for " + track.name()
+                + ". Add sessions, register entries, then open it.");
+            return 1;
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            send(context, "GP create refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static int deleteGrandPrixWeekend(CommandContext<CommandSourceStack> context) {
+        try {
+            String gpName = StringArgumentType.getString(context, "gp");
+            boolean deleted = OWRGrandPrixRegistry.get(context.getSource().getServer()).deleteWeekend(gpName);
+            send(context, deleted ? "Deleted GP weekend " + gpName + "." : "Unknown GP weekend " + gpName + ".");
+            return deleted ? 1 : 0;
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            send(context, "GP delete refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static int addGrandPrixSession(CommandContext<CommandSourceStack> context) {
+        OWRGrandPrixRegistry registry = OWRGrandPrixRegistry.get(context.getSource().getServer());
+        try {
+            String gpName = StringArgumentType.getString(context, "gp");
+            GrandPrixWeekend.SessionType type = parseEnum(GrandPrixWeekend.SessionType.class,
+                StringArgumentType.getString(context, "type"), "session type");
+            GrandPrixWeekend.SessionFormat format = parseSessionFormat(type,
+                StringArgumentType.getString(context, "format"));
+            GrandPrixWeekend.GridSource gridSource = parseGridSource(StringArgumentType.getString(context, "gridSource"));
+            GrandPrixWeekend.SessionConfig config = new GrandPrixWeekend.SessionConfig(
+                registry.allocateSessionId(), StringArgumentType.getString(context, "name"), type, format,
+                secondsToTicks(IntegerArgumentType.getInteger(context, "durationSeconds")),
+                IntegerArgumentType.getInteger(context, "lapLimit"),
+                secondsToTicks(IntegerArgumentType.getInteger(context, "countdownSeconds")),
+                secondsToTicks(IntegerArgumentType.getInteger(context, "graceSeconds")),
+                IntegerArgumentType.getInteger(context, "worldTime"), gridSource);
+            registry.updateWeekend(gpName, weekend -> weekend.addSession(config, context.getSource().getLevel().getGameTime(),
+                actorId(context), actorName(context)));
+            send(context, "Added " + config.name() + " (" + type.displayName() + ", "
+                + format.name().toLowerCase(java.util.Locale.ROOT) + ") to " + gpName + ".");
+            return 1;
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            send(context, "GP session add refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static int removeGrandPrixSession(CommandContext<CommandSourceStack> context) {
+        try {
+            String gpName = StringArgumentType.getString(context, "gp");
+            int index = IntegerArgumentType.getInteger(context, "index") - 1;
+            OWRGrandPrixRegistry.get(context.getSource().getServer()).updateWeekend(gpName,
+                weekend -> weekend.removeSession(index, context.getSource().getLevel().getGameTime(), actorId(context), actorName(context)));
+            send(context, "Removed session " + (index + 1) + " from " + gpName + ".");
+            return 1;
+        } catch (IllegalArgumentException | IllegalStateException | IndexOutOfBoundsException exception) {
+            send(context, "GP session remove refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static int moveGrandPrixSession(CommandContext<CommandSourceStack> context) {
+        try {
+            String gpName = StringArgumentType.getString(context, "gp");
+            int from = IntegerArgumentType.getInteger(context, "from") - 1;
+            int to = IntegerArgumentType.getInteger(context, "to") - 1;
+            OWRGrandPrixRegistry.get(context.getSource().getServer()).updateWeekend(gpName,
+                weekend -> weekend.moveSession(from, to, context.getSource().getLevel().getGameTime(), actorId(context), actorName(context)));
+            send(context, "Moved session " + (from + 1) + " to " + (to + 1) + " in " + gpName + ".");
+            return 1;
+        } catch (IllegalArgumentException | IllegalStateException | IndexOutOfBoundsException exception) {
+            send(context, "GP session move refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static int openGrandPrixWeekend(CommandContext<CommandSourceStack> context) {
+        try {
+            String gpName = StringArgumentType.getString(context, "gp");
+            OWRGrandPrixRegistry registry = OWRGrandPrixRegistry.get(context.getSource().getServer());
+            GrandPrixWeekend weekend = registry.weekend(gpName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown GP weekend"));
+            requireWeekendDimension(context, weekend);
+            boolean anotherOpen = registry.weekends().stream().anyMatch(other -> other != weekend
+                && other.state() == GrandPrixWeekend.EventState.OPEN
+                && other.dimensionId().equals(weekend.dimensionId()));
+            if (anotherOpen) {
+                throw new IllegalStateException("Another GP weekend is already open in this dimension");
+            }
+            validateWeekendTrack(context, weekend, weekend.sessions(context.getSource().getLevel().getGameTime()).stream()
+                .anyMatch(session -> session.config().type().usesGrid()));
+            registry.updateWeekend(gpName,
+                value -> value.open(context.getSource().getLevel().getGameTime(), actorId(context), actorName(context)));
+            send(context, "Opened " + gpName + "; its schedule is now locked. Use control advance to open the first session.");
+            return 1;
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            send(context, "GP open refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static int controlGrandPrixWeekend(CommandContext<CommandSourceStack> context) {
+        String gpName = StringArgumentType.getString(context, "gp");
+        String action = StringArgumentType.getString(context, "action").toLowerCase(java.util.Locale.ROOT);
+        OWRGrandPrixRegistry registry = OWRGrandPrixRegistry.get(context.getSource().getServer());
+        GrandPrixWeekend weekend;
+        try {
+            weekend = registry.weekend(gpName).orElseThrow(() -> new IllegalArgumentException("Unknown GP weekend"));
+            requireWeekendDimension(context, weekend);
+            long tick = context.getSource().getLevel().getGameTime();
+            UUID actor = actorId(context);
+            String actorName = actorName(context);
+            switch (action) {
+                case "advance" -> registry.updateWeekend(gpName, value -> value.advance(tick, actor, actorName));
+                case "stage" -> {
+                    validateWeekendTrack(context, weekend, true);
+                    GrandPrixWeekend.SessionView session = weekend.activeSession(tick)
+                        .orElseThrow(() -> new IllegalStateException("The weekend has no active session"));
+                    if (session.grid().isEmpty()) {
+                        List<UUID> order = weekend.suggestedGridOrder();
+                        if (order.isEmpty()) {
+                            throw new IllegalStateException("Set the manual grid with /owr gp grid first");
+                        }
+                        registry.updateWeekend(gpName, value -> value.materializeGrid(order, tick, actor, actorName));
+                    }
+                    registry.updateWeekend(gpName, value -> value.stage(tick, actor, actorName));
+                    stageGrandPrixCars(context.getSource().getLevel(), weekend);
+                    OWRRaceControlState.get(context.getSource().getLevel()).setStartPhase(0);
+                }
+                case "countdown" -> {
+                    registry.updateWeekend(gpName, value -> value.countdown(tick, actor, actorName));
+                    OWRRaceControlState.get(context.getSource().getLevel()).setStartPhase(1);
+                }
+                case "start" -> startGrandPrixSession(context, registry, weekend, gpName, tick, actor, actorName);
+                case "suspend" -> {
+                    registry.updateWeekend(gpName, value -> value.suspend(RaceSessionSuspensionReason.DIRECTOR, tick, actor, actorName));
+                    LiveRaceTimingService.stop(context.getSource().getLevel(), "DIRECTOR");
+                }
+                case "resume" -> {
+                    registry.updateWeekend(gpName, value -> value.resume(tick, actor, actorName));
+                    LiveRaceTimingService.resume(context.getSource().getLevel());
+                }
+                case "finish" -> {
+                    registry.updateWeekend(gpName, value -> value.finish(tick, actor, actorName));
+                    LiveRaceTimingService.stop(context.getSource().getLevel(), "FINISHING");
+                }
+                case "provisional" -> {
+                    List<GrandPrixWeekend.ResultRow> rows = buildGrandPrixResult(context, weekend, tick);
+                    registry.updateWeekend(gpName, value -> value.publishProvisional(rows, tick, actor, actorName));
+                }
+                case "official" -> registry.updateWeekend(gpName, value -> value.officialize(tick, actor, actorName));
+                case "complete" -> registry.updateWeekend(gpName, value -> value.complete(tick, actor, actorName));
+                case "abandon" -> registry.updateWeekend(gpName, value -> value.abandon(tick, actor, actorName));
+                default -> throw new IllegalArgumentException("Unknown action; use advance, stage, countdown, start, suspend, resume, finish, provisional, official, complete, or abandon");
+            }
+            send(context, "GP " + gpName + ": " + action + " completed.");
+            return 1;
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            send(context, "GP control refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static void startGrandPrixSession(CommandContext<CommandSourceStack> context, OWRGrandPrixRegistry registry,
+                                               GrandPrixWeekend weekend, String gpName, long tick, UUID actor,
+                                               String actorName) {
+        GrandPrixWeekend.SessionView session = weekend.activeSession(tick)
+            .orElseThrow(() -> new IllegalStateException("The weekend has no active session"));
+        RaceSessionState required = session.config().type().usesGrid() ? RaceSessionState.COUNTDOWN : RaceSessionState.OPEN;
+        if (session.state() != required) {
+            throw new IllegalStateException("The session must be " + required.name().toLowerCase(java.util.Locale.ROOT) + " before start");
+        }
+        validateWeekendTrack(context, weekend, session.config().type().usesGrid());
+        Set<UUID> eligible = weekend.entries().stream()
+            .filter(entry -> entry.status() == GrandPrixWeekend.EntryStatus.ENTERED)
+            .map(GrandPrixWeekend.Entry::driverId).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        OWRLapRecords.get(context.getSource().getLevel()).activateSession(session.config().sessionId(), session.config().name());
+        LiveRaceTimingService.StartResult timing = LiveRaceTimingService.start(context.getSource().getLevel(),
+            session.config().sessionId(), session.config().name(), session.config().lapLimit(), eligible,
+            session.config().durationTicks() > 0L ? session.config().durationTicks() : -1L);
+        if (!timing.started()) {
+            throw new IllegalStateException(timing.message());
+        }
+        registry.updateWeekend(gpName, value -> value.start(tick, actor, actorName));
+        OWRRaceControlState.get(context.getSource().getLevel()).setStartPhase(6);
+    }
+
+    private static List<GrandPrixWeekend.ResultRow> buildGrandPrixResult(CommandContext<CommandSourceStack> context,
+                                                                         GrandPrixWeekend weekend, long tick) {
+        GrandPrixWeekend.SessionView session = weekend.activeSession(tick)
+            .orElseThrow(() -> new IllegalStateException("The weekend has no active session"));
+        if (session.config().type() == GrandPrixWeekend.SessionType.PRACTICE
+            || session.config().type() == GrandPrixWeekend.SessionType.QUALIFYING) {
+            return buildBestLapResult(context.getSource().getLevel(), weekend, session.config());
+        }
+        Map<UUID, com.openwheelracing.content.race.timing.RaceTimingRow> timingRows = new HashMap<>();
+        LiveRaceTimingService.latestSnapshot(context.getSource().getLevel()).ifPresent(snapshot -> snapshot.rows().forEach(
+            row -> timingRows.put(row.participant().id(), row)));
+        List<GrandPrixWeekend.ResultRow> result = new ArrayList<>();
+        int position = 1;
+        for (var row : timingRows.values().stream().sorted(Comparator.comparingInt(com.openwheelracing.content.race.timing.RaceTimingRow::position)).toList()) {
+            if (weekend.entries().stream().noneMatch(entry -> entry.driverId().equals(row.participant().id()))) {
+                continue;
+            }
+            result.add(new GrandPrixWeekend.ResultRow(position++, row.participant().id(), row.displayName(),
+                GrandPrixWeekend.ResultStatus.FINISHED, row.completedLaps(), 0, tick, 0));
+        }
+        for (GrandPrixWeekend.Entry entry : weekend.entries()) {
+            if (!timingRows.containsKey(entry.driverId())) {
+                result.add(new GrandPrixWeekend.ResultRow(position++, entry.driverId(), entry.driverName(),
+                    GrandPrixWeekend.ResultStatus.DNS, 0, 0, tick, 0));
+            }
+        }
+        return result;
+    }
+
+    private static List<GrandPrixWeekend.ResultRow> buildBestLapResult(ServerLevel level, GrandPrixWeekend weekend,
+                                                                       GrandPrixWeekend.SessionConfig config) {
+        Map<UUID, List<OWRLapRecords.LapRecord>> laps = OWRLapRecords.get(level).getValidSessionLaps(config.sessionId()).stream()
+            .filter(lap -> weekend.entries().stream().anyMatch(entry -> entry.driverId().equals(lap.driverId())))
+            .collect(java.util.stream.Collectors.groupingBy(OWRLapRecords.LapRecord::driverId));
+        int allowance = config.qualifyingAllowance();
+        if (allowance > 0) {
+            laps.replaceAll((driver, records) -> records.stream().limit(allowance).toList());
+        }
+        Comparator<GrandPrixWeekend.Entry> comparator = (left, right) -> compareQualifyingLaps(laps.get(left.driverId()), laps.get(right.driverId()));
+        List<GrandPrixWeekend.Entry> ordered = weekend.entries().stream().sorted(comparator).toList();
+        List<GrandPrixWeekend.ResultRow> rows = new ArrayList<>();
+        for (int index = 0; index < ordered.size(); index++) {
+            GrandPrixWeekend.Entry entry = ordered.get(index);
+            List<OWRLapRecords.LapRecord> driverLaps = laps.getOrDefault(entry.driverId(), List.of());
+            int best = driverLaps.stream().mapToInt(OWRLapRecords.LapRecord::lapMillis).min().orElse(0);
+            long completion = driverLaps.stream().filter(lap -> lap.lapMillis() == best)
+                .mapToLong(OWRLapRecords.LapRecord::completedGameTime).min().orElse(0L);
+            rows.add(new GrandPrixWeekend.ResultRow(index + 1, entry.driverId(), entry.driverName(),
+                best > 0 ? GrandPrixWeekend.ResultStatus.FINISHED : GrandPrixWeekend.ResultStatus.NOT_CLASSIFIED,
+                driverLaps.size(), best, completion, 0));
+        }
+        return rows;
+    }
+
+    private static int compareQualifyingLaps(List<OWRLapRecords.LapRecord> left, List<OWRLapRecords.LapRecord> right) {
+        List<OWRLapRecords.LapRecord> a = left == null ? List.of() : left.stream()
+            .sorted(Comparator.comparingInt(OWRLapRecords.LapRecord::lapMillis).thenComparingLong(OWRLapRecords.LapRecord::completedGameTime)).toList();
+        List<OWRLapRecords.LapRecord> b = right == null ? List.of() : right.stream()
+            .sorted(Comparator.comparingInt(OWRLapRecords.LapRecord::lapMillis).thenComparingLong(OWRLapRecords.LapRecord::completedGameTime)).toList();
+        if (a.isEmpty() != b.isEmpty()) return a.isEmpty() ? 1 : -1;
+        for (int index = 0; index < Math.min(a.size(), b.size()); index++) {
+            int byLap = Integer.compare(a.get(index).lapMillis(), b.get(index).lapMillis());
+            if (byLap != 0) return byLap;
+            int byCompletion = Long.compare(a.get(index).completedGameTime(), b.get(index).completedGameTime());
+            if (byCompletion != 0) return byCompletion;
+        }
+        return Integer.compare(b.size(), a.size());
+    }
+
+    private static int showGrandPrixStatus(CommandContext<CommandSourceStack> context) {
+        try {
+            String gpName = StringArgumentType.getString(context, "gp");
+            GrandPrixWeekend weekend = OWRGrandPrixRegistry.get(context.getSource().getServer()).weekend(gpName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown GP weekend"));
+            long tick = context.getSource().getLevel().getGameTime();
+            send(context, weekend.name() + " [" + weekend.state().name() + "] entries=" + weekend.entries().size()
+                + " track=" + weekend.trackId() + " dimension=" + weekend.dimensionId() + ".");
+            List<GrandPrixWeekend.SessionView> sessions = weekend.sessions(tick);
+            for (int index = 0; index < sessions.size(); index++) {
+                GrandPrixWeekend.SessionView session = sessions.get(index);
+                String active = index == weekend.activeSessionIndex() ? " *" : "";
+                send(context, (index + 1) + ". " + session.config().name() + " " + session.config().type().name()
+                    + "/" + session.config().format().name() + " " + session.state().name() + active
+                    + " elapsed=" + session.elapsedTicks() / 20 + "s remaining=" + session.remainingTicks() / 20 + "s"
+                    + (session.state() == RaceSessionState.COUNTDOWN
+                        || session.state() == RaceSessionState.SUSPENDED && session.suspendedFrom() == RaceSessionState.COUNTDOWN
+                        ? " countdown=" + session.countdownRemainingTicks() / 20.0 + "s" : "")
+                    + (session.result() == null ? "" : " result=" + (session.result().official() ? "official" : "provisional")
+                        + " r" + session.result().revision()) + (session.grid().isEmpty() ? "" : " grid=" + session.grid().size()));
+            }
+            if (sessions.isEmpty()) {
+                send(context, "Schedule is empty.");
+            }
+            return sessions.size();
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            send(context, "GP status refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static int setGrandPrixGrid(CommandContext<CommandSourceStack> context) {
+        try {
+            String gpName = StringArgumentType.getString(context, "gp");
+            OWRGrandPrixRegistry registry = OWRGrandPrixRegistry.get(context.getSource().getServer());
+            GrandPrixWeekend weekend = registry.weekend(gpName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown GP weekend"));
+            requireWeekendDimension(context, weekend);
+            Map<String, UUID> byCode = weekend.entries().stream().collect(java.util.stream.Collectors.toMap(
+                entry -> entry.displayCode().toLowerCase(java.util.Locale.ROOT), GrandPrixWeekend.Entry::driverId));
+            String[] codes = StringArgumentType.getString(context, "codes").trim().split("[\\s,]+");
+            List<UUID> order = new ArrayList<>();
+            for (String code : codes) {
+                UUID driver = byCode.get(code.toLowerCase(java.util.Locale.ROOT));
+                if (driver == null) {
+                    throw new IllegalArgumentException("Unknown entry code " + code);
+                }
+                order.add(driver);
+            }
+            long tick = context.getSource().getLevel().getGameTime();
+            registry.updateWeekend(gpName, value -> value.materializeGrid(order, tick, actorId(context), actorName(context)));
+            send(context, "Materialized manual grid for " + gpName + ": " + String.join(", ", codes) + ".");
+            return order.size();
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            send(context, "GP grid refused: " + exception.getMessage() + ".");
+            return 0;
+        }
+    }
+
+    private static void stageGrandPrixCars(ServerLevel level, GrandPrixWeekend weekend) {
+        GrandPrixWeekend.SessionView session = weekend.activeSession(level.getGameTime()).orElseThrow();
+        TrackDefinition track = TrackDefinitionsData.get(level).get(weekend.trackId()).orElseThrow();
+        List<TrackDefinition.GridSlot> slots = track.gridSlots().stream()
+            .sorted(Comparator.comparingInt(TrackDefinition.GridSlot::index)).toList();
+        for (int index = 0; index < session.grid().size(); index++) {
+            ServerPlayer driver = level.getServer().getPlayerList().getPlayer(session.grid().get(index));
+            if (driver == null || driver.level() != level || !(driver.getVehicle() instanceof OpenwheelCarEntity car)
+                || car.getControllingPassenger() != driver) {
+                continue;
+            }
+            TrackDefinition.GridSlot slot = slots.get(index);
+            car.setPos(slot.position().x(), slot.position().y() + 0.02, slot.position().z());
+            car.setYRot((float) Math.toDegrees(slot.headingRadians()) - 90.0f);
+            car.setDeltaMovement(Vec3.ZERO);
+        }
+    }
+
+    private static void requireWeekendDimension(CommandContext<CommandSourceStack> context, GrandPrixWeekend weekend) {
+        if (!dimensionId(context).equals(weekend.dimensionId())) {
+            throw new IllegalStateException("Run this control from the weekend dimension " + weekend.dimensionId());
+        }
+    }
+
+    private static void validateWeekendTrack(CommandContext<CommandSourceStack> context, GrandPrixWeekend weekend,
+                                             boolean requireGrid) {
+        TrackDefinition track = TrackDefinitionsData.get(context.getSource().getLevel()).get(weekend.trackId())
+            .orElseThrow(() -> new IllegalStateException("The configured track no longer exists"));
+        Optional<TrackDefinition> active = TrackDefinitionsData.get(context.getSource().getLevel()).activeTrack(dimensionId(context));
+        if (active.isEmpty() || !active.get().trackId().equals(track.trackId())) {
+            throw new IllegalStateException("Select the configured track before opening or starting this weekend");
+        }
+        Optional<SurveyRoute> route = TrackSurveyData.get(context.getSource().getLevel()).get(track.trackId());
+        if (route.isEmpty() || route.get().nodes().size() < 2 || route.get().length() <= 0.0) {
+            throw new IllegalStateException("The configured track has no valid survey route");
+        }
+        if (!requireGrid) {
+            return;
+        }
+        Set<Integer> indices = new HashSet<>();
+        for (TrackDefinition.GridSlot slot : track.gridSlots()) {
+            if (!indices.add(slot.index())) {
+                throw new IllegalStateException("The configured track has duplicate grid slot " + slot.index());
+            }
+        }
+        if (track.gridSlots().size() < weekend.entries().size()) {
+            throw new IllegalStateException("The configured track has " + track.gridSlots().size() + " grid slots for "
+                + weekend.entries().size() + " entries");
+        }
+    }
+
+    private static GrandPrixWeekend.SessionFormat parseSessionFormat(GrandPrixWeekend.SessionType type, String value) {
+        String clean = value.toLowerCase(java.util.Locale.ROOT).replace('-', '_');
+        if (clean.equals("timed")) {
+            return switch (type) {
+                case PRACTICE -> GrandPrixWeekend.SessionFormat.TIMED_PRACTICE;
+                case QUALIFYING -> GrandPrixWeekend.SessionFormat.TIMED_QUALIFYING;
+                case SPRINT, RACE -> GrandPrixWeekend.SessionFormat.TIMED_RACE;
+            };
+        }
+        if (clean.equals("laps") || clean.equals("lap_count")) return GrandPrixWeekend.SessionFormat.LAP_COUNT_RACE;
+        if (clean.equals("one_shot")) return GrandPrixWeekend.SessionFormat.ONE_SHOT_QUALIFYING;
+        if (clean.equals("two_shot")) return GrandPrixWeekend.SessionFormat.TWO_SHOT_QUALIFYING;
+        return parseEnum(GrandPrixWeekend.SessionFormat.class, clean, "session format");
+    }
+
+    private static GrandPrixWeekend.GridSource parseGridSource(String value) {
+        return switch (value.toLowerCase(java.util.Locale.ROOT).replace('-', '_')) {
+            case "entry", "entries", "configured" -> GrandPrixWeekend.GridSource.CONFIGURED_ENTRY_ORDER;
+            case "previous", "previous_official" -> GrandPrixWeekend.GridSource.PREVIOUS_OFFICIAL;
+            case "manual" -> GrandPrixWeekend.GridSource.MANUAL;
+            default -> throw new IllegalArgumentException("Unknown grid source; use entry, previous, or manual");
+        };
+    }
+
+    private static <E extends Enum<E>> E parseEnum(Class<E> type, String value, String label) {
+        try {
+            return Enum.valueOf(type, value.toUpperCase(java.util.Locale.ROOT).replace('-', '_'));
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("Unknown " + label + ": " + value);
+        }
+    }
+
+    private static long secondsToTicks(int seconds) {
+        return Math.multiplyExact((long) seconds, 20L);
+    }
+
+    private static UUID actorId(CommandContext<CommandSourceStack> context) {
+        return context.getSource().getEntity() == null ? null : context.getSource().getEntity().getUUID();
+    }
+
+    private static String actorName(CommandContext<CommandSourceStack> context) {
+        return context.getSource().getTextName();
     }
 
     private static int resumeRaceTiming(CommandContext<CommandSourceStack> context) {

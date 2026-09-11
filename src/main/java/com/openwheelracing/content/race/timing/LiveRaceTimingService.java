@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
 
 public final class LiveRaceTimingService {
     private static final int BROADCAST_INTERVAL_TICKS = 4;
@@ -36,6 +37,11 @@ public final class LiveRaceTimingService {
     }
 
     public static StartResult start(ServerLevel level, long sessionId, String sessionName, int lapLimit) {
+        return start(level, sessionId, sessionName, lapLimit, Set.of(), -1L);
+    }
+
+    public static StartResult start(ServerLevel level, long sessionId, String sessionName, int lapLimit,
+                                    Set<UUID> eligibleParticipants, long remainingRaceTicks) {
         Optional<TrackDefinition> activeTrack = TrackDefinitionsData.get(level).activeTrack(level.dimension().identifier().toString());
         if (activeTrack.isEmpty()) {
             return new StartResult(false, "No active track in this dimension");
@@ -46,7 +52,7 @@ public final class LiveRaceTimingService {
             return new StartResult(false, "Active track has no valid survey route");
         }
         RuntimeState runtime = new RuntimeState(sessionId, sessionName, activeTrack.get().trackId(), route.get().routeId(),
-            surveys.revision(), route.get().toModel(), lapLimit);
+            surveys.revision(), route.get().toModel(), lapLimit, eligibleParticipants, remainingRaceTicks);
         RUNTIMES.put(level, runtime);
         RECOVERY_CHECKED.add(level);
         runtime.tick(level);
@@ -78,6 +84,18 @@ public final class LiveRaceTimingService {
     public static Optional<LiveRaceTimingSnapshot> latestSnapshot(ServerLevel level) {
         RuntimeState runtime = RUNTIMES.get(level);
         return runtime == null ? Optional.empty() : Optional.of(runtime.decoratedSnapshot(level.getGameTime()));
+    }
+
+    public static void updateWeekendContext(ServerLevel level, long sessionId, String weekendName, String sessionType,
+                                            Set<UUID> eligibleParticipants, long remainingRaceTicks) {
+        RuntimeState runtime = RUNTIMES.get(level);
+        if (runtime == null || runtime.sessionId != sessionId) {
+            return;
+        }
+        runtime.eligibleParticipants = Set.copyOf(eligibleParticipants);
+        runtime.remainingRaceTicks = Math.max(-1L, remainingRaceTicks);
+        runtime.weekendName = weekendName == null ? "" : weekendName;
+        runtime.sessionType = sessionType == null ? "" : sessionType;
     }
 
     public static void sendCurrent(ServerPlayer player) {
@@ -126,7 +144,7 @@ public final class LiveRaceTimingService {
             return;
         }
         RuntimeState runtime = new RuntimeState(checkpoint.sessionId(), checkpoint.sessionName(), checkpoint.trackId(), checkpoint.routeId(),
-            surveys.revision(), route.get().toModel(), checkpoint.lapLimit());
+            surveys.revision(), route.get().toModel(), checkpoint.lapLimit(), Set.copyOf(checkpoint.eligibleParticipants()), -1L);
         runtime.active = false;
         runtime.suspensionReason = "SERVER_RECOVERY";
         List<LiveRaceClassificationEngine.RestoredProgress> restored = checkpoint.participants().stream().map(saved ->
@@ -174,12 +192,21 @@ public final class LiveRaceTimingService {
         private long lastBroadcastTick = Long.MIN_VALUE;
         private long lastBroadcastRevision = Long.MIN_VALUE;
         private boolean forceBroadcast;
+        private Set<UUID> eligibleParticipants;
+        private long remainingRaceTicks;
+        private String weekendName = "";
+        private String sessionType = "";
 
         private RuntimeState(long sessionId, String sessionName, UUID trackId, UUID routeId, int surveyRevision, SurveyRouteModel route) {
             this(sessionId, sessionName, trackId, routeId, surveyRevision, route, 0);
         }
 
         private RuntimeState(long sessionId, String sessionName, UUID trackId, UUID routeId, int surveyRevision, SurveyRouteModel route, int lapLimit) {
+            this(sessionId, sessionName, trackId, routeId, surveyRevision, route, lapLimit, Set.of(), -1L);
+        }
+
+        private RuntimeState(long sessionId, String sessionName, UUID trackId, UUID routeId, int surveyRevision,
+                             SurveyRouteModel route, int lapLimit, Set<UUID> eligibleParticipants, long remainingRaceTicks) {
             this.sessionId = sessionId;
             this.sessionName = sessionName == null ? "" : sessionName;
             this.trackId = trackId;
@@ -187,6 +214,8 @@ public final class LiveRaceTimingService {
             this.surveyRevision = surveyRevision;
             this.route = route;
             this.lapLimit = Math.max(0, lapLimit);
+            this.eligibleParticipants = Set.copyOf(eligibleParticipants);
+            this.remainingRaceTicks = Math.max(-1L, remainingRaceTicks);
             engine.reset(route.length());
         }
 
@@ -224,6 +253,9 @@ public final class LiveRaceTimingService {
                 }
                 Participant participant = participant(car);
                 if (participant == null) {
+                    continue;
+                }
+                if (!eligibleParticipants.isEmpty() && !eligibleParticipants.contains(participant.key().id())) {
                     continue;
                 }
                 LocalizedParticipant state = localized.computeIfAbsent(participant.key(), ignored -> new LocalizedParticipant());
@@ -270,15 +302,16 @@ public final class LiveRaceTimingService {
                 new LiveRaceTimingData.SavedParticipant(row.participant().id(), row.participant().kind().ordinal(), row.displayName(),
                     row.completedLaps(), row.routeDistanceMeters(), row.position())).toList();
             LiveRaceTimingData.get(level).update(new LiveRaceTimingData.Checkpoint(true, snapshot.active(), snapshot.suspensionReason(),
-                sessionId, sessionName, trackId, routeId, surveyRevision, lapLimit, snapshot.revision(), saved));
+                sessionId, sessionName, trackId, routeId, surveyRevision, lapLimit, List.copyOf(eligibleParticipants), snapshot.revision(), saved));
         }
 
         private LiveRaceTimingSnapshot decoratedSnapshot(long serverTick) {
             List<RaceTimingRow> rows = engineSnapshot == null ? List.of() : engineSnapshot.rows();
             List<RacePositionChange> changes = engineSnapshot == null ? List.of() : engineSnapshot.recentPositionChanges();
             long revision = engineSnapshot == null ? engine.revision() : engineSnapshot.revision();
-            return new LiveRaceTimingSnapshot(active, suspensionReason, sessionId, sessionName, trackId, routeId, revision,
-                serverTick, route.length(), rows, changes, lapLimit, -1L);
+            return new LiveRaceTimingSnapshot(active, suspensionReason, sessionId, sessionName, weekendName, sessionType,
+                trackId, routeId, revision,
+                serverTick, route.length(), rows, changes, lapLimit, remainingRaceTicks);
         }
     }
 

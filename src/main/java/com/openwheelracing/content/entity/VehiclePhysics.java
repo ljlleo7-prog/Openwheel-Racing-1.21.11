@@ -412,6 +412,20 @@ public final class VehiclePhysics {
             * lowSpeedCornerRotationBlend(speedMetersPerSecond);
     }
 
+    /**
+     * Smoothly removes residual wheel/body motion after the car has nearly stopped.
+     * This is deliberately a rate-based response rather than a velocity clamp.
+     */
+    static double nearStationarySettlingGain(double speedMetersPerSecond, double dtSeconds) {
+        double movingBlend = smoothstep(Math.max(0.0, speedMetersPerSecond) / 0.90);
+        return (1.0 - movingBlend) * (1.0 - Math.exp(-7.0 * Math.max(0.0, dtSeconds)));
+    }
+
+    static double blockedContactSettlingGain(double blockedFraction, double dtSeconds) {
+        return clamp(blockedFraction, 0.0, 1.0)
+            * (1.0 - Math.exp(-12.0 * Math.max(0.0, dtSeconds)));
+    }
+
     static double gripEnvelopeForInputSource(boolean keyboardInput, double assistedEnvelope) {
         return keyboardInput ? assistedEnvelope : Double.POSITIVE_INFINITY;
     }

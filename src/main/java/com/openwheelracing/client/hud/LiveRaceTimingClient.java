@@ -33,6 +33,10 @@ public final class LiveRaceTimingClient {
         return snapshot.active();
     }
 
+    public static boolean hasWeekendSession() {
+        return snapshot.sessionId() > 0L && !snapshot.weekendName().isBlank();
+    }
+
     public static List<RaceTimingRow> rows() {
         return snapshot.rows();
     }

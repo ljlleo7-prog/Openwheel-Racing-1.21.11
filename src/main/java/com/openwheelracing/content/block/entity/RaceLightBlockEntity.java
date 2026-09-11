@@ -115,7 +115,8 @@ public class RaceLightBlockEntity extends BlockEntity implements MenuProvider {
 
     private RaceSignal resolveFlagSignal(OWRRaceControlState control) {
         RaceSignal global = control.signalForGlobalFlag();
-        if (global != RaceSignal.GREEN || !control.isAutoFlagging() || !(level instanceof ServerLevel serverLevel) || !hasRouteAssignment()) {
+        if (!hasRouteAssignment()) return global == RaceSignal.GREEN ? RaceSignal.OFF : global;
+        if (global != RaceSignal.GREEN || !control.isAutoFlagging() || !(level instanceof ServerLevel serverLevel)) {
             return global;
         }
         RaceSignal automatic = RaceAutoFlagService.signalForLight(serverLevel, assignedRouteDistance, assignedRouteLength);

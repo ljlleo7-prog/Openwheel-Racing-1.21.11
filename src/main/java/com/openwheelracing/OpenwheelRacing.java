@@ -9,6 +9,7 @@ import com.openwheelracing.content.command.OWRCommands;
 import com.openwheelracing.content.race.OWRLegacyDimensionDataImporter;
 import com.openwheelracing.content.race.RaceAutoFlagService;
 import com.openwheelracing.content.race.timing.LiveRaceTimingService;
+import com.openwheelracing.content.race.weekend.GrandPrixWeekendService;
 import com.openwheelracing.content.track.TrackMapAutoDetector;
 import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
 import com.openwheelracing.network.OWRNetwork;
@@ -68,6 +69,7 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(TrackWeatherChunkProgression::onServerTick);
         NeoForge.EVENT_BUS.addListener(BasicAiFleetManager::onServerTick);
         NeoForge.EVENT_BUS.addListener(LiveRaceTimingService::onServerTick);
+        NeoForge.EVENT_BUS.addListener(GrandPrixWeekendService::onServerTick);
         NeoForge.EVENT_BUS.addListener(RaceAutoFlagService::onServerTick);
     }
 
