@@ -7,8 +7,19 @@ final class ModularCollisionGeometry {
     }
 
     static double firstContactTime(Rectangle moving, double movementX, double movementZ, Rectangle stationary) {
+        Contact contact = firstContact(moving, movementX, movementZ, stationary);
+        return contact == null ? Double.NaN : contact.time;
+    }
+
+    static Contact firstContact(Rectangle moving, double movementX, double movementZ, Rectangle stationary) {
         double entry = 0.0;
         double exit = 1.0;
+        double minimumInitialOverlap = Double.POSITIVE_INFINITY;
+        double initialNormalX = 0.0;
+        double initialNormalZ = 0.0;
+        double entryNormalX = 0.0;
+        double entryNormalZ = 0.0;
+        boolean initiallyOverlapping = true;
         double[][] axes = {
             {moving.rightX, moving.rightZ},
             {moving.forwardX, moving.forwardZ},
@@ -23,10 +34,23 @@ final class ModularCollisionGeometry {
             double separation = stationaryCenter - movingCenter;
             double combinedRadius = movingRadius + stationaryRadius;
             double projectedMovement = movementX * axis[0] + movementZ * axis[1];
+            double initialOverlap = combinedRadius - Math.abs(separation);
+
+            if (initialOverlap < -EPSILON) {
+                initiallyOverlapping = false;
+            } else if (initialOverlap < minimumInitialOverlap) {
+                minimumInitialOverlap = initialOverlap;
+                double movingSide = movingCenter - stationaryCenter;
+                double sign = Math.abs(movingSide) > EPSILON
+                    ? Math.signum(movingSide)
+                    : (Math.abs(projectedMovement) > EPSILON ? -Math.signum(projectedMovement) : 1.0);
+                initialNormalX = axis[0] * sign;
+                initialNormalZ = axis[1] * sign;
+            }
 
             if (Math.abs(projectedMovement) <= EPSILON) {
                 if (Math.abs(separation) > combinedRadius + EPSILON) {
-                    return Double.NaN;
+                    return null;
                 }
                 continue;
             }
@@ -38,13 +62,30 @@ final class ModularCollisionGeometry {
                 axisEntry = axisExit;
                 axisExit = swap;
             }
-            entry = Math.max(entry, axisEntry);
+            if (axisEntry > entry) {
+                entry = axisEntry;
+                double movingCenterAtEntry = movingCenter + projectedMovement * axisEntry;
+                double sign = Math.signum(movingCenterAtEntry - stationaryCenter);
+                if (sign == 0.0) {
+                    sign = -Math.signum(projectedMovement);
+                }
+                entryNormalX = axis[0] * sign;
+                entryNormalZ = axis[1] * sign;
+            }
             exit = Math.min(exit, axisExit);
             if (entry - exit > EPSILON) {
-                return Double.NaN;
+                return null;
             }
         }
-        return exit >= -EPSILON && entry <= 1.0 + EPSILON ? Math.max(0.0, entry) : Double.NaN;
+        if (initiallyOverlapping) {
+            return new Contact(0.0, initialNormalX, initialNormalZ);
+        }
+        return exit >= -EPSILON && entry <= 1.0 + EPSILON
+            ? new Contact(Math.max(0.0, entry), entryNormalX, entryNormalZ)
+            : null;
+    }
+
+    record Contact(double time, double normalX, double normalZ) {
     }
 
     record Rectangle(double centerX, double centerZ,

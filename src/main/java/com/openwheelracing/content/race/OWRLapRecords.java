@@ -215,6 +215,23 @@ public class OWRLapRecords extends SavedData {
             .toList();
     }
 
+    public List<DriverAverage> getDriverAverages(int selectedLaps) {
+        int count = Math.max(1, Math.min(20, selectedLaps));
+        Map<UUID, List<LapRecord>> grouped = new HashMap<>();
+        for (LapRecord lap : laps) {
+            if (!lap.invalidated() && lap.lapMillis() > 0) grouped.computeIfAbsent(lap.driverId(), ignored -> new ArrayList<>()).add(lap);
+        }
+        return grouped.entrySet().stream().map(entry -> {
+            List<LapRecord> valid = entry.getValue().stream().sorted(Comparator.comparingInt(LapRecord::lapMillis)).limit(count).toList();
+            int average = (int) Math.round(valid.stream().mapToInt(LapRecord::lapMillis).average().orElse(0));
+            LapRecord first = valid.getFirst();
+            return new DriverAverage(entry.getKey(), first.driverName(), average, valid.size(), first.lapMillis(), first.sessionName());
+        }).sorted(Comparator.comparingInt(DriverAverage::averageLapMillis).thenComparing(DriverAverage::driverName)).toList();
+    }
+
+    public record DriverAverage(UUID driverId, String driverName, int averageLapMillis, int sampleLaps,
+                                int bestLapMillis, String bestLapSessionName) {}
+
     public List<DriverBest> getActiveSessionBestLapsSorted() {
         Map<UUID, DriverBest> bests = new HashMap<>();
         for (LapRecord lap : laps) {

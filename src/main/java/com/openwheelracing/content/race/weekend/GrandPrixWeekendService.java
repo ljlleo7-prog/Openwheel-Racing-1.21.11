@@ -34,6 +34,9 @@ public final class GrandPrixWeekendService {
         MinecraftServer server = event.getServer();
         OWRGrandPrixRegistry registry = OWRGrandPrixRegistry.get(server);
         int connectedPlayers = server.getPlayerList().getPlayerCount();
+        Set<String> openDimensions = registry.weekends().stream()
+            .filter(weekend -> weekend.state() == GrandPrixWeekend.EventState.OPEN)
+            .map(GrandPrixWeekend::dimensionId).collect(Collectors.toUnmodifiableSet());
         for (GrandPrixWeekend weekend : registry.weekends()) {
             if (weekend.state() != GrandPrixWeekend.EventState.OPEN) {
                 continue;
@@ -83,10 +86,13 @@ public final class GrandPrixWeekendService {
                 OWRRaceControlState.get(level).setStartPhase(phase);
                 if (session.countdownRemainingTicks() == 0L) {
                     OWRLapRecords.get(level).activateSession(session.config().sessionId(), session.config().name());
+                    int timingLapLimit = session.config().format() == GrandPrixWeekend.SessionFormat.LAP_COUNT_RACE
+                        ? session.config().lapLimit() : 0;
                     LiveRaceTimingService.StartResult timing = LiveRaceTimingService.start(level, session.config().sessionId(),
-                        session.config().name(), session.config().lapLimit(), eligible,
+                        session.config().name(), timingLapLimit, eligible,
                         session.config().durationTicks() > 0L ? session.config().durationTicks() : -1L);
                     if (timing.started()) {
+                        LiveRaceTimingService.lockParticipantCars(level, session.config().sessionId());
                         weekend.start(tick, null, "SERVER");
                         OWRRaceControlState.get(level).setStartPhase(6);
                     } else {
@@ -99,6 +105,11 @@ public final class GrandPrixWeekendService {
             long remaining = session.config().durationTicks() > 0L ? session.remainingTicks() : -1L;
             LiveRaceTimingService.updateWeekendContext(level, session.config().sessionId(), weekend.name(),
                 session.config().type().name(), eligible, remaining);
+        }
+        for (ServerLevel level : server.getAllLevels()) {
+            if (!openDimensions.contains(level.dimension().identifier().toString())) {
+                LiveRaceTimingService.clearWeekendContext(level);
+            }
         }
     }
 

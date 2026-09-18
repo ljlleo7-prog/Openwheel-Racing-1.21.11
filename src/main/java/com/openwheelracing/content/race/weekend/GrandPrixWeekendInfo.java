@@ -10,8 +10,9 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
                                    int activeSessionIndex, String activeSessionName, String activeSessionType,
                                    String activeSessionFormat, String activeSessionState, String suspensionReason,
                                    long elapsedTicks, long remainingTicks, long countdownRemainingTicks,
-                                   List<SessionInfo> sessions) {
+                                   List<SessionInfo> sessions, List<EntryInfo> entries) {
     private static final int MAX_SESSIONS = 32;
+    private static final int MAX_ENTRIES = 24;
 
     public GrandPrixWeekendInfo {
         eventName = clean(eventName);
@@ -27,24 +28,28 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
         remainingTicks = Math.max(0L, remainingTicks);
         countdownRemainingTicks = Math.max(0L, countdownRemainingTicks);
         sessions = List.copyOf(sessions == null ? List.of() : sessions.stream().limit(MAX_SESSIONS).toList());
+        entries = List.copyOf(entries == null ? List.of() : entries.stream().limit(MAX_ENTRIES).toList());
     }
 
     public static GrandPrixWeekendInfo empty() {
-        return new GrandPrixWeekendInfo(false, "", "", 0, -1, "", "", "", "", "", 0L, 0L, 0L, List.of());
+        return new GrandPrixWeekendInfo(false, "", "", 0, -1, "", "", "", "", "", 0L, 0L, 0L, List.of(), List.of());
     }
 
     public static GrandPrixWeekendInfo from(GrandPrixWeekend weekend, long serverTick) {
         List<GrandPrixWeekend.SessionView> views = weekend.sessions(serverTick);
         List<SessionInfo> sessions = views.stream().map(view -> new SessionInfo(view.config().name(),
             view.config().type().name(), view.config().format().name(), view.state().name(), view.config().durationTicks(),
-            view.config().lapLimit(), view.grid().size(), view.result() != null && view.result().official())).toList();
+            view.config().lapLimit(), view.config().countdownTicks(), view.config().graceTicks(), view.config().worldTime(),
+            view.config().gridSource().name(), view.grid().size(), view.result() != null && view.result().official())).toList();
+        List<EntryInfo> entries = weekend.entries().stream()
+            .map(entry -> new EntryInfo(entry.driverName(), entry.displayCode(), entry.status().name())).toList();
         GrandPrixWeekend.SessionView active = weekend.activeSession(serverTick).orElse(null);
         return new GrandPrixWeekendInfo(true, weekend.name(), weekend.state().name(), weekend.entries().size(),
             weekend.activeSessionIndex(), active == null ? "" : active.config().name(),
             active == null ? "" : active.config().type().name(), active == null ? "" : active.config().format().name(),
             active == null ? "" : active.state().name(), active == null ? "" : active.suspensionReason().name(),
             active == null ? 0L : active.elapsedTicks(), active == null ? 0L : active.remainingTicks(),
-            active == null ? 0L : active.countdownRemainingTicks(), sessions);
+            active == null ? 0L : active.countdownRemainingTicks(), sessions, entries);
     }
 
     public void encode(FriendlyByteBuf buffer) {
@@ -63,6 +68,8 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
         buffer.writeLong(countdownRemainingTicks);
         buffer.writeVarInt(sessions.size());
         sessions.forEach(session -> session.encode(buffer));
+        buffer.writeVarInt(entries.size());
+        entries.forEach(entry -> entry.encode(buffer));
     }
 
     public static GrandPrixWeekendInfo decode(FriendlyByteBuf buffer) {
@@ -87,8 +94,16 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
         for (int index = 0; index < count; index++) {
             sessions.add(SessionInfo.decode(buffer));
         }
+        int decodedEntryCount = buffer.readVarInt();
+        if (decodedEntryCount < 0 || decodedEntryCount > MAX_ENTRIES) {
+            throw new IllegalArgumentException("GP entry summary count exceeds " + MAX_ENTRIES);
+        }
+        java.util.ArrayList<EntryInfo> entries = new java.util.ArrayList<>(decodedEntryCount);
+        for (int index = 0; index < decodedEntryCount; index++) {
+            entries.add(EntryInfo.decode(buffer));
+        }
         return new GrandPrixWeekendInfo(present, eventName, eventState, entryCount, activeIndex, activeName,
-            activeType, activeFormat, activeState, reason, elapsed, remaining, countdown, sessions);
+            activeType, activeFormat, activeState, reason, elapsed, remaining, countdown, sessions, entries);
     }
 
     public boolean can(String action) {
@@ -120,7 +135,8 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
     }
 
     public record SessionInfo(String name, String type, String format, String state, long durationTicks,
-                              int lapLimit, int gridSize, boolean official) {
+                              int lapLimit, long countdownTicks, long graceTicks, long worldTime, String gridSource,
+                              int gridSize, boolean official) {
         public SessionInfo {
             name = clean(name);
             type = clean(type);
@@ -128,6 +144,10 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
             state = clean(state);
             durationTicks = Math.max(0L, durationTicks);
             lapLimit = Math.max(0, lapLimit);
+            countdownTicks = Math.max(0L, countdownTicks);
+            graceTicks = Math.max(0L, graceTicks);
+            worldTime = Math.clamp(worldTime, 0L, 23_999L);
+            gridSource = clean(gridSource);
             gridSize = Math.max(0, gridSize);
         }
 
@@ -138,13 +158,36 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
             buffer.writeUtf(state, 24);
             buffer.writeLong(durationTicks);
             buffer.writeVarInt(lapLimit);
+            buffer.writeLong(countdownTicks);
+            buffer.writeLong(graceTicks);
+            buffer.writeLong(worldTime);
+            buffer.writeUtf(gridSource, 32);
             buffer.writeVarInt(gridSize);
             buffer.writeBoolean(official);
         }
 
         private static SessionInfo decode(FriendlyByteBuf buffer) {
             return new SessionInfo(buffer.readUtf(40), buffer.readUtf(24), buffer.readUtf(32), buffer.readUtf(24),
-                buffer.readLong(), buffer.readVarInt(), buffer.readVarInt(), buffer.readBoolean());
+                buffer.readLong(), buffer.readVarInt(), buffer.readLong(), buffer.readLong(), buffer.readLong(),
+                buffer.readUtf(32), buffer.readVarInt(), buffer.readBoolean());
+        }
+    }
+
+    public record EntryInfo(String driverName, String displayCode, String status) {
+        public EntryInfo {
+            driverName = clean(driverName);
+            displayCode = clean(displayCode);
+            status = clean(status);
+        }
+
+        private void encode(FriendlyByteBuf buffer) {
+            buffer.writeUtf(driverName, 40);
+            buffer.writeUtf(displayCode, 8);
+            buffer.writeUtf(status, 24);
+        }
+
+        private static EntryInfo decode(FriendlyByteBuf buffer) {
+            return new EntryInfo(buffer.readUtf(40), buffer.readUtf(8), buffer.readUtf(24));
         }
     }
 }

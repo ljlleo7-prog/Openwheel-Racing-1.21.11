@@ -21,6 +21,8 @@ import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
+import com.openwheelracing.content.race.BoPDriverRow;
+import com.openwheelracing.content.race.BoPProfileState;
 import com.openwheelracing.content.race.RaceFlagMode;
 import com.openwheelracing.content.race.TeamCarRow;
 import com.openwheelracing.content.race.timing.LiveRaceTimingService;
@@ -66,7 +68,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "17";
+    private static final String PROTOCOL = "18";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -109,6 +111,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorStartSessionMessage.TYPE, codec(RaceDirectorStartSessionMessage::encode, RaceDirectorStartSessionMessage::decode), RaceDirectorStartSessionMessage::handle);
         registrar.playToServer(RaceDirectorRefreshSessionMessage.TYPE, codec(RaceDirectorRefreshSessionMessage::encode, RaceDirectorRefreshSessionMessage::decode), RaceDirectorRefreshSessionMessage::handle);
         registrar.playToServer(RaceDirectorGrandPrixControlMessage.TYPE, codec(RaceDirectorGrandPrixControlMessage::encode, RaceDirectorGrandPrixControlMessage::decode), RaceDirectorGrandPrixControlMessage::handle);
+        registrar.playToServer(RaceDirectorGrandPrixSetupMessage.TYPE, codec(RaceDirectorGrandPrixSetupMessage::encode, RaceDirectorGrandPrixSetupMessage::decode), RaceDirectorGrandPrixSetupMessage::handle);
         registrar.playToServer(RaceDirectorSetArchiveModeMessage.TYPE, codec(RaceDirectorSetArchiveModeMessage::encode, RaceDirectorSetArchiveModeMessage::decode), RaceDirectorSetArchiveModeMessage::handle);
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
         registrar.playToServer(TeamTerminalSenseCarsMessage.TYPE, codec(TeamTerminalSenseCarsMessage::encode, TeamTerminalSenseCarsMessage::decode), TeamTerminalSenseCarsMessage::handle);
@@ -117,6 +120,8 @@ public final class OWRNetwork {
         registrar.playToServer(MonitorTelemetrySubscribeMessage.TYPE, codec(MonitorTelemetrySubscribeMessage::encode, MonitorTelemetrySubscribeMessage::decode), MonitorTelemetrySubscribeMessage::handle);
         registrar.playToServer(RaceMonitorAutoDetectMapMessage.TYPE, codec(RaceMonitorAutoDetectMapMessage::encode, RaceMonitorAutoDetectMapMessage::decode), RaceMonitorAutoDetectMapMessage::handle);
         registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
+        registrar.playToServer(RaceDirectorSetBoPMessage.TYPE, codec(RaceDirectorSetBoPMessage::encode, RaceDirectorSetBoPMessage::decode), RaceDirectorSetBoPMessage::handle);
+        registrar.playToServer(RaceDirectorSetBoPLapsMessage.TYPE, codec(RaceDirectorSetBoPLapsMessage::encode, RaceDirectorSetBoPLapsMessage::decode), RaceDirectorSetBoPLapsMessage::handle);
         registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
         registrar.playToClient(TrackMoistureSnapshotMessage.TYPE, codec(TrackMoistureSnapshotMessage::encode, TrackMoistureSnapshotMessage::decode), TrackMoistureSnapshotMessage::handle);
         registrar.playToClient(LiveryTextureCacheMessage.TYPE, codec(LiveryTextureCacheMessage::encode, LiveryTextureCacheMessage::decode), LiveryTextureCacheMessage::handle);
@@ -1051,22 +1056,29 @@ public final class OWRNetwork {
     public static void sendRankingBoard(ServerPlayer player, ServerLevel level) {
         OWRLapRecords records = OWRLapRecords.get(level);
         LapTimingScope scope = LapTimingPreferences.get(player.getUUID());
-        PacketDistributor.sendToPlayer(player, rankingBoard(records, scope));
+        PacketDistributor.sendToPlayer(player, rankingBoard(records, scope, usesGpLapTimeLeaderboard(level)));
     }
 
     public static void broadcastRankingBoard(net.minecraft.server.MinecraftServer server, net.minecraft.server.level.ServerLevel level) {
         OWRLapRecords records = OWRLapRecords.get(level);
         for (net.minecraft.server.level.ServerPlayer p : server.getPlayerList().getPlayers()) {
             if (p.level().dimension().equals(level.dimension())) {
-                PacketDistributor.sendToPlayer(p, rankingBoard(records, LapTimingPreferences.get(p.getUUID())));
+                PacketDistributor.sendToPlayer(p, rankingBoard(records, LapTimingPreferences.get(p.getUUID()), usesGpLapTimeLeaderboard(level)));
             }
         }
     }
 
-    private static RankingBoardMessage rankingBoard(OWRLapRecords records, LapTimingScope scope) {
-        return scope == LapTimingScope.ALL_TIME
+    private static RankingBoardMessage rankingBoard(OWRLapRecords records, LapTimingScope scope, boolean forceSession) {
+        return !forceSession && scope == LapTimingScope.ALL_TIME
             ? new RankingBoardMessage("ALL TIME", records.getPlayerBestLapsSorted())
             : new RankingBoardMessage("(" + records.getActiveSessionId() + ")", records.getActiveSessionBestLapsSorted());
+    }
+
+    private static boolean usesGpLapTimeLeaderboard(ServerLevel level) {
+        return LiveRaceTimingService.latestSnapshot(level)
+            .filter(snapshot -> !snapshot.weekendName().isBlank())
+            .map(snapshot -> snapshot.sessionType().equals("PRACTICE") || snapshot.sessionType().equals("QUALIFYING"))
+            .orElse(false);
     }
 
     public record LiveRaceTimingSnapshotMessage(LiveRaceTimingSnapshot snapshot) implements CustomPacketPayload {
@@ -1266,6 +1278,19 @@ public final class OWRNetwork {
                 com.openwheelracing.content.race.PitLanePenaltyRow.encode(row, buffer);
             }
             snapshot.grandPrixWeekend().encode(buffer);
+            buffer.writeVarInt(snapshot.bopSelectedLaps());
+            buffer.writeVarInt(snapshot.bopDrivers().size());
+            for (BoPDriverRow row : snapshot.bopDrivers()) {
+                buffer.writeUUID(row.driverId());
+                buffer.writeUtf(row.driverName(), 40);
+                buffer.writeInt(row.averageLapMillis());
+                buffer.writeVarInt(row.sampleLaps());
+                buffer.writeInt(row.bestLapMillis());
+                buffer.writeUtf(row.bestLapSessionName(), 40);
+                buffer.writeByte(row.weightPercent());
+                buffer.writeByte(row.powerPercent());
+                buffer.writeInt(row.estimatedLapMillis());
+            }
         }
 
         private static RaceDirectorSnapshotMessage decode(FriendlyByteBuf buffer) {
@@ -1313,12 +1338,19 @@ public final class OWRNetwork {
             }
             com.openwheelracing.content.race.weekend.GrandPrixWeekendInfo grandPrixWeekend =
                 com.openwheelracing.content.race.weekend.GrandPrixWeekendInfo.decode(buffer);
+            int bopSelectedLaps = buffer.readVarInt();
+            int bopCount = buffer.readVarInt();
+            java.util.ArrayList<BoPDriverRow> bopDrivers = new java.util.ArrayList<>(bopCount);
+            for (int index = 0; index < bopCount; index++) {
+                bopDrivers.add(new BoPDriverRow(buffer.readUUID(), buffer.readUtf(40), buffer.readInt(), buffer.readVarInt(),
+                    buffer.readInt(), buffer.readUtf(40), buffer.readByte(), buffer.readByte(), buffer.readInt()));
+            }
             return new RaceDirectorSnapshotMessage(new RaceDirectorSnapshot(checkpointCheckEnabled, offTrackCheckEnabled, autoShiftingAllowed,
                 minimumValidLapTicks, raceLapLimit, page, maxPage, raceControlRevision, lapRecordsRevision, maxErsCapacityMj,
                 maxBalancedDeployKw, maxAttackDeployKw, maxHarvestNegativeKw, globalFlag, carDamageModifier, tyreWearModifier,
                 activeSessionId, activeSessionName, archiveMode, leftTeamCarId, rightTeamCarId, trackMap, trackMapScanRunning,
                 trackMapScanScannedChunks, trackMapScanTotalChunks, trackMapScanDetectedCells, trackMoisture, laps, teamCars,
-                penalties, grandPrixWeekend));
+                penalties, grandPrixWeekend, bopSelectedLaps, bopDrivers));
         }
 
         private static void handle(RaceDirectorSnapshotMessage message, IPayloadContext context) {
@@ -1783,6 +1815,101 @@ public final class OWRNetwork {
         }
     }
 
+    /** Bounded setup request; the existing Brigadier commands remain the single validation and persistence path. */
+    public record RaceDirectorGrandPrixSetupMessage(String operation, List<String> arguments) implements CustomPacketPayload {
+        private static final int MAX_ARGUMENTS = 10;
+        public static final CustomPacketPayload.Type<RaceDirectorGrandPrixSetupMessage> TYPE = payloadType("race_director_grand_prix_setup_message");
+
+        public RaceDirectorGrandPrixSetupMessage {
+            operation = operation == null ? "" : operation;
+            arguments = List.copyOf(arguments == null ? List.of() : arguments);
+        }
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RaceDirectorGrandPrixSetupMessage message, FriendlyByteBuf buffer) {
+            buffer.writeUtf(message.operation, 24);
+            buffer.writeVarInt(Math.min(message.arguments.size(), MAX_ARGUMENTS));
+            message.arguments.stream().limit(MAX_ARGUMENTS).forEach(argument -> buffer.writeUtf(argument, 80));
+        }
+
+        private static RaceDirectorGrandPrixSetupMessage decode(FriendlyByteBuf buffer) {
+            String operation = buffer.readUtf(24);
+            int count = buffer.readVarInt();
+            if (count < 0 || count > MAX_ARGUMENTS) {
+                throw new IllegalArgumentException("GP setup argument count exceeds " + MAX_ARGUMENTS);
+            }
+            java.util.ArrayList<String> arguments = new java.util.ArrayList<>(count);
+            for (int index = 0; index < count; index++) {
+                arguments.add(buffer.readUtf(80));
+            }
+            return new RaceDirectorGrandPrixSetupMessage(operation, arguments);
+        }
+
+        private static void handle(RaceDirectorGrandPrixSetupMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.player() instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+                if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
+                    return;
+                }
+                String command = setupCommand(message.operation.toLowerCase(java.util.Locale.ROOT), message.arguments);
+                if (command == null) {
+                    return;
+                }
+                player.level().getServer().getCommands().performPrefixedCommand(
+                    player.createCommandSourceStack().withPermission(LevelBasedPermissionSet.MODERATOR), command);
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+            });
+        }
+
+        private static String setupCommand(String operation, List<String> args) {
+            try {
+                int expectedArguments = switch (operation) {
+                    case "create", "delete", "open" -> 1;
+                    case "remove", "unregister" -> 2;
+                    case "move", "register" -> 3;
+                    case "add" -> 10;
+                    default -> -1;
+                };
+                if (args.size() != expectedArguments) return null;
+                return switch (operation) {
+                    case "create" -> "owr gp create " + quote(args.get(0));
+                    case "delete" -> "owr gp delete " + quote(args.get(0));
+                    case "open" -> "owr gp open " + quote(args.get(0));
+                    case "remove" -> "owr gp remove " + quote(args.get(0)) + " " + integer(args.get(1));
+                    case "move" -> "owr gp move " + quote(args.get(0)) + " "
+                        + integer(args.get(1)) + " " + integer(args.get(2));
+                    case "register" -> "owr gp register " + quote(args.get(0)) + " "
+                        + quote(args.get(1)) + " " + quote(args.get(2));
+                    case "unregister" -> "owr gp unregister " + quote(args.get(0)) + " " + quote(args.get(1));
+                    case "add" -> "owr gp add " + quote(args.get(0)) + " " + word(args.get(1))
+                        + " " + word(args.get(2)) + " " + quote(args.get(3)) + " " + integer(args.get(4))
+                        + " " + integer(args.get(5)) + " " + integer(args.get(6)) + " " + integer(args.get(7))
+                        + " " + integer(args.get(8)) + " " + word(args.get(9));
+                    default -> null;
+                };
+            } catch (IllegalArgumentException exception) {
+                return null;
+            }
+        }
+
+        private static String quote(String value) {
+            return StringArgumentType.escapeIfRequired(value);
+        }
+
+        private static String integer(String value) {
+            return Integer.toString(Integer.parseInt(value));
+        }
+
+        private static String word(String value) {
+            if (!value.matches("[a-zA-Z_]+")) throw new IllegalArgumentException("Not a command word");
+            return value;
+        }
+    }
+
     public record RaceDirectorRefreshSessionMessage() implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<RaceDirectorRefreshSessionMessage> TYPE = payloadType("race_director_refresh_session_message");
 
@@ -2022,6 +2149,44 @@ public final class OWRNetwork {
                         sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
                     }
                 });
+            });
+        }
+    }
+
+    public record RaceDirectorSetBoPMessage(UUID driverId, int weightPercent, int powerPercent) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSetBoPMessage> TYPE = payloadType("race_director_set_bop_message");
+        @Override public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(RaceDirectorSetBoPMessage message, FriendlyByteBuf buffer) {
+            buffer.writeUUID(message.driverId()); buffer.writeByte(message.weightPercent()); buffer.writeByte(message.powerPercent());
+        }
+        private static RaceDirectorSetBoPMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorSetBoPMessage(buffer.readUUID(), buffer.readByte(), buffer.readByte());
+        }
+        private static void handle(RaceDirectorSetBoPMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                if (!(context.player() instanceof ServerPlayer player) || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) return;
+                int weight = Math.max(BoPProfileState.MIN_WEIGHT_PERCENT, Math.min(BoPProfileState.MAX_WEIGHT_PERCENT, message.weightPercent()));
+                int power = Math.max(BoPProfileState.MIN_POWER_PERCENT, Math.min(BoPProfileState.MAX_POWER_PERCENT, message.powerPercent()));
+                ServerLevel level = (ServerLevel) player.level();
+                BoPProfileState.get(level).set(message.driverId(), weight, power);
+                level.getEntitiesOfClass(OpenwheelCarEntity.class, player.getBoundingBox().inflate(128.0))
+                    .stream().filter(car -> car.getControllingPassenger() instanceof ServerPlayer driver && driver.getUUID().equals(message.driverId()))
+                    .forEach(car -> car.applyBoP(weight, power));
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(level));
+            });
+        }
+    }
+
+    public record RaceDirectorSetBoPLapsMessage(int laps) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RaceDirectorSetBoPLapsMessage> TYPE = payloadType("race_director_set_bop_laps_message");
+        @Override public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(RaceDirectorSetBoPLapsMessage message, FriendlyByteBuf buffer) { buffer.writeVarInt(message.laps()); }
+        private static RaceDirectorSetBoPLapsMessage decode(FriendlyByteBuf buffer) { return new RaceDirectorSetBoPLapsMessage(buffer.readVarInt()); }
+        private static void handle(RaceDirectorSetBoPLapsMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                if (!(context.player() instanceof ServerPlayer player) || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) return;
+                menu.setBoPSelectedLaps(message.laps());
+                sendRaceDirectorSnapshot(player, menu.createSnapshot((ServerLevel) player.level()));
             });
         }
     }

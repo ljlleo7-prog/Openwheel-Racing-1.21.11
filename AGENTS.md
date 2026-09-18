@@ -21,6 +21,10 @@ Use `./gradlew test --tests 'com.openwheelracing.content.ai.BasicAiGripModelTest
 
 Follow existing Java conventions: four-space indentation, braces on the same line, `UpperCamelCase` types, `lowerCamelCase` methods/fields, and `UPPER_SNAKE_CASE` constants. Keep packages lowercase beneath `com.openwheelracing`. Name registries with the `OWR` prefix where established. No formatter or lint task is configured, so match surrounding code and keep imports clean. Use UTF-8.
 
+### Client UI Rendering Pitfall
+
+Minecraft 1.21.11 permits only one blurred background pass per frame. A screen opened from another screen can be rendered in the same frame after the parent already blurred, so do not call `Screen.renderBackground()` from such screens. Override `renderBackground()` as a no-op and paint an opaque/manual background in `render()` when necessary. Recheck this when adding or changing screen transitions.
+
 ## Testing Guidelines
 
 JUnit Jupiter 5.11.4 is configured. Name test classes `*Test` and test methods after observable behavior. Add focused unit tests for physics, geometry, timing, AI, and serialization changes. Run `./gradlew build` before submitting; it includes both standard and livery prototype tests.

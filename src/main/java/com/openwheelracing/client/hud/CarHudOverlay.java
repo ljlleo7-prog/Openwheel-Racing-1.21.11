@@ -487,6 +487,12 @@ public final class CarHudOverlay {
     }
 
     private static void renderRaceTimingTower(GuiGraphics graphics, Font font, java.util.UUID localParticipantId) {
+        var snapshot = LiveRaceTimingClient.snapshot();
+        if (!snapshot.weekendName().isBlank()
+            && (snapshot.sessionType().equals("PRACTICE") || snapshot.sessionType().equals("QUALIFYING"))) {
+            renderWeekendLapTimeTower(graphics, font, snapshot);
+            return;
+        }
         List<RaceTimingRow> allRows = LiveRaceTimingClient.rows();
         int localIndex = -1;
         for (int index = 0; index < allRows.size(); index++) {
@@ -505,7 +511,6 @@ public final class CarHudOverlay {
         int py = 8;
         graphics.fill(px, py, px + panelWidth, py + panelHeight, 0xB8142638);
         graphics.fill(px, py, px + panelWidth, py + 1, 0xAA55718B);
-        var snapshot = LiveRaceTimingClient.snapshot();
         String session = fit(font, snapshot.sessionName().isBlank() ? snapshot.sessionType() : snapshot.sessionName(), panelWidth - 12);
         String raceProgress = raceProgressLabel(allRows);
         if (snapshot.weekendName().isBlank()) {
@@ -539,6 +544,49 @@ public final class CarHudOverlay {
             graphics.drawString(font, marker + name, px + 20, y, color, false);
             graphics.drawString(font, gap, px + panelWidth - 6 - font.width(gap), y, color, false);
         }
+    }
+
+    private static void renderWeekendLapTimeTower(GuiGraphics graphics, Font font,
+                                                   com.openwheelracing.content.race.timing.LiveRaceTimingSnapshot snapshot) {
+        List<OWRLapRecords.DriverBest> ranking = LapRankingClient.getRanking();
+        int rowCount = Math.min(8, ranking.size());
+        int panelWidth = 166;
+        int headerHeight = 40;
+        int rowHeight = 10;
+        int panelHeight = headerHeight + Math.max(1, rowCount) * rowHeight + 4;
+        int px = 8;
+        int py = 8;
+        graphics.fill(px, py, px + panelWidth, py + panelHeight, 0xB8142638);
+        graphics.fill(px, py, px + panelWidth, py + 1, 0xAA55718B);
+        String session = fit(font, snapshot.sessionName().isBlank() ? snapshot.sessionType() : snapshot.sessionName(), panelWidth - 12);
+        drawScaledText(graphics, font, session, px + panelWidth / 2, py + 3, 1.25f, 0xFFFFFFFF, true);
+        drawScaledText(graphics, font, fit(font, snapshot.weekendName(), panelWidth - 16), px + panelWidth / 2, py + 17,
+            0.82f, 0xFFAEBCCC, false);
+        graphics.fill(px + 5, py + 29, px + panelWidth - 5, py + 30, 0x6655718B);
+        String type = snapshot.sessionType().replace('_', ' ');
+        graphics.drawString(font, type, px + 6, py + 30, 0xFF8394A7, false);
+        String clock = snapshot.remainingRaceTicks() < 0L ? "--:--" : formatSessionClock(snapshot.remainingRaceTicks());
+        graphics.drawString(font, clock, px + panelWidth - 6 - font.width(clock), py + 30, 0xFF7EE787, false);
+        if (ranking.isEmpty()) {
+            graphics.drawString(font, Component.translatable("hud.openwheelracing.race.no_laps").getString(),
+                px + 6, py + headerHeight + 1, 0xFF777777, false);
+            return;
+        }
+        int leaderMillis = ranking.getFirst().millis();
+        for (int index = 0; index < rowCount; index++) {
+            OWRLapRecords.DriverBest entry = ranking.get(index);
+            int y = py + headerHeight + index * rowHeight;
+            int color = index == 0 ? 0xFFFFDD44 : 0xFFCCCCCC;
+            String time = index == 0 ? formatLapTime(entry.millis()) : "+" + formatGap(entry.millis() - leaderMillis);
+            graphics.drawString(font, Integer.toString(index + 1), px + 5, y, color, false);
+            graphics.drawString(font, fit(font, entry.name(), 82), px + 20, y, color, false);
+            graphics.drawString(font, time, px + panelWidth - 6 - font.width(time), y, color, false);
+        }
+    }
+
+    private static String formatSessionClock(long ticks) {
+        long seconds = Math.max(0L, ticks + 19L) / 20L;
+        return String.format("%d:%02d", seconds / 60L, seconds % 60L);
     }
 
     private static String raceProgressLabel(List<RaceTimingRow> rows) {

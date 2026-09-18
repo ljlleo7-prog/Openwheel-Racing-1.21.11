@@ -143,6 +143,29 @@ public final class VehiclePhysics {
             forceLateral / massKg + yawRate * velocityLongitudinal);
     }
 
+    static CollisionResponse resolvePlanarCollision(double firstVelocityX, double firstVelocityZ, double firstMass,
+                                                     double secondVelocityX, double secondVelocityZ, double secondMass,
+                                                     double normalX, double normalZ, double restitution) {
+        double normalLength = Math.hypot(normalX, normalZ);
+        if (normalLength <= 1.0E-9 || firstMass <= 0.0 || secondMass <= 0.0) {
+            return new CollisionResponse(firstVelocityX, firstVelocityZ, secondVelocityX, secondVelocityZ);
+        }
+        double nx = normalX / normalLength;
+        double nz = normalZ / normalLength;
+        double closingSpeed = (firstVelocityX - secondVelocityX) * nx
+            + (firstVelocityZ - secondVelocityZ) * nz;
+        if (closingSpeed <= 0.0) {
+            return new CollisionResponse(firstVelocityX, firstVelocityZ, secondVelocityX, secondVelocityZ);
+        }
+        double impulse = (1.0 + clamp(restitution, 0.0, 1.0)) * closingSpeed
+            / (1.0 / firstMass + 1.0 / secondMass);
+        return new CollisionResponse(
+            firstVelocityX - nx * impulse / firstMass,
+            firstVelocityZ - nz * impulse / firstMass,
+            secondVelocityX + nx * impulse / secondMass,
+            secondVelocityZ + nz * impulse / secondMass);
+    }
+
     static double kinematicLongitudinalSlip(double wheelAngularSpeed, double wheelRadius,
                                             double patchLongitudinalSpeed) {
         double wheelSurfaceSpeed = wheelAngularSpeed * wheelRadius;
@@ -789,6 +812,10 @@ public final class VehiclePhysics {
     }
 
     record BodyAcceleration(double longitudinal, double lateral) {
+    }
+
+    record CollisionResponse(double firstVelocityX, double firstVelocityZ,
+                             double secondVelocityX, double secondVelocityZ) {
     }
 
     record AxleWheelLoads(double negativeLocalX, double positiveLocalX) {

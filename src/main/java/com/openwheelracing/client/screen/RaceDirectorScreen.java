@@ -56,7 +56,9 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     }
 
     public static void applySnapshot(RaceDirectorSnapshot snapshot) {
-        if (Minecraft.getInstance().screen instanceof GrandPrixWeekendScreen weekendScreen) {
+        if (Minecraft.getInstance().screen instanceof BoPConsoleScreen bopScreen) {
+            bopScreen.applySnapshot(snapshot);
+        } else if (Minecraft.getInstance().screen instanceof GrandPrixWeekendScreen weekendScreen) {
             weekendScreen.applySnapshot(snapshot);
         } else if (Minecraft.getInstance().screen instanceof RaceDirectorScreen screen) {
             screen.menu.applySnapshot(snapshot);
@@ -97,6 +99,9 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             addBoardWidgets();
         }
         if (menu.getMonitorType() == com.openwheelracing.content.block.entity.RaceMonitorType.DIRECTOR) {
+            addRenderableWidget(Button.builder(Component.literal("BoP CONSOLE"), button ->
+                Minecraft.getInstance().setScreen(new BoPConsoleScreen(this, menu.getSnapshot())))
+                .bounds(leftPos + imageWidth - 196, topPos + 20, 92, 18).build());
             addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.gp_weekend.open"), button ->
                 Minecraft.getInstance().setScreen(new GrandPrixWeekendScreen(this, menu.getSnapshot().grandPrixWeekend())))
                 .bounds(leftPos + imageWidth - 98, topPos + 20, 88, 18).build());

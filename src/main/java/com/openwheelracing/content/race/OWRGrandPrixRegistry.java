@@ -283,9 +283,8 @@ public final class OWRGrandPrixRegistry extends SavedData {
         if (found.isEmpty()) {
             return false;
         }
-        if (found.get().state() != GrandPrixWeekend.EventState.DRAFT
-            && found.get().state() != GrandPrixWeekend.EventState.ABANDONED) {
-            throw new IllegalStateException("Only draft or abandoned weekends may be deleted");
+        if (found.get().state() == GrandPrixWeekend.EventState.OPEN) {
+            throw new IllegalStateException("An open weekend may not be deleted");
         }
         weekends.remove(found.get());
         setDirty();

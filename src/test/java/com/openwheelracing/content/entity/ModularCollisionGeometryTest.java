@@ -34,6 +34,33 @@ class ModularCollisionGeometryTest {
         assertTrue(Double.isNaN(ModularCollisionGeometry.firstContactTime(rightFront, movementX, movementZ, target)));
     }
 
+    @Test
+    void overlappingRectangleReportsAnOutwardNormalThatAllowsEscape() {
+        ModularCollisionGeometry.Rectangle carNose = worldRectangle(0.0, 0.85, 0.0, 0.30, 0.40);
+        ModularCollisionGeometry.Rectangle barrier = worldRectangle(0.0, 1.0, 0.0, 0.50, 0.50);
+
+        ModularCollisionGeometry.Contact contact = ModularCollisionGeometry.firstContact(
+            carNose, 0.0, -0.25, barrier);
+
+        assertEquals(0.0, contact.time(), 1.0E-9);
+        assertTrue(contact.normalZ() < 0.0);
+        assertTrue(-0.25 * contact.normalZ() > 0.0,
+            "Movement out of an existing overlap must point along the outward normal");
+    }
+
+    @Test
+    void sweptContactReportsNormalAgainstApproach() {
+        ModularCollisionGeometry.Rectangle carNose = worldRectangle(0.0, 0.0, 0.0, 0.30, 0.40);
+        ModularCollisionGeometry.Rectangle barrier = worldRectangle(0.0, 1.0, 0.0, 0.50, 0.50);
+
+        ModularCollisionGeometry.Contact contact = ModularCollisionGeometry.firstContact(
+            carNose, 0.0, 0.50, barrier);
+
+        assertEquals(0.20, contact.time(), 1.0E-9);
+        assertTrue(contact.normalZ() < 0.0);
+        assertTrue(0.50 * contact.normalZ() < 0.0);
+    }
+
     private static ModularCollisionGeometry.Rectangle rectangle(
             double localX, double localZ, double yaw, double halfWidth, double halfLength) {
         double forwardX = -Math.sin(yaw);

@@ -9,6 +9,7 @@ import com.openwheelracing.content.track.survey.SurveyRouteLocalizer;
 import com.openwheelracing.content.track.survey.SurveyRouteModel;
 import com.openwheelracing.content.track.survey.TrackSurveyData;
 import com.openwheelracing.network.OWRNetwork;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -96,6 +97,33 @@ public final class LiveRaceTimingService {
         runtime.remainingRaceTicks = Math.max(-1L, remainingRaceTicks);
         runtime.weekendName = weekendName == null ? "" : weekendName;
         runtime.sessionType = sessionType == null ? "" : sessionType;
+    }
+
+    /** Removes GP-only HUD decoration while retaining the finished timing snapshot for Race Director records. */
+    public static void clearWeekendContext(ServerLevel level) {
+        RuntimeState runtime = RUNTIMES.get(level);
+        if (runtime == null || runtime.weekendName.isBlank()) {
+            return;
+        }
+        runtime.weekendName = "";
+        runtime.sessionType = "";
+        runtime.eligibleParticipants = Set.of();
+        runtime.remainingRaceTicks = -1L;
+        runtime.forceBroadcast = true;
+    }
+
+    /** Captures the exact car assigned to each driver at lights-out. A later car swap retires that driver. */
+    public static void lockParticipantCars(ServerLevel level, long sessionId) {
+        RuntimeState runtime = RUNTIMES.get(level);
+        if (runtime == null || runtime.sessionId != sessionId) {
+            return;
+        }
+        runtime.lockParticipantCars(level);
+    }
+
+    public static Set<UUID> retiredParticipants(ServerLevel level, long sessionId) {
+        RuntimeState runtime = RUNTIMES.get(level);
+        return runtime == null || runtime.sessionId != sessionId ? Set.of() : Set.copyOf(runtime.retiredParticipants);
     }
 
     public static void sendCurrent(ServerPlayer player) {
@@ -196,6 +224,9 @@ public final class LiveRaceTimingService {
         private long remainingRaceTicks;
         private String weekendName = "";
         private String sessionType = "";
+        private final Map<UUID, UUID> lockedParticipantCars = new HashMap<>();
+        private final Set<UUID> retiredParticipants = new java.util.HashSet<>();
+        private boolean participantCarsLocked;
 
         private RuntimeState(long sessionId, String sessionName, UUID trackId, UUID routeId, int surveyRevision, SurveyRouteModel route) {
             this(sessionId, sessionName, trackId, routeId, surveyRevision, route, 0);
@@ -258,6 +289,26 @@ public final class LiveRaceTimingService {
                 if (!eligibleParticipants.isEmpty() && !eligibleParticipants.contains(participant.key().id())) {
                     continue;
                 }
+                if (participantCarsLocked) {
+                    UUID driverId = participant.key().id();
+                    if (retiredParticipants.contains(driverId)) {
+                        continue;
+                    }
+                    UUID lockedCarId = lockedParticipantCars.get(driverId);
+                    if (lockedCarId == null) {
+                        continue;
+                    }
+                    if (!lockedCarId.equals(car.getUUID())) {
+                        if (retiredParticipants.add(driverId)) {
+                            ServerPlayer driver = level.getServer().getPlayerList().getPlayer(driverId);
+                            if (driver != null) {
+                                driver.sendSystemMessage(Component.translatable("message.openwheelracing.gp.car_change_retired"));
+                            }
+                            forceBroadcast = true;
+                        }
+                        continue;
+                    }
+                }
                 LocalizedParticipant state = localized.computeIfAbsent(participant.key(), ignored -> new LocalizedParticipant());
                 SurveyRouteLocalizer.Result result = SurveyRouteLocalizer.locate(route,
                     new SurveyRouteModel.Point(car.getX(), car.getY(), car.getZ()), Math.toRadians(car.getYRot() + 90.0F), state.localizer);
@@ -269,6 +320,23 @@ public final class LiveRaceTimingService {
                     confidence(result.status()), level.getGameTime(), level.getGameTime() * 50L, participant.initialOrderHint()));
             }
             return observations;
+        }
+
+        private void lockParticipantCars(ServerLevel level) {
+            lockedParticipantCars.clear();
+            retiredParticipants.clear();
+            for (Entity entity : level.getAllEntities()) {
+                if (!(entity instanceof OpenwheelCarEntity car) || !car.participatesInRaceTiming()) {
+                    continue;
+                }
+                Participant participant = participant(car);
+                if (participant == null || !eligibleParticipants.isEmpty() && !eligibleParticipants.contains(participant.key().id())) {
+                    continue;
+                }
+                lockedParticipantCars.putIfAbsent(participant.key().id(), car.getUUID());
+            }
+            participantCarsLocked = true;
+            forceBroadcast = true;
         }
 
         private Participant participant(OpenwheelCarEntity car) {

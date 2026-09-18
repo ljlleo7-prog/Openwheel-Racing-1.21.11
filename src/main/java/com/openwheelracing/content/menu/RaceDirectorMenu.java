@@ -11,6 +11,9 @@ import com.openwheelracing.content.race.RaceDirectorSnapshot;
 import com.openwheelracing.content.race.TeamCarRow;
 import com.openwheelracing.content.race.PitLanePenaltyData;
 import com.openwheelracing.content.race.PitLanePenaltyRow;
+import com.openwheelracing.content.race.BoPDriverRow;
+import com.openwheelracing.content.race.BoPMath;
+import com.openwheelracing.content.race.BoPProfileState;
 import com.openwheelracing.content.race.OWRGrandPrixRegistry;
 import com.openwheelracing.content.race.weekend.GrandPrixWeekend;
 import com.openwheelracing.content.race.weekend.GrandPrixWeekendInfo;
@@ -41,6 +44,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private final RaceMonitorType monitorType;
     private final RaceDirectorBlockEntity raceDirector;
     private int page;
+    private int bopSelectedLaps = 3;
     private boolean archiveMode;
     private int lastRaceControlRevision = Integer.MIN_VALUE;
     private int lastLapRecordsRevision = Integer.MIN_VALUE;
@@ -103,6 +107,8 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     public void setPage(int page) {
         this.page = Math.max(0, page);
     }
+
+    public void setBoPSelectedLaps(int laps) { bopSelectedLaps = Math.max(1, Math.min(20, laps)); }
 
     public boolean isArchiveMode() {
         return archiveMode;
@@ -231,7 +237,13 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             laps,
             senseTeamCars(level),
             PitLanePenaltyData.get(level).pending().stream().map(PitLanePenaltyRow::from).toList(),
-            grandPrixInfo(level)
+            grandPrixInfo(level),
+            bopSelectedLaps,
+            records.getDriverAverages(bopSelectedLaps).stream().limit(32).map(average -> {
+                BoPProfileState.ProfileValues profile = BoPProfileState.get(level).get(average.driverId());
+                return new BoPDriverRow(average.driverId(), average.driverName(), average.averageLapMillis(), average.sampleLaps(), average.bestLapMillis(), average.bestLapSessionName(),
+                    profile.weightPercent(), profile.powerPercent(), BoPMath.estimateLapMillis(average.averageLapMillis(), profile.weightPercent(), profile.powerPercent()));
+            }).toList()
         );
     }
 
@@ -241,7 +253,9 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
             .filter(weekend -> weekend.dimensionId().equals(dimensionId)).toList();
         GrandPrixWeekend selected = weekends.stream()
             .filter(weekend -> weekend.state() == GrandPrixWeekend.EventState.OPEN).findFirst()
-            .orElseGet(() -> weekends.isEmpty() ? null : weekends.getFirst());
+            .orElseGet(() -> weekends.stream()
+                .filter(weekend -> weekend.state() == GrandPrixWeekend.EventState.DRAFT).findFirst()
+                .orElseGet(() -> weekends.isEmpty() ? null : weekends.getFirst()));
         return selected == null ? GrandPrixWeekendInfo.empty() : GrandPrixWeekendInfo.from(selected, level.getGameTime());
     }
 

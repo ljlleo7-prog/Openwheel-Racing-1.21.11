@@ -21,6 +21,7 @@ import com.openwheelracing.content.race.LapTimingPreferences;
 import com.openwheelracing.content.race.LapTimingScope;
 import com.openwheelracing.content.race.OWRLapProfiles;
 import com.openwheelracing.content.race.OWRLapRecords;
+import com.openwheelracing.content.race.BoPProfileState;
 import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.PitLanePenaltyData;
 import com.openwheelracing.content.race.PitLaneSpeedMath;
@@ -158,6 +159,8 @@ public class OpenwheelCarEntity extends Entity {
     private static final EntityDataAccessor<Integer> ERS_LICO_HARVEST_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> ERS_LICO_BALANCED_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> ERS_LICO_ATTACK_POWER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Float> BOP_WEIGHT_MULTIPLIER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> BOP_POWER_MULTIPLIER = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.FLOAT);
 
     public static final int PIT_STOP_DURATION = 60; // 3 seconds
     public static final int TYRE_PHASE_NONE = 0;
@@ -861,6 +864,8 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(ERS_LICO_HARVEST_POWER, ERS_LICO_HARVEST_POWER_DEFAULT_KW);
         builder.define(ERS_LICO_BALANCED_POWER, ERS_LICO_BALANCED_POWER_DEFAULT_KW);
         builder.define(ERS_LICO_ATTACK_POWER, ERS_LICO_ATTACK_POWER_DEFAULT_KW);
+        builder.define(BOP_WEIGHT_MULTIPLIER, 1.0f);
+        builder.define(BOP_POWER_MULTIPLIER, 1.0f);
     }
 
     @Override
@@ -1997,6 +2002,7 @@ public class OpenwheelCarEntity extends Entity {
         super.tick();
 
         if (!level().isClientSide()) {
+            syncBoPFromBoundDriver();
             boolean ridden = getControllingPassenger() != null;
             if (wasRiddenLastTick && !ridden && getDeltaMovement().horizontalDistance() > MAX_REASONABLE_MOVEMENT_BLOCKS_PER_TICK) {
                 logMovementWarning("dismount with excessive velocity", position(), getDeltaMovement(), getDeltaMovement(), 0.0, 0.0, 0.0, getCurrentSurface());
@@ -2021,6 +2027,22 @@ public class OpenwheelCarEntity extends Entity {
             tickEngineDamageEffects();
             tickWarnings();
         }
+    }
+
+    private void syncBoPFromBoundDriver() {
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        UUID driverId = getControllingPassenger() != null ? getControllingPassenger().getUUID()
+            : getBasicAiIdentity().map(BasicAiDriverIdentity::driverId).orElse(null);
+        if (driverId == null) return;
+        BoPProfileState.ProfileValues profile = BoPProfileState.get(serverLevel).get(driverId);
+        entityData.set(BOP_WEIGHT_MULTIPLIER, (float) profile.weightMultiplier());
+        entityData.set(BOP_POWER_MULTIPLIER, (float) profile.powerMultiplier());
+    }
+
+    public void applyBoP(int weightPercent, int powerPercent) {
+        BoPProfileState.ProfileValues profile = new BoPProfileState.ProfileValues(weightPercent, powerPercent);
+        entityData.set(BOP_WEIGHT_MULTIPLIER, (float) profile.weightMultiplier());
+        entityData.set(BOP_POWER_MULTIPLIER, (float) profile.powerMultiplier());
     }
 
     private void sendPendingDriveInputAck() {
@@ -3357,7 +3379,7 @@ public class OpenwheelCarEntity extends Entity {
 
         VehicleProfile profile = vehicleProfile();
         boolean dynamicPhysics = VehiclePhysicsPresetState.current(level()).isDynamic();
-        double carMassKg = profile.massKg();
+        double carMassKg = profile.massKg() * entityData.get(BOP_WEIGHT_MULTIPLIER);
         double wheelbase = profile.wheelbase();
         double trackWidth = profile.trackWidth();
         double halfTrackWidth = trackWidth * 0.5;
@@ -3365,7 +3387,7 @@ public class OpenwheelCarEntity extends Entity {
         double rearStaticWeight = 1.0 - frontStaticWeight;
         double frontAxleDistance = wheelbase * rearStaticWeight;
         double rearAxleDistance = wheelbase * frontStaticWeight;
-        double yawInertia = profile.yawInertia();
+        double yawInertia = profile.yawInertia() * entityData.get(BOP_WEIGHT_MULTIPLIER);
         double dragArea = profile.dragArea();
         double downforceArea = profile.downforceArea();
         double maxBrakeForce = profile.maxBrakeForce();
@@ -3451,8 +3473,10 @@ public class OpenwheelCarEntity extends Entity {
         }
         int engineRpm = updateEngineRpm(
             drivelineSpeedBlocksPerTick, gear, gearTopSpeed, throttle, launchClutch, clutchReleasing);
-        double power = combustionPowerWatts(engineRpm) * profile.powerMultiplier() * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
-        double requestedIcePowerWatts = throttle > 0.0 && gear > NEUTRAL_GEAR ? power * throttle : 0.0;
+        // BoP power is an ICE restriction/boost only. ERS is calculated independently below
+        // so its deployment and harvest remain at the normal race-control limits.
+        double icePowerWatts = combustionPowerWatts(engineRpm) * profile.powerMultiplier() * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor * entityData.get(BOP_POWER_MULTIPLIER);
+        double requestedIcePowerWatts = throttle > 0.0 && gear > NEUTRAL_GEAR ? icePowerWatts * throttle : 0.0;
         double tyreSlip = 0.0;
 
         double steerInput = Math.abs(steeringDemand) > STEERING_DEADZONE ? steeringDemand : 0.0;
@@ -3624,13 +3648,13 @@ public class OpenwheelCarEntity extends Entity {
             double subDriveForceRequest = driveDirection != 0.0 && throttle > 0.0
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
                     && subSpeedBlocksPerTick < pitSpeedLimit && !boggedInSand
-                ? driveDirection * power * throttle / Math.max(MIN_POWER_SPEED, Math.abs(velocityLong))
+                ? driveDirection * icePowerWatts * throttle / Math.max(MIN_POWER_SPEED, Math.abs(velocityLong))
                 : 0.0;
             if (clutchReleasing && driveDirection != 0.0
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
                     && subSpeedBlocksPerTick < pitSpeedLimit && !boggedInSand) {
                 double releaseT = clutchReleaseTicks / (double) CLUTCH_RELEASE_TICKS;
-                double storedPower = combustionPowerWatts(Math.max(engineRpm, clutchReleaseRpm)) * profile.powerMultiplier() * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor;
+                double storedPower = combustionPowerWatts(Math.max(engineRpm, clutchReleaseRpm)) * profile.powerMultiplier() * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor * entityData.get(BOP_POWER_MULTIPLIER);
                 double clutchForce = driveDirection * storedPower * releaseT / MIN_POWER_SPEED;
                 subDriveForceRequest = driveDirection > 0.0
                     ? Math.max(subDriveForceRequest, clutchForce)
@@ -4370,35 +4394,20 @@ public class OpenwheelCarEntity extends Entity {
                             component.centerX() + beforeMove.x - getX(), component.centerZ() + beforeMove.z - getZ(),
                             component.rightX(), component.rightZ(), component.forwardX(), component.forwardZ(),
                             component.halfWidth(), component.halfLength());
-                        double time = ModularCollisionGeometry.firstContactTime(
+                        ModularCollisionGeometry.Contact contact = ModularCollisionGeometry.firstContact(
                             component, movement.x, movement.z, barrierRectangle);
-                        if (!Double.isFinite(time) || best != null && time >= best.time() - 1.0E-7) {
+                        if (contact == null || best != null && contact.time() >= best.time() - 1.0E-7) {
                             continue;
                         }
-                        Vec3 normal = barrierContactNormal(component, movement, time, barrierBox);
+                        Vec3 normal = new Vec3(contact.normalX(), 0.0, contact.normalZ());
                         if (movement.x * normal.x + movement.z * normal.z < -1.0E-8) {
-                            best = new BarrierContact(normal, time);
+                            best = new BarrierContact(normal, contact.time());
                         }
                     }
                 }
             }
         }
         return best;
-    }
-
-    private static Vec3 barrierContactNormal(ModularCollisionGeometry.Rectangle component, Vec3 movement,
-                                             double time, AABB barrierBox) {
-        double centerX = component.centerX() + movement.x * time;
-        double centerZ = component.centerZ() + movement.z * time;
-        double toMinX = Math.abs(centerX - barrierBox.minX);
-        double toMaxX = Math.abs(centerX - barrierBox.maxX);
-        double toMinZ = Math.abs(centerZ - barrierBox.minZ);
-        double toMaxZ = Math.abs(centerZ - barrierBox.maxZ);
-        double nearest = Math.min(Math.min(toMinX, toMaxX), Math.min(toMinZ, toMaxZ));
-        if (nearest == toMinX) return new Vec3(-1.0, 0.0, 0.0);
-        if (nearest == toMaxX) return new Vec3(1.0, 0.0, 0.0);
-        if (nearest == toMinZ) return new Vec3(0.0, 0.0, -1.0);
-        return new Vec3(0.0, 0.0, 1.0);
     }
 
     private record BarrierContact(Vec3 normal, double time) {
@@ -4800,6 +4809,17 @@ public class OpenwheelCarEntity extends Entity {
 
     private void applyEntityImpactResponse(Entity target, Vec3 normal, double impactSpeed, boolean carTarget) {
         Vec3 carVelocity = getDeltaMovement();
+        if (target instanceof OpenwheelCarEntity otherCar) {
+            Vec3 otherVelocity = otherCar.getDeltaMovement();
+            VehiclePhysics.CollisionResponse response = VehiclePhysics.resolvePlanarCollision(
+                carVelocity.x, carVelocity.z, vehicleProfile().massKg() * entityData.get(BOP_WEIGHT_MULTIPLIER),
+                otherVelocity.x, otherVelocity.z,
+                otherCar.vehicleProfile().massKg() * otherCar.entityData.get(BOP_WEIGHT_MULTIPLIER),
+                normal.x, normal.z, 0.28);
+            setDeltaMovement(response.firstVelocityX(), carVelocity.y, response.firstVelocityZ());
+            otherCar.setDeltaMovement(response.secondVelocityX(), otherVelocity.y, response.secondVelocityZ());
+            return;
+        }
         Vec3 carHorizontalVelocity = new Vec3(carVelocity.x, 0.0, carVelocity.z);
         double intoTarget = Math.max(0.0, carHorizontalVelocity.dot(normal));
         Vec3 redirectedCarVelocity = carHorizontalVelocity
@@ -4807,7 +4827,7 @@ public class OpenwheelCarEntity extends Entity {
             .scale(carTarget ? 0.70 : 0.82);
         setDeltaMovement(new Vec3(redirectedCarVelocity.x, carVelocity.y, redirectedCarVelocity.z));
 
-        double targetPush = Math.min(carTarget ? 0.45 : 0.80, impactSpeed * (carTarget ? 0.65 : 1.15));
+        double targetPush = Math.min(0.80, impactSpeed * 1.15);
         Vec3 targetVelocity = target.getDeltaMovement();
         target.setDeltaMovement(targetVelocity.add(normal.x * targetPush, carTarget ? 0.0 : 0.08, normal.z * targetPush));
     }

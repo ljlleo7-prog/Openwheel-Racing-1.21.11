@@ -10,7 +10,8 @@ public record RaceDirectorSnapshot(boolean checkpointCheckEnabled, boolean offTr
         long activeSessionId, String activeSessionName, boolean archiveMode, int leftTeamCarId, int rightTeamCarId, TrackMapSnapshot trackMap,
         boolean trackMapScanRunning, int trackMapScanScannedChunks, int trackMapScanTotalChunks, int trackMapScanDetectedCells,
         TrackMoistureSnapshot trackMoisture, List<RaceDirectorLapRow> laps, List<TeamCarRow> teamCars,
-        List<PitLanePenaltyRow> pendingPitPenalties, GrandPrixWeekendInfo grandPrixWeekend) {
+        List<PitLanePenaltyRow> pendingPitPenalties, GrandPrixWeekendInfo grandPrixWeekend,
+        int bopSelectedLaps, List<BoPDriverRow> bopDrivers) {
     public RaceDirectorSnapshot {
         trackMap = trackMap == null ? TrackMapSnapshot.EMPTY : trackMap;
         trackMoisture = trackMoisture == null ? TrackMoistureSnapshot.EMPTY : trackMoisture;
@@ -18,12 +19,13 @@ public record RaceDirectorSnapshot(boolean checkpointCheckEnabled, boolean offTr
         teamCars = List.copyOf(teamCars == null ? List.of() : teamCars);
         pendingPitPenalties = List.copyOf(pendingPitPenalties == null ? List.of() : pendingPitPenalties);
         grandPrixWeekend = grandPrixWeekend == null ? GrandPrixWeekendInfo.empty() : grandPrixWeekend;
+        bopDrivers = List.copyOf(bopDrivers == null ? List.of() : bopDrivers);
     }
 
     public static RaceDirectorSnapshot empty() {
         return new RaceDirectorSnapshot(false, true, true, OWRLapRecords.DEFAULT_MIN_VALID_LAP_TICKS, OWRRaceControlState.DEFAULT_RACE_LAP_LIMIT,
             0, 0, 0, 0, 4, 200, 350, 110, RaceFlagMode.DEFAULT, 1.0, 1.0, OWRLapRecords.DEFAULT_SESSION_ID,
             OWRLapRecords.DEFAULT_SESSION_NAME, false, -1, -1, TrackMapSnapshot.EMPTY, false, 0, 0, 0,
-            TrackMoistureSnapshot.EMPTY, List.of(), List.of(), List.of(), GrandPrixWeekendInfo.empty());
+            TrackMoistureSnapshot.EMPTY, List.of(), List.of(), List.of(), GrandPrixWeekendInfo.empty(), 3, List.of());
     }
 }

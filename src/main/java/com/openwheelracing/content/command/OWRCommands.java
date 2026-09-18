@@ -17,6 +17,7 @@ import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.OWRGrandPrixRegistry;
 import com.openwheelracing.content.race.OWRLapRecords;
+import com.openwheelracing.content.race.BoPProfileState;
 import com.openwheelracing.content.race.session.RaceSessionState;
 import com.openwheelracing.content.race.session.RaceSessionSuspensionReason;
 import com.openwheelracing.content.race.timing.LiveRaceTimingService;
@@ -85,6 +86,14 @@ public final class OWRCommands {
                         .executes(context -> setVehiclePhysicsPreset(context, VehiclePhysicsPreset.DYNAMIC)))
                     .then(Commands.literal("status")
                         .executes(OWRCommands::showVehiclePhysicsPreset))))
+            .then(Commands.literal("bop")
+                .then(Commands.literal("set")
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .then(Commands.argument("weight", IntegerArgumentType.integer(BoPProfileState.MIN_WEIGHT_PERCENT, BoPProfileState.MAX_WEIGHT_PERCENT))
+                            .then(Commands.argument("power", IntegerArgumentType.integer(BoPProfileState.MIN_POWER_PERCENT, BoPProfileState.MAX_POWER_PERCENT))
+                                .executes(OWRCommands::setBoP)))))
+                .then(Commands.literal("status")
+                    .then(Commands.argument("player", EntityArgument.player()).executes(OWRCommands::showBoP))))
             .then(Commands.literal("race")
                 .then(Commands.literal("timing")
                     .then(Commands.literal("resume").executes(OWRCommands::resumeRaceTiming))
@@ -272,6 +281,25 @@ public final class OWRCommands {
                     .then(Commands.literal("generate")
                         .executes(OWRCommands::generateAiLine)))));
     }
+
+    private static int setBoP(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer target = EntityArgument.getPlayer(context, "player");
+        int weight = IntegerArgumentType.getInteger(context, "weight");
+        int power = IntegerArgumentType.getInteger(context, "power");
+        BoPProfileState.get((ServerLevel) target.level()).set(target.getUUID(), weight, power);
+        if (target.getVehicle() instanceof OpenwheelCarEntity car) car.applyBoP(weight, power);
+        send(context, "BoP " + target.getScoreboardName() + ": weight " + signed(weight) + "%, power " + signed(power) + "%");
+        return 1;
+    }
+
+    private static int showBoP(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer target = EntityArgument.getPlayer(context, "player");
+        BoPProfileState.ProfileValues profile = BoPProfileState.get((ServerLevel) target.level()).get(target.getUUID());
+        send(context, "BoP " + target.getScoreboardName() + ": weight " + signed(profile.weightPercent()) + "%, power " + signed(profile.powerPercent()) + "%");
+        return 1;
+    }
+
+    private static String signed(int value) { return value >= 0 ? "+" + value : Integer.toString(value); }
 
     private static int setVehiclePhysicsPreset(CommandContext<CommandSourceStack> context,
                                                VehiclePhysicsPreset preset) {
@@ -468,7 +496,10 @@ public final class OWRCommands {
             UUID actor = actorId(context);
             String actorName = actorName(context);
             switch (action) {
-                case "advance" -> registry.updateWeekend(gpName, value -> value.advance(tick, actor, actorName));
+                case "advance" -> {
+                    registry.updateWeekend(gpName, value -> value.advance(tick, actor, actorName));
+                    LiveRaceTimingService.clearWeekendContext(context.getSource().getLevel());
+                }
                 case "stage" -> {
                     validateWeekendTrack(context, weekend, true);
                     GrandPrixWeekend.SessionView session = weekend.activeSession(tick)
@@ -532,13 +563,21 @@ public final class OWRCommands {
             .filter(entry -> entry.status() == GrandPrixWeekend.EntryStatus.ENTERED)
             .map(GrandPrixWeekend.Entry::driverId).collect(java.util.stream.Collectors.toUnmodifiableSet());
         OWRLapRecords.get(context.getSource().getLevel()).activateSession(session.config().sessionId(), session.config().name());
+        int timingLapLimit = session.config().format() == GrandPrixWeekend.SessionFormat.LAP_COUNT_RACE
+            ? session.config().lapLimit() : 0;
         LiveRaceTimingService.StartResult timing = LiveRaceTimingService.start(context.getSource().getLevel(),
-            session.config().sessionId(), session.config().name(), session.config().lapLimit(), eligible,
+            session.config().sessionId(), session.config().name(), timingLapLimit, eligible,
             session.config().durationTicks() > 0L ? session.config().durationTicks() : -1L);
         if (!timing.started()) {
             throw new IllegalStateException(timing.message());
         }
+        if (session.config().type().usesGrid()) {
+            LiveRaceTimingService.lockParticipantCars(context.getSource().getLevel(), session.config().sessionId());
+        }
         registry.updateWeekend(gpName, value -> value.start(tick, actor, actorName));
+        LiveRaceTimingService.updateWeekendContext(context.getSource().getLevel(), session.config().sessionId(), weekend.name(),
+            session.config().type().name(), eligible, session.config().durationTicks() > 0L ? session.config().durationTicks() : -1L);
+        OWRNetwork.broadcastRankingBoard(context.getSource().getServer(), context.getSource().getLevel());
         OWRRaceControlState.get(context.getSource().getLevel()).setStartPhase(6);
     }
 
@@ -553,19 +592,24 @@ public final class OWRCommands {
         Map<UUID, com.openwheelracing.content.race.timing.RaceTimingRow> timingRows = new HashMap<>();
         LiveRaceTimingService.latestSnapshot(context.getSource().getLevel()).ifPresent(snapshot -> snapshot.rows().forEach(
             row -> timingRows.put(row.participant().id(), row)));
+        Set<UUID> retired = LiveRaceTimingService.retiredParticipants(context.getSource().getLevel(), session.config().sessionId());
         List<GrandPrixWeekend.ResultRow> result = new ArrayList<>();
         int position = 1;
-        for (var row : timingRows.values().stream().sorted(Comparator.comparingInt(com.openwheelracing.content.race.timing.RaceTimingRow::position)).toList()) {
+        for (var row : timingRows.values().stream().sorted(Comparator
+            .comparingInt((com.openwheelracing.content.race.timing.RaceTimingRow row) -> retired.contains(row.participant().id()) ? 1 : 0)
+            .thenComparingInt(com.openwheelracing.content.race.timing.RaceTimingRow::position)).toList()) {
             if (weekend.entries().stream().noneMatch(entry -> entry.driverId().equals(row.participant().id()))) {
                 continue;
             }
             result.add(new GrandPrixWeekend.ResultRow(position++, row.participant().id(), row.displayName(),
-                GrandPrixWeekend.ResultStatus.FINISHED, row.completedLaps(), 0, tick, 0));
+                retired.contains(row.participant().id()) ? GrandPrixWeekend.ResultStatus.DNF : GrandPrixWeekend.ResultStatus.FINISHED,
+                row.completedLaps(), 0, tick, 0));
         }
         for (GrandPrixWeekend.Entry entry : weekend.entries()) {
             if (!timingRows.containsKey(entry.driverId())) {
                 result.add(new GrandPrixWeekend.ResultRow(position++, entry.driverId(), entry.driverName(),
-                    GrandPrixWeekend.ResultStatus.DNS, 0, 0, tick, 0));
+                    retired.contains(entry.driverId()) ? GrandPrixWeekend.ResultStatus.DNF : GrandPrixWeekend.ResultStatus.DNS,
+                    0, 0, tick, 0));
             }
         }
         return result;
