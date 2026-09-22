@@ -19,13 +19,12 @@ import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
-import net.neoforged.neoforge.client.event.InputEvent;
-import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
-import net.neoforged.neoforge.client.event.RenderPlayerEvent;
-import net.neoforged.neoforge.client.event.ScreenEvent;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
-import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
+import net.minecraftforge.client.event.InputEvent;
+import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
+import net.minecraftforge.client.event.RenderAvatarEvent;
+import net.minecraftforge.client.event.ScreenEvent;
+import net.minecraftforge.event.TickEvent.ClientTickEvent;
+import net.minecraftforge.client.event.AddGuiOverlayLayersEvent;
 import org.lwjgl.glfw.GLFW;
 
 public final class OpenwheelRacingClientEvents {
@@ -39,9 +38,9 @@ public final class OpenwheelRacingClientEvents {
         OWRKeyMappings.register(event);
     }
 
-    public static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
-        event.registerAboveAll(CAR_HUD, CarHudOverlay::render);
-        event.registerAboveAll(SURVEY_ROUTE_HUD, SurveyRouteHud::render);
+    public static void onAddGuiOverlayLayers(AddGuiOverlayLayersEvent event) {
+        event.getLayeredDraw().add(CAR_HUD, CarHudOverlay::render);
+        event.getLayeredDraw().add(SURVEY_ROUTE_HUD, SurveyRouteHud::render);
     }
 
     public static void onScreenInit(ScreenEvent.Init.Post event) {
@@ -69,9 +68,9 @@ public final class OpenwheelRacingClientEvents {
         }
     }
 
-    public static void onMouseButton(InputEvent.MouseButton.Pre event) {
+    public static boolean onMouseButton(InputEvent.MouseButton.Pre event) {
         if (event.getAction() != GLFW.GLFW_PRESS || OWRClientInputHandler.onboardCar() == null) {
-            return;
+            return false;
         }
         boolean handled = switch (event.getButton()) {
             case GLFW.GLFW_MOUSE_BUTTON_LEFT -> OWRClientInputHandler.shiftDown();
@@ -79,21 +78,18 @@ public final class OpenwheelRacingClientEvents {
             case GLFW.GLFW_MOUSE_BUTTON_MIDDLE -> OWRClientInputHandler.toggleDrs();
             default -> false;
         };
-        if (handled) {
-            event.setCanceled(true);
-        }
+        return handled;
     }
 
-    public static void onRenderPlayer(RenderPlayerEvent.Pre<?> event) {
+    public static boolean onRenderPlayer(RenderAvatarEvent.Pre event) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null && OWRCameraMode.isTCamera() && event.getRenderState().id == mc.player.getId()) {
-            event.setCanceled(true);
-        }
+        return mc.player != null && OWRCameraMode.isTCamera() && event.getState().id == mc.player.getId();
     }
 
-    public static void onRenderLevelAfterEntities(RenderLevelStageEvent.AfterEntities event) {
-        StewardLineOverlay.render(event);
-        SurveyRouteOverlay.render(event);
-        AiRacingLineOverlay.render(event);
+    public static void renderWorldOverlays(net.minecraft.client.renderer.state.LevelRenderState state) {
+        StewardLineOverlay.render(state);
+        SurveyRouteOverlay.render(state);
+        AiRacingLineOverlay.render(state);
+        Minecraft.getInstance().renderBuffers().bufferSource().endBatch(net.minecraft.client.renderer.rendertype.RenderTypes.lines());
     }
 }

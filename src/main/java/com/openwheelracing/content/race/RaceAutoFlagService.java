@@ -20,7 +20,7 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.minecraftforge.event.TickEvent.ServerTickEvent;
 
 /** Server-authoritative local-yellow detection based on route distance, never sector numbers. */
 public final class RaceAutoFlagService {
@@ -43,8 +43,8 @@ public final class RaceAutoFlagService {
     private RaceAutoFlagService() { }
 
     public static void onServerTick(ServerTickEvent.Post event) {
-        boolean autoFlagTick = event.getServer().getTickCount() % 20 == 0;
-        for (ServerLevel level : event.getServer().getAllLevels()) {
+        boolean autoFlagTick = event.server().getTickCount() % 20 == 0;
+        for (ServerLevel level : event.server().getAllLevels()) {
             OWRRaceControlState state = OWRRaceControlState.get(level);
             tickStartSequence(level, state);
             if (autoFlagTick) tickAutoFlags(level, state);

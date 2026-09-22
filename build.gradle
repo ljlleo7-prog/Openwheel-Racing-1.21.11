@@ -1,10 +1,11 @@
-// This is a minimal setup of a NeoForge mod workspace.
+// Forge 1.21.11 workspace. Keep the loader coordinates here so Forge updates are
+// a one-line change instead of being spread through the build.
 
 plugins {
     id 'java'
     id 'idea'
     id 'eclipse'
-    id 'net.neoforged.moddev' version '2.0.142'
+    id 'net.minecraftforge.gradle' version '[7.0.3,8)'
 }
 
 version = '1.18.2'
@@ -38,49 +39,42 @@ configurations {
     liveryPrototypeTestRuntimeOnly.extendsFrom testRuntimeOnly
 }
 
-neoForge {
-    version = '21.11.44'
+minecraft {
+    mappings channel: 'official', version: '1.21.11'
 
     runs {
         configureEach {
-            gameDirectory = layout.projectDirectory.dir('run')
+            workingDir = layout.projectDirectory.dir('run')
             systemProperty 'eventbus.api.strictRuntimeChecks', 'true'
-            systemProperty 'neoforge.enabledGameTestNamespaces', 'openwheelracing'
-            jvmArgument '-XstartOnFirstThread'
+            systemProperty 'forge.enabledGameTestNamespaces', 'openwheelracing'
+            jvmArgs '-XstartOnFirstThread'
         }
 
-        client {
-            client()
+        register('client')
+
+        register('server') {
+            args '--nogui'
         }
 
-        server {
-            server()
-            programArgument '--nogui'
-        }
+        register('gameTestServer')
 
-        gameTestServer {
-            type = 'gameTestServer'
-        }
-
-        data {
-            data()
-            gameDirectory = layout.projectDirectory.dir('run-data')
-            programArguments.addAll '--mod', 'openwheelracing', '--all', '--output', layout.projectDirectory.dir('src/generated/resources').asFile.absolutePath, '--existing', layout.projectDirectory.dir('src/main/resources').asFile.absolutePath
-        }
-    }
-
-    mods {
-        openwheelracing {
-            sourceSet sourceSets.main
+        register('data') {
+            workingDir = layout.projectDirectory.dir('run-data')
+            args '--mod', 'openwheelracing', '--all', '--output', layout.projectDirectory.dir('src/generated/resources'), '--existing', layout.projectDirectory.dir('src/main/resources')
         }
     }
 }
 
 repositories {
+    minecraft.mavenizer(it)
+    maven fg.forgeMaven
+    maven fg.minecraftLibsMaven
     mavenCentral()
 }
 
 dependencies {
+    implementation minecraft.dependency('net.minecraftforge:forge:1.21.11-61.1.0')
+    annotationProcessor 'net.minecraftforge:eventbus-validator:7.0.1'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

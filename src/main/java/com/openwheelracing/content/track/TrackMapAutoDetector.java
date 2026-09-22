@@ -7,7 +7,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.minecraftforge.event.TickEvent.ServerTickEvent;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -52,11 +52,11 @@ public final class TrackMapAutoDetector {
         if (JOBS.isEmpty()) {
             return;
         }
-        MinecraftServer server = event.getServer();
+        MinecraftServer server = event.server();
         ArrayList<String> finished = new ArrayList<>();
         for (ScanJob job : new ArrayList<>(JOBS.values())) {
             ServerLevel level = server.getLevel(job.levelKey);
-            if (level == null || job.tick(level, event.hasTime())) {
+            if (level == null || job.tick(level, event.haveTime())) {
                 finished.add(job.dimensionId);
             }
         }

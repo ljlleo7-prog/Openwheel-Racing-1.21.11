@@ -8,8 +8,8 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.levelgen.Heightmap;
 import com.openwheelracing.content.track.TrackMapData;
 import com.openwheelracing.content.track.TrackMapSnapshot;
-import net.neoforged.neoforge.event.level.ChunkEvent;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.minecraftforge.event.level.ChunkEvent;
+import net.minecraftforge.event.TickEvent.ServerTickEvent;
 
 import java.util.ArrayDeque;
 import java.util.IdentityHashMap;
@@ -54,7 +54,7 @@ public final class TrackWeatherChunkProgression {
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
-        for (ServerLevel level : event.getServer().getAllLevels()) {
+        for (ServerLevel level : event.server().getAllLevels()) {
             TrackAmbientTemperature.tick(level);
             process(level);
         }

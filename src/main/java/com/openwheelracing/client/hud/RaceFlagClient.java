@@ -3,8 +3,8 @@ package com.openwheelracing.client.hud;
 import com.openwheelracing.content.race.RaceFlagMode;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
 public final class RaceFlagClient {

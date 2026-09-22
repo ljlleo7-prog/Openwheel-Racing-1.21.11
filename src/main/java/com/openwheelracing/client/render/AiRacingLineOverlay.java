@@ -5,7 +5,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.openwheelracing.network.OWRNetwork;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+import net.minecraft.client.renderer.state.LevelRenderState;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
@@ -29,12 +29,12 @@ public final class AiRacingLineOverlay {
         strips = List.of();
     }
 
-    public static void render(RenderLevelStageEvent.AfterEntities event) {
+    public static void render(LevelRenderState state) {
         Minecraft mc = Minecraft.getInstance();
         if (!visible || mc.level == null || !mc.level.dimension().identifier().toString().equals(dimensionId)) return;
-        Vec3 camera = event.getLevelRenderState().cameraRenderState.pos;
+        Vec3 camera = state.cameraRenderState.pos;
         VertexConsumer consumer = mc.renderBuffers().bufferSource().getBuffer(RenderTypes.lines());
-        PoseStack.Pose pose = event.getPoseStack().last();
+        PoseStack.Pose pose = new PoseStack().last();
         for (OWRNetwork.AiRacingLineStrip strip : strips) {
             double[] x = strip.x(), y = strip.y(), z = strip.z();
             int segmentCount = strip.closed() ? x.length : x.length - 1;

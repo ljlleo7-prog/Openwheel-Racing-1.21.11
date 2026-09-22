@@ -15,7 +15,7 @@ import com.openwheelracing.content.track.survey.TrackSurveyData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.Entity;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.minecraftforge.event.TickEvent.ServerTickEvent;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -66,10 +66,10 @@ public final class BasicAiFleetManager {
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
-        if (!event.hasTime()) {
+        if (!event.haveTime()) {
             return;
         }
-        MinecraftServer server = event.getServer();
+        MinecraftServer server = event.server();
         for (ServerLevel level : server.getAllLevels()) {
             refreshTickets(level);
         }

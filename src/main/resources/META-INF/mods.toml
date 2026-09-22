@@ -1,6 +1,6 @@
-# See https://docs.neoforged.net/docs/1.21.11/gettingstarted/modfiles/
+# See https://docs.minecraftforge.net/en/1.21.x/gettingstarted/modfiles/
 modLoader="javafml"
-loaderVersion="[1,)"
+loaderVersion="[61,)"
 license="All Rights Reserved"
 
 [[mods]]
@@ -16,9 +16,9 @@ Craft, tune, and race open-wheel cars on custom-built Minecraft circuits.
     config="openwheelracing.mixins.json"
 
 [[dependencies.openwheelracing]]
-    modId="neoforge"
+    modId="forge"
     mandatory=true
-    versionRange="[21.11,)"
+    versionRange="[61,)"
     ordering="NONE"
     side="BOTH"
 

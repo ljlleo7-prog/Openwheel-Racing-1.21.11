@@ -10,7 +10,7 @@ import com.openwheelracing.network.OWRNetwork;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+import net.minecraft.client.renderer.state.LevelRenderState;
 
 import java.util.List;
 import java.util.UUID;
@@ -76,12 +76,12 @@ public final class SurveyRouteOverlay {
         localization = SurveyRouteLocalizer.locate(route, new SurveyRouteModel.Point(car.getX(), car.getY(), car.getZ()), Math.toRadians(car.getYRot() + 90.0F), LOCALIZER_STATE);
     }
 
-    public static void render(RenderLevelStageEvent.AfterEntities event) {
+    public static void render(LevelRenderState state) {
         if (!visible || Minecraft.getInstance().level == null || rawSamples.isEmpty() && nodes.isEmpty()) return;
-        Vec3 camera = event.getLevelRenderState().cameraRenderState.pos;
+        Vec3 camera = state.cameraRenderState.pos;
         if (camera == null) return;
         VertexConsumer consumer = Minecraft.getInstance().renderBuffers().bufferSource().getBuffer(RenderTypes.lines());
-        PoseStack.Pose pose = event.getPoseStack().last();
+        PoseStack.Pose pose = new PoseStack().last();
         drawRaw(consumer, pose, camera);
         drawProcessed(consumer, pose, camera);
         drawLocalization(consumer, pose, camera);

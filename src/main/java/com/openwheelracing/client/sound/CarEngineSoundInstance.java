@@ -12,7 +12,7 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.registries.DeferredHolder;
+import net.minecraftforge.registries.RegistryObject;
 
 final class CarEngineSoundInstance extends AbstractTickableSoundInstance {
     private static final float IDLE_RPM = 900.0f;
@@ -274,6 +274,6 @@ final class CarEngineSoundInstance extends AbstractTickableSoundInstance {
         return t * t * (3.0f - 2.0f * t);
     }
 
-    private record Sample(float rpm, DeferredHolder<SoundEvent, SoundEvent> sound) {
+    private record Sample(float rpm, RegistryObject<SoundEvent> sound) {
     }
 }

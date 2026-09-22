@@ -39,7 +39,7 @@ import com.openwheelracing.registry.OWREntities;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
-import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;

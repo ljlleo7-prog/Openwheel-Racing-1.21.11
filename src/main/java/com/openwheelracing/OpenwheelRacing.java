@@ -24,15 +24,18 @@ import com.openwheelracing.registry.OWRItems;
 import com.openwheelracing.registry.OWRMenus;
 import com.openwheelracing.registry.OWRRecipes;
 import com.openwheelracing.registry.OWRSoundEvents;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.RegisterCommandsEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent;
-import net.neoforged.neoforge.event.furnace.FurnaceFuelBurnTimeEvent;
-import net.neoforged.neoforge.event.server.ServerStartedEvent;
-import net.neoforged.neoforge.event.server.ServerStoppedEvent;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.eventbus.api.bus.BusGroup;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.furnace.FurnaceFuelBurnTimeEvent;
+import net.minecraftforge.event.server.ServerStartedEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 import org.slf4j.Logger;
 
 @Mod(OpenwheelRacing.MODID)
@@ -41,10 +44,13 @@ public final class OpenwheelRacing {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    public OpenwheelRacing(IEventBus modBus) {
-        modBus.addListener(BasicAiFleetChunkTickets::register);
-        modBus.addListener(this::commonSetup);
-        modBus.addListener(OWRNetwork::register);
+    public OpenwheelRacing(FMLJavaModLoadingContext context) {
+        BusGroup modBus = context.getModBusGroup();
+        FMLCommonSetupEvent.getBus(modBus).addListener(this::commonSetup);
+        OWRNetwork.register();
+        if (FMLEnvironment.dist == Dist.CLIENT) {
+            new com.openwheelracing.client.OpenwheelRacingClient(context);
+        }
         OWRDataComponents.register(modBus);
         OWREntities.register(modBus);
         OWRFluids.register(modBus);
@@ -55,22 +61,22 @@ public final class OpenwheelRacing {
         OWRRecipes.register(modBus);
         OWRSoundEvents.register(modBus);
         OWRCreativeTabs.register(modBus);
-        NeoForge.EVENT_BUS.addListener(OWRFuelHandler::onFuelBurnTime);
-        NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> OWRCommands.register(event));
-        NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
-        NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedOut);
-        NeoForge.EVENT_BUS.addListener(this::onPlayerChangedDimension);
-        NeoForge.EVENT_BUS.addListener(this::onPlayerRespawn);
-        NeoForge.EVENT_BUS.addListener(this::onServerStarted);
-        NeoForge.EVENT_BUS.addListener(this::onServerStopped);
-        NeoForge.EVENT_BUS.addListener(TrackMapAutoDetector::onServerTick);
-        NeoForge.EVENT_BUS.addListener(TrackWeatherChunkProgression::onChunkLoad);
-        NeoForge.EVENT_BUS.addListener(TrackWeatherChunkProgression::onChunkUnload);
-        NeoForge.EVENT_BUS.addListener(TrackWeatherChunkProgression::onServerTick);
-        NeoForge.EVENT_BUS.addListener(BasicAiFleetManager::onServerTick);
-        NeoForge.EVENT_BUS.addListener(LiveRaceTimingService::onServerTick);
-        NeoForge.EVENT_BUS.addListener(GrandPrixWeekendService::onServerTick);
-        NeoForge.EVENT_BUS.addListener(RaceAutoFlagService::onServerTick);
+        FurnaceFuelBurnTimeEvent.BUS.addListener(OWRFuelHandler::onFuelBurnTime);
+        RegisterCommandsEvent.BUS.addListener(OWRCommands::register);
+        PlayerEvent.PlayerLoggedInEvent.BUS.addListener(this::onPlayerLoggedIn);
+        PlayerEvent.PlayerLoggedOutEvent.BUS.addListener(this::onPlayerLoggedOut);
+        PlayerEvent.PlayerChangedDimensionEvent.BUS.addListener(this::onPlayerChangedDimension);
+        PlayerEvent.PlayerRespawnEvent.BUS.addListener(this::onPlayerRespawn);
+        ServerStartedEvent.BUS.addListener(this::onServerStarted);
+        ServerStoppedEvent.BUS.addListener(this::onServerStopped);
+        net.minecraftforge.event.TickEvent.ServerTickEvent.Post.BUS.addListener(TrackMapAutoDetector::onServerTick);
+        net.minecraftforge.event.level.ChunkEvent.Load.BUS.addListener(TrackWeatherChunkProgression::onChunkLoad);
+        net.minecraftforge.event.level.ChunkEvent.Unload.BUS.addListener(TrackWeatherChunkProgression::onChunkUnload);
+        net.minecraftforge.event.TickEvent.ServerTickEvent.Post.BUS.addListener(TrackWeatherChunkProgression::onServerTick);
+        net.minecraftforge.event.TickEvent.ServerTickEvent.Post.BUS.addListener(BasicAiFleetManager::onServerTick);
+        net.minecraftforge.event.TickEvent.ServerTickEvent.Post.BUS.addListener(LiveRaceTimingService::onServerTick);
+        net.minecraftforge.event.TickEvent.ServerTickEvent.Post.BUS.addListener(GrandPrixWeekendService::onServerTick);
+        net.minecraftforge.event.TickEvent.ServerTickEvent.Post.BUS.addListener(RaceAutoFlagService::onServerTick);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {

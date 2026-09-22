@@ -13,7 +13,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.minecraftforge.event.TickEvent.ServerTickEvent;
 
 import java.util.Comparator;
 import java.util.List;
@@ -28,10 +28,10 @@ public final class GrandPrixWeekendService {
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
-        if (!event.hasTime()) {
+        if (!event.haveTime()) {
             return;
         }
-        MinecraftServer server = event.getServer();
+        MinecraftServer server = event.server();
         OWRGrandPrixRegistry registry = OWRGrandPrixRegistry.get(server);
         int connectedPlayers = server.getPlayerList().getPlayerCount();
         Set<String> openDimensions = registry.weekends().stream()

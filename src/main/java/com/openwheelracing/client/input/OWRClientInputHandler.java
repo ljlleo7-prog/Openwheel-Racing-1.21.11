@@ -7,7 +7,7 @@ import com.openwheelracing.network.OWRNetwork;
 import com.openwheelracing.registry.OWRSoundEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.sounds.SoundSource;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.minecraftforge.event.TickEvent.ClientTickEvent;
 import org.lwjgl.glfw.GLFW;
 
 public final class OWRClientInputHandler {

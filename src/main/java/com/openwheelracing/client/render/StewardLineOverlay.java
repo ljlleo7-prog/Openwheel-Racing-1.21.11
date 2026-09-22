@@ -9,7 +9,7 @@ import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+import net.minecraft.client.renderer.state.LevelRenderState;
 
 public final class StewardLineOverlay {
     private static final double Y_OFFSET = 0.0;
@@ -43,16 +43,16 @@ public final class StewardLineOverlay {
         lines = List.of();
     }
 
-    public static void render(RenderLevelStageEvent.AfterEntities event) {
+    public static void render(LevelRenderState state) {
         if (!visible || lines.isEmpty() || Minecraft.getInstance().level == null) {
             return;
         }
-        Vec3 camera = event.getLevelRenderState().cameraRenderState.pos;
+        Vec3 camera = state.cameraRenderState.pos;
         if (camera == null) {
             return;
         }
         VertexConsumer consumer = Minecraft.getInstance().renderBuffers().bufferSource().getBuffer(RenderTypes.lines());
-        PoseStack poseStack = event.getPoseStack();
+        PoseStack poseStack = new PoseStack();
         for (TrackDefinition.StewardLine line : lines) {
             drawLine(consumer, poseStack.last(), camera, line, color(line.type()));
         }

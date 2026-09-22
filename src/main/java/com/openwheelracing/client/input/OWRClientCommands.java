@@ -5,7 +5,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
-import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
+import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 
 public final class OWRClientCommands {
     private OWRClientCommands() {

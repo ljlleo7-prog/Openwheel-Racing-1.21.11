@@ -5317,7 +5317,7 @@ public class OpenwheelCarEntity extends Entity {
         double reverseTopSpeedKmh,
         double[] gearTopSpeedsKmh,
         double steeringResponseMultiplier,
-        net.neoforged.neoforge.registries.DeferredHolder<net.minecraft.world.item.Item, net.minecraft.world.item.Item> pickupItem
+        net.minecraftforge.registries.RegistryObject<net.minecraft.world.item.Item> pickupItem
     ) {
         protected VehicleProfile {
             if (engineRpmPoints.length != enginePowerPoints.length || engineRpmPoints.length < 2) {
