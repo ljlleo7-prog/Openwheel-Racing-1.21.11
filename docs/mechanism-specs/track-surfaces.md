@@ -22,6 +22,7 @@ For each surface, define visual role, driving effect, crafting cost, and future 
 | Pit lane | subtly-Gridded block similar to track | Speed limit, high grip low drag though | Asphalt track + white coloring |  |
 | Start/finish | Black-white grid with direction arrow | Timing | Asphalt track + quartz |  |
 | Checkpoint | White line with some text-like texture on it with arrow | Check passing | Asphalt track + redstone |  |
+| Sandstone | Sand-colored firm runoff/paved scenery | Concrete-like grip and drag; no loose-sand sinking | Vanilla sandstone | Useful for desert circuits such as Bahrain and Abu Dhabi |
 
 ## Driving Effects
 

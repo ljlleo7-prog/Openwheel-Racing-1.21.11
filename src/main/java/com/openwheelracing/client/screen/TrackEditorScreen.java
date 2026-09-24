@@ -67,6 +67,7 @@ public class TrackEditorScreen extends Screen {
         TrackEditorMaterial.CYAN_CONCRETE,
         TrackEditorMaterial.BLUE_CONCRETE,
         TrackEditorMaterial.SAND,
+        TrackEditorMaterial.SANDSTONE,
         TrackEditorMaterial.GRASS,
         TrackEditorMaterial.DIRT,
         TrackEditorMaterial.GRAVEL
@@ -78,6 +79,7 @@ public class TrackEditorScreen extends Screen {
     private static final TrackEditorMaterial[] RUNOFF_MATERIALS = {
         TrackEditorMaterial.GRAVEL,
         TrackEditorMaterial.SAND,
+        TrackEditorMaterial.SANDSTONE,
         TrackEditorMaterial.DIRT,
         TrackEditorMaterial.GRASS,
         TrackEditorMaterial.LIGHT_GRAY_CONCRETE,
@@ -1145,7 +1147,11 @@ public class TrackEditorScreen extends Screen {
         if (block == OWRBlocks.BARRIER.get()) {
             return (byte) 5;
         }
-        if (block == Blocks.GRASS_BLOCK) {
+        if (block == Blocks.GRASS_BLOCK
+                || block == Blocks.SHORT_GRASS
+                || block == Blocks.TALL_GRASS
+                || block == Blocks.FERN
+                || block == Blocks.LARGE_FERN) {
             return (byte) 6;
         }
         if (block == Blocks.OAK_LEAVES || block == Blocks.BIRCH_LEAVES || block == Blocks.SPRUCE_LEAVES || block == Blocks.JUNGLE_LEAVES || block == Blocks.ACACIA_LEAVES || block == Blocks.DARK_OAK_LEAVES || block == Blocks.MANGROVE_LEAVES || block == Blocks.CHERRY_LEAVES) {
@@ -1187,15 +1193,22 @@ public class TrackEditorScreen extends Screen {
         if (block == Blocks.GRAVEL) {
             return (byte) 19;
         }
-        if (block == Blocks.WHITE_CONCRETE || block == Blocks.LIGHT_GRAY_CONCRETE) {
-            return (byte) 20;
-        }
-        if (block == Blocks.GRAY_CONCRETE || block == Blocks.BLACK_CONCRETE) {
-            return (byte) 21;
-        }
-        if (block == Blocks.RED_CONCRETE) {
-            return (byte) 22;
-        }
+        if (block == Blocks.WHITE_CONCRETE) return (byte) 24;
+        if (block == Blocks.ORANGE_CONCRETE) return (byte) 25;
+        if (block == Blocks.MAGENTA_CONCRETE) return (byte) 26;
+        if (block == Blocks.LIGHT_BLUE_CONCRETE) return (byte) 27;
+        if (block == Blocks.YELLOW_CONCRETE) return (byte) 28;
+        if (block == Blocks.LIME_CONCRETE) return (byte) 29;
+        if (block == Blocks.PINK_CONCRETE) return (byte) 30;
+        if (block == Blocks.GRAY_CONCRETE) return (byte) 31;
+        if (block == Blocks.LIGHT_GRAY_CONCRETE) return (byte) 32;
+        if (block == Blocks.CYAN_CONCRETE) return (byte) 33;
+        if (block == Blocks.PURPLE_CONCRETE) return (byte) 34;
+        if (block == Blocks.BLUE_CONCRETE) return (byte) 35;
+        if (block == Blocks.BROWN_CONCRETE) return (byte) 36;
+        if (block == Blocks.GREEN_CONCRETE) return (byte) 37;
+        if (block == Blocks.RED_CONCRETE) return (byte) 38;
+        if (block == Blocks.BLACK_CONCRETE) return (byte) 39;
         return (byte) 23;
     }
 
@@ -1224,6 +1237,22 @@ public class TrackEditorScreen extends Screen {
             case 21 -> 0xFF505050;
             case 22 -> 0xFF8F2B25;
             case 23 -> 0xFF667066;
+            case 24 -> 0xFFD8D9D9;
+            case 25 -> 0xFFE06100;
+            case 26 -> 0xFFA9309F;
+            case 27 -> 0xFF2389C6;
+            case 28 -> 0xFFF0AF15;
+            case 29 -> 0xFF5EA818;
+            case 30 -> 0xFFD5658E;
+            case 31 -> 0xFF36393D;
+            case 32 -> 0xFF7D7D73;
+            case 33 -> 0xFF157788;
+            case 34 -> 0xFF641F9C;
+            case 35 -> 0xFF2C2E8F;
+            case 36 -> 0xFF603B1F;
+            case 37 -> 0xFF485B17;
+            case 38 -> 0xFF8E2020;
+            case 39 -> 0xFF080A0F;
             default -> 0xFF181A1C;
         };
     }
@@ -1586,11 +1615,14 @@ public class TrackEditorScreen extends Screen {
                 int localZ = index / TERRAIN_TILE_BLOCKS;
                 int worldX = baseX + localX;
                 int worldZ = baseZ + localZ;
+                if (!level.hasChunkAt(new BlockPos(worldX, fallbackY, worldZ))) {
+                    continue;
+                }
                 TerrainSample sample = sampleTerrain(level, worldX, worldZ, fallbackY);
                 if (sample.complete()) {
                     storeTerrainSample(worldX, worldZ, sample);
+                    sampled++;
                 }
-                sampled++;
             }
             return sampled;
         }
@@ -1615,6 +1647,9 @@ public class TrackEditorScreen extends Screen {
         }
 
         private void setSample(int worldX, int worldZ, TerrainSample sample) {
+            if (!sample.complete()) {
+                return;
+            }
             int localX = worldX - baseX;
             int localZ = worldZ - baseZ;
             if (localX < 0 || localX >= TERRAIN_TILE_BLOCKS || localZ < 0 || localZ >= TERRAIN_TILE_BLOCKS) {

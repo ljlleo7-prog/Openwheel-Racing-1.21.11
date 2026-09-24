@@ -17,9 +17,9 @@ import java.util.List;
 import java.util.Map;
 
 public final class TrackEditorPlacementService {
-    private static final int MAX_BLOCKS_PER_OPERATION = 8192;
+    private static final int MAX_BLOCKS_PER_OPERATION = 32768;
     private static final int MAX_DISTANCE_FROM_PLAYER = 512;
-    private static final int MAX_POLYGON_AREA = 16384;
+    private static final int MAX_POLYGON_AREA = 32768;
 
     private TrackEditorPlacementService() {
     }
@@ -380,6 +380,7 @@ public final class TrackEditorPlacementService {
             || block == Blocks.CYAN_CONCRETE
             || block == Blocks.BLUE_CONCRETE
             || block == Blocks.SAND
+            || block == Blocks.SANDSTONE
             || block == Blocks.GRASS_BLOCK
             || block == Blocks.DIRT
             || block == Blocks.GRAVEL

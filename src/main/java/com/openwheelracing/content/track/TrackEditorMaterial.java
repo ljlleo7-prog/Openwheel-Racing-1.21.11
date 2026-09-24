@@ -22,7 +22,8 @@ public enum TrackEditorMaterial {
     DIRT(false),
     GRAVEL(false),
     KERB(true),
-    BARRIER(true);
+    BARRIER(true),
+    SANDSTONE(false);
 
     private final boolean edge;
 
@@ -51,6 +52,7 @@ public enum TrackEditorMaterial {
             case GRAVEL -> Blocks.GRAVEL;
             case KERB -> OWRBlocks.KERB.get();
             case BARRIER -> OWRBlocks.BARRIER.get();
+            case SANDSTONE -> Blocks.SANDSTONE;
         };
         BlockState state = block.defaultBlockState();
         if (state.hasProperty(HorizontalDirectionalBlock.FACING)) {

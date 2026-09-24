@@ -2727,7 +2727,14 @@ public class OpenwheelCarEntity extends Entity {
                 || block == Blocks.DEEPSLATE_BRICKS
                 || block == Blocks.DEEPSLATE_BRICK_SLAB
                 || block == Blocks.DEEPSLATE_TILES
-                || block == Blocks.DEEPSLATE_TILE_SLAB;
+                || block == Blocks.DEEPSLATE_TILE_SLAB
+                || block == Blocks.SANDSTONE
+                || block == Blocks.SANDSTONE_SLAB
+                || block == Blocks.SMOOTH_SANDSTONE
+                || block == Blocks.SMOOTH_SANDSTONE_SLAB
+                || block == Blocks.CUT_SANDSTONE
+                || block == Blocks.CUT_SANDSTONE_SLAB
+                || block == Blocks.CHISELED_SANDSTONE;
     }
 
     private SurfaceProfile getCurrentSurface() {
