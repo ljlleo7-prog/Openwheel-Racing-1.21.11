@@ -17,6 +17,8 @@ import com.openwheelracing.content.car.ServerLiveryTextures;
 import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.item.TyreItem;
 import com.openwheelracing.content.race.LapProfileCollector;
+import com.openwheelracing.content.race.LapTelemetryRecorder;
+import com.openwheelracing.content.race.LapTelemetryStore;
 import com.openwheelracing.content.race.LapTimingPreferences;
 import com.openwheelracing.content.race.LapTimingScope;
 import com.openwheelracing.content.race.OWRLapProfiles;
@@ -444,6 +446,7 @@ public class OpenwheelCarEntity extends Entity {
     private Vec3 preemptiveBarrierVelocity = Vec3.ZERO;
     private double lapStartedAt = -1.0;
     private final LapProfileCollector lapProfileCollector = new LapProfileCollector();
+    private final LapTelemetryRecorder lapTelemetryRecorder = new LapTelemetryRecorder();
     private long lastStartFinishMarker;
     private long lastStartFinishTriggerAt = -20L;
     private String lockedStartFinishGate = "";
@@ -453,7 +456,6 @@ public class OpenwheelCarEntity extends Entity {
     private boolean pitLaneSpeedReported;
     private double pitLaneTimingTicks;
     private double pitLaneProjectedDistance;
-    private double pitLanePreviousProjection = Double.NaN;
     private int pitLaneHudLingerTicks;
     private long lastLowTyreWarningAt = -200L;
     private long lastDamageWarningAt = -200L;
@@ -1765,6 +1767,14 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private void crossStartFinishLine(BlockPos pos, Direction markerFacing, double movementT, String gateKey) {
+        boolean forwardPass = isForwardPass(markerFacing);
+        double plane = markerFacing.getAxis() == Direction.Axis.X ? pos.getX() + 0.5 : pos.getZ() + 0.5;
+        handleStartFinishCrossing(pos, movementT, gateKey, forwardPass, true,
+            markerFacing.getAxis() == Direction.Axis.X, plane);
+    }
+
+    private void handleStartFinishCrossing(BlockPos pos, double movementT, String gateKey, boolean forwardPass,
+                                           boolean blockGate, boolean axisX, double plane) {
         if (!participatesInRaceTiming()) {
             return;
         }
@@ -1777,10 +1787,12 @@ public class OpenwheelCarEntity extends Entity {
         }
         lastStartFinishMarker = packed;
         lastStartFinishTriggerAt = level().getGameTime();
-        lockedStartFinishGate = gateKey;
-        lockedStartFinishPlane = markerFacing.getAxis() == Direction.Axis.X ? pos.getX() + 0.5 : pos.getZ() + 0.5;
-        lockedStartFinishAxisX = markerFacing.getAxis() == Direction.Axis.X;
-        if (!isForwardPass(markerFacing)) {
+        if (blockGate) {
+            lockedStartFinishGate = gateKey;
+            lockedStartFinishPlane = plane;
+            lockedStartFinishAxisX = axisX;
+        }
+        if (!forwardPass) {
             invalidateLap("reverse pass");
             return;
         }
@@ -1846,10 +1858,18 @@ public class OpenwheelCarEntity extends Entity {
             if (level() instanceof ServerLevel serverLevel) {
                 TrackDefinitionsData.get(serverLevel).activeTrack(serverLevel.dimension().identifier().toString())
                     .flatMap(track -> TrackSurveyData.get(serverLevel).get(track.trackId()))
-                    .ifPresentOrElse(route -> lapProfileCollector.start(route, player.getUUID(), gameTime), lapProfileCollector::reset);
+                    .ifPresentOrElse(route -> {
+                        lapProfileCollector.start(route, player.getUUID(), gameTime);
+                        lapTelemetryRecorder.start(route, player.getUUID(), player.getScoreboardName(),
+                            serverLevel.dimension().identifier().toString(), gameTime);
+                    }, () -> {
+                        lapProfileCollector.reset();
+                        lapTelemetryRecorder.reset();
+                    });
             }
         } else {
             lapProfileCollector.reset();
+            lapTelemetryRecorder.reset();
         }
         if (message != null) {
             messageDriver(message);
@@ -1875,6 +1895,8 @@ public class OpenwheelCarEntity extends Entity {
         }
         int minimumLapMillis = OWRRaceControlState.get(serverLevel).getMinimumValidLapTicks() * 50;
         if (lapMillis <= minimumLapMillis) {
+            recordInvalidTelemetry(serverLevel, lapTelemetryRecorder.driverId(), lapTelemetryRecorder.driverName(),
+                startFinishPos, lapMillis, "below minimum lap time");
             messageDriver(Component.translatable("message.openwheelracing.race_director.lap_ignored", String.format("%.1f", minimumLapMillis / 1000.0f)));
             return false;
         }
@@ -1907,6 +1929,9 @@ public class OpenwheelCarEntity extends Entity {
                 isAbsEnabled()
             )
         );
+        lapTelemetryRecorder.sampleFinish(crossingTime, lapProfileCollector.latest(), position(), getSpeedKmh());
+        lapTelemetryRecorder.finish(lapRecord.id(), lapMillis)
+            .ifPresent(snapshot -> LapTelemetryStore.save(serverLevel.getServer(), snapshot));
         activeTrack.ifPresent(track -> commitValidTimingSegments(records, player.getUUID(), serverLevel.dimension().identifier().toString(), track, timingSegments));
         if (activeTrack.isPresent()) {
             OWRLapProfiles.BestLapProfile profile = lapProfileCollector.finish(serverLevel.dimension().identifier().toString(),
@@ -2788,6 +2813,9 @@ public class OpenwheelCarEntity extends Entity {
         int minZ = (int) Math.floor(swept.minZ);
         int maxZ = (int) Math.floor(swept.maxZ);
         List<PlacedMarkerGateGeometry.Marker> markers = new java.util.ArrayList<>();
+        boolean hasDetectionLine = level() instanceof ServerLevel serverLevel
+            && TrackDefinitionsData.get(serverLevel).activeTrack(serverLevel.dimension().identifier().toString())
+                .flatMap(TrackDefinition::startFinish).isPresent();
         for (int y = minY; y <= maxY; y++) {
             for (int x = minX; x <= maxX; x++) {
                 for (int z = minZ; z <= maxZ; z++) {
@@ -2796,6 +2824,7 @@ public class OpenwheelCarEntity extends Entity {
                     Block block = state.getBlock();
                     PlacedMarkerGateGeometry.MarkerType type;
                     if (block == OWRBlocks.START_FINISH.get()) {
+                        if (hasDetectionLine) continue;
                         type = PlacedMarkerGateGeometry.MarkerType.START_FINISH;
                     } else if (block == OWRBlocks.CHECKPOINT.get()) {
                         type = PlacedMarkerGateGeometry.MarkerType.CHECKPOINT;
@@ -2848,30 +2877,53 @@ public class OpenwheelCarEntity extends Entity {
         }
     }
 
-    private void repairMissedStartFinishFromSurvey() {
-        Optional<com.openwheelracing.content.race.SurveyRouteLapRepair.Candidate> repair = lapProfileCollector.pollLapRepair();
-        if (repair.isEmpty() || lapStartedAt < 0.0 || lastStartFinishTriggerAt == level().getGameTime()
+    private void scanTrackStartFinishLine(Vec3 beforeMove, Vec3 actualMovement) {
+        if (!participatesInRaceTiming() || actualMovement.horizontalDistanceSqr() <= 1.0E-8
             || !(level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        // A real marker crossing resets the collector during scanVirtualMarkerLines, so a
-        // candidate can survive until here only when the placed marker was not dispatched.
-        Optional<TrackDefinition> activeTrack = TrackDefinitionsData.get(serverLevel)
-            .activeTrack(serverLevel.dimension().identifier().toString());
-        if (activeTrack.isEmpty() || activeTrack.get().startFinish().isEmpty()) {
+        Optional<TrackDefinition.StartFinishLine> configuredLine = TrackDefinitionsData.get(serverLevel)
+            .activeTrack(serverLevel.dimension().identifier().toString())
+            .flatMap(TrackDefinition::startFinish);
+        if (configuredLine.isEmpty()) {
             return;
         }
-        TrackDefinition.StartFinishLine line = activeTrack.get().startFinish().orElseThrow();
-        BlockPos markerPosition = BlockPos.containing(
-            (line.left().x() + line.right().x()) * 0.5,
-            (line.left().y() + line.right().y()) * 0.5,
-            (line.left().z() + line.right().z()) * 0.5
-        );
-        var candidate = repair.orElseThrow();
-        boolean completed = completeLap(markerPosition, level().getGameTime(), candidate.detectedGameTime());
-        startLap(candidate.estimatedCrossingGameTime(), Component.literal(completed
-            ? "Lap timing repaired from surveyed route"
-            : "Lap restarted from surveyed route — cross all checkpoints"));
+        TrackDefinition.StartFinishLine line = configuredLine.orElseThrow();
+        double lineDx = line.right().x() - line.left().x();
+        double lineDz = line.right().z() - line.left().z();
+        double lineLength = Math.sqrt(lineDx * lineDx + lineDz * lineDz);
+        if (lineLength <= 1.0E-4) {
+            return;
+        }
+        double extension = COMPONENT_BODY_HALF_WIDTH;
+        double extendX = lineDx / lineLength * extension;
+        double extendZ = lineDz / lineLength * extension;
+        TrackDefinition.Point3 left = new TrackDefinition.Point3(line.left().x() - extendX, line.left().y(), line.left().z() - extendZ);
+        TrackDefinition.Point3 right = new TrackDefinition.Point3(line.right().x() + extendX, line.right().y(), line.right().z() + extendZ);
+        Vec3 current = position();
+        Optional<TrackGeometry.LineCrossing> crossing = TrackGeometry.crossing(beforeMove, current, left, right);
+        if (crossing.isEmpty()) {
+            return;
+        }
+        double movementT = crossing.orElseThrow().movementT();
+        double crossingY = beforeMove.y + (current.y - beforeMove.y) * movementT;
+        double crossingX = beforeMove.x + (current.x - beforeMove.x) * movementT;
+        double crossingZ = beforeMove.z + (current.z - beforeMove.z) * movementT;
+        double originalLineT = ((crossingX - line.left().x()) * lineDx + (crossingZ - line.left().z()) * lineDz)
+            / (lineDx * lineDx + lineDz * lineDz);
+        originalLineT = clamp(originalLineT, 0.0, 1.0);
+        double lineY = line.left().y() + (line.right().y() - line.left().y()) * originalLineT;
+        if (Math.abs(crossingY - lineY) > 2.5) {
+            return;
+        }
+        double headingX = Math.cos(line.headingRadians());
+        double headingZ = Math.sin(line.headingRadians());
+        Vec3 carForward = Vec3.directionFromRotation(0.0f, getYRot());
+        boolean forwardPass = actualMovement.x * headingX + actualMovement.z * headingZ > 0.0
+            && carForward.x * headingX + carForward.z * headingZ > 0.35;
+        BlockPos linePosition = BlockPos.containing((line.left().x() + line.right().x()) * 0.5,
+            (line.left().y() + line.right().y()) * 0.5, (line.left().z() + line.right().z()) * 0.5);
+        handleStartFinishCrossing(linePosition, movementT, "track:start_finish", forwardPass, false, false, Double.NaN);
     }
 
     private double markerLateralSupport(PlacedMarkerGateGeometry.Axis axis) {
@@ -2949,6 +3001,9 @@ public class OpenwheelCarEntity extends Entity {
         Optional<TrackDefinition> activeTrack = TrackDefinitionsData.get(serverLevel)
             .activeTrack(serverLevel.dimension().identifier().toString());
         if (activeTrack.isEmpty()) {
+            pitLaneTimingActive = false;
+            pitLaneTimingTicks = 0;
+            pitLaneProjectedDistance = 0.0;
             entityData.set(PIT_LANE_ACTIVE, false);
             entityData.set(PIT_LANE_HUD_VISIBLE, false);
             return;
@@ -2961,6 +3016,9 @@ public class OpenwheelCarEntity extends Entity {
         if (exitCrossing.isPresent()) PitLaneSurveyRuntime.onExit(this);
         Optional<PitLaneSurveyData.Route> route = PitLaneSurveyData.get(serverLevel).get(track.trackId());
         if (route.isEmpty() || route.get().points().size() < 2) {
+            pitLaneTimingActive = false;
+            pitLaneTimingTicks = 0;
+            pitLaneProjectedDistance = 0.0;
             entityData.set(PIT_LANE_ACTIVE, false);
             entityData.set(PIT_LANE_HUD_VISIBLE, false);
             entityData.set(PIT_LANE_AVERAGE_SPEED, 0.0f);
@@ -2973,14 +3031,17 @@ public class OpenwheelCarEntity extends Entity {
             new PitLaneSpeedMath.Point(current.x, current.y, current.z));
         Vec3 movement = current.subtract(beforeMove);
 
-        boolean newlySpawnedRecovery = tickCount <= 20 && projection.filter(value ->
-            value.horizontalDistance() <= PitLaneSpeedMath.RECOVERY_DISTANCE_METERS && Math.abs(value.verticalDelta()) <= 3.0).isPresent();
-        if (!pitLaneTimingActive && (crossedEntry || newlySpawnedRecovery)) {
+        double surveyDistance = projection.map(value -> Math.hypot(value.horizontalDistance(), value.verticalDelta()))
+            .orElse(Double.POSITIVE_INFINITY);
+        boolean withinPitSurvey = surveyDistance <= 2.0;
+        boolean beyondPitSurvey = surveyDistance >= 20.0;
+        // The entry/exit detection lines remain the normal authority. The survey
+        // corridor only repairs missed transitions at <=2 m and forces an exit at >=20 m.
+        if (!pitLaneTimingActive && !crossedExit && (withinPitSurvey || (crossedEntry && !beyondPitSurvey))) {
             pitLaneTimingActive = true;
             pitLaneSpeedReported = false;
             pitLaneTimingTicks = 0;
             pitLaneProjectedDistance = 0.0;
-            pitLanePreviousProjection = Double.NaN;
             entityData.set(PIT_LANE_ACTIVE, true);
             entityData.set(PIT_LANE_HUD_VISIBLE, true);
             pitLaneHudLingerTicks = 0;
@@ -3006,6 +3067,8 @@ public class OpenwheelCarEntity extends Entity {
             return;
         }
 
+        // Account for the transition tick before clearing the state at the forced
+        // 20 m survey boundary; otherwise accelerating out could evade the limit.
         if (projection.isPresent()) {
             double instantKmh = PitLaneSpeedMath.projectedSpeedKmh(projection.get(), movement.x, movement.z);
             double timingStart = entryCrossing.map(TrackGeometry.LineCrossing::movementT).orElse(0.0);
@@ -3016,8 +3079,6 @@ public class OpenwheelCarEntity extends Entity {
             double averageKmh = pitLaneTimingTicks <= 0 ? 0.0 : pitLaneProjectedDistance / pitLaneTimingTicks * 72.0;
             entityData.set(PIT_LANE_PROJECTED_SPEED, (float) instantKmh);
             entityData.set(PIT_LANE_AVERAGE_SPEED, (float) averageKmh);
-            repairMissedStartFinishFromPitRoute(track, route.get(), projection.get().distanceAlong());
-            pitLanePreviousProjection = projection.get().distanceAlong();
             if (!pitLaneSpeedReported && instantKmh > PitLaneSpeedMath.INSTANT_LIMIT_KMH) {
                 reportPitLaneSpeeding(serverLevel, instantKmh, averageKmh, "instant speed above 85 km/h");
             }
@@ -3025,36 +3086,25 @@ public class OpenwheelCarEntity extends Entity {
                 reportPitLaneSpeeding(serverLevel, instantKmh, averageKmh, "average speed above 80 km/h");
             }
         }
-        if (crossedExit) {
+        if (crossedExit || beyondPitSurvey) {
+            if (!crossedExit && pitLaneTimingTicks > 0 && !pitLaneSpeedReported) {
+                double averageKmh = pitLaneProjectedDistance / pitLaneTimingTicks * 72.0;
+                if (averageKmh > PitLaneSpeedMath.AVERAGE_LIMIT_KMH) {
+                    double instantKmh = entityData.get(PIT_LANE_PROJECTED_SPEED);
+                    reportPitLaneSpeeding(serverLevel, instantKmh, averageKmh, "average speed above 80 km/h (survey boundary)");
+                }
+            }
             pitLaneTimingActive = false;
             pitLaneTimingTicks = 0;
             pitLaneProjectedDistance = 0.0;
-            pitLanePreviousProjection = Double.NaN;
             entityData.set(PIT_LANE_ACTIVE, false);
-            entityData.set(PIT_LANE_HUD_VISIBLE, true);
-            pitLaneHudLingerTicks = 60;
+            entityData.set(PIT_LANE_HUD_VISIBLE, crossedExit);
+            pitLaneHudLingerTicks = crossedExit ? 60 : 0;
+            if (!crossedExit) {
+                entityData.set(PIT_LANE_AVERAGE_SPEED, 0.0f);
+                entityData.set(PIT_LANE_PROJECTED_SPEED, 0.0f);
+            }
         }
-    }
-
-    private void repairMissedStartFinishFromPitRoute(TrackDefinition track, PitLaneSurveyData.Route route, double currentProjection) {
-        if (!Double.isFinite(pitLanePreviousProjection) || currentProjection <= pitLanePreviousProjection
-            || lapStartedAt < 0.0 || lastStartFinishTriggerAt == level().getGameTime() || track.startFinish().isEmpty()) return;
-        TrackDefinition.StartFinishLine line = track.startFinish().orElseThrow();
-        Optional<Double> crossingDistance = PitLaneSpeedMath.intersectionDistance(route.points(),
-            new PitLaneSpeedMath.Point(line.left().x(), line.left().y(), line.left().z()),
-            new PitLaneSpeedMath.Point(line.right().x(), line.right().y(), line.right().z()));
-        if (crossingDistance.isEmpty() || pitLanePreviousProjection > crossingDistance.get() || currentProjection < crossingDistance.get()) return;
-        double fraction = (crossingDistance.get() - pitLanePreviousProjection) / (currentProjection - pitLanePreviousProjection);
-        double detectedGameTime = level().getGameTime();
-        double estimatedCrossingGameTime = detectedGameTime - (1.0 - Math.max(0.0, Math.min(1.0, fraction)));
-        BlockPos markerPosition = BlockPos.containing(
-            (line.left().x() + line.right().x()) * 0.5,
-            (line.left().y() + line.right().y()) * 0.5,
-            (line.left().z() + line.right().z()) * 0.5);
-        boolean completed = completeLap(markerPosition, level().getGameTime(), detectedGameTime);
-        startLap(estimatedCrossingGameTime, Component.literal(completed
-            ? "Lap timing repaired from pit-lane survey"
-            : "Lap restarted from pit-lane survey — cross all checkpoints"));
     }
 
     private Optional<TrackGeometry.LineCrossing> pitLineCrossing(TrackDefinition track, TrackDefinition.StewardLineType type, Vec3 previous, Vec3 current) {
@@ -4187,10 +4237,13 @@ public class OpenwheelCarEntity extends Entity {
         if (!level().isClientSide()) {
             SurveyRouteRuntime.recordMovement(this);
             lapProfileCollector.sample(new com.openwheelracing.content.track.survey.SurveyRouteModel.Point(getX(), getY(), getZ()), Math.toRadians(getYRot() + 90.0F), level().getGameTime(), actualMovement.horizontalDistance() * 72.0);
+            if (lapTelemetryRecorder.active()) {
+                lapTelemetryRecorder.sample(level().getGameTime(), level().getGameTime(), lapProfileCollector.latest(), position(), getSpeedKmh());
+            }
+            scanTrackStartFinishLine(beforeMove, actualMovement);
             scanVirtualMarkerLines(beforeMove, actualMovement);
             scanStewardTimingLines(beforeMove, actualMovement);
             tickPitLaneTiming(beforeMove);
-            repairMissedStartFinishFromSurvey();
         }
 
 
@@ -4870,12 +4923,39 @@ public class OpenwheelCarEntity extends Entity {
 
     private void invalidateLap(String reason) {
         if (lapStartedAt >= 0.0) {
+            if (level() instanceof ServerLevel serverLevel && lapTelemetryRecorder.active()) {
+                TrackDefinition.StartFinishLine line = TrackDefinitionsData.get(serverLevel)
+                    .activeTrack(serverLevel.dimension().identifier().toString())
+                    .flatMap(TrackDefinition::startFinish).orElse(null);
+                BlockPos linePosition = line == null ? blockPosition() : BlockPos.containing(
+                    (line.left().x() + line.right().x()) * 0.5, (line.left().y() + line.right().y()) * 0.5,
+                    (line.left().z() + line.right().z()) * 0.5);
+                int elapsed = Math.max(1, elapsedMillisAt(level().getGameTime()));
+                recordInvalidTelemetry(serverLevel, lapTelemetryRecorder.driverId(), lapTelemetryRecorder.driverName(), linePosition, elapsed, reason);
+            }
             lapStartedAt = -1.0;
             lapProfileCollector.reset();
+            lapTelemetryRecorder.reset();
             resetLapProgress();
             entityData.set(CHECKPOINT_ARMED, false);
             showInvalidLap(reason);
         }
+    }
+
+    private void recordInvalidTelemetry(ServerLevel serverLevel, java.util.UUID driverId, String driverName,
+                                        BlockPos startFinishPos, int lapMillis, String reason) {
+        if (driverId == null || !lapTelemetryRecorder.active()) return;
+        lapTelemetryRecorder.sampleFinish(serverLevel.getGameTime(), lapProfileCollector.latest(), position(), getSpeedKmh());
+        if (lapTelemetryRecorder.sampleCount() < 2) return;
+        OWRLapRecords records = OWRLapRecords.get(serverLevel);
+        OWRLapRecords.LapRecord record = records.recordLap(driverId, driverName, Math.max(1, lapMillis),
+            serverLevel.getGameTime(), serverLevel.dimension().identifier().toString(), startFinishPos.asLong(),
+            visitedCheckpoints.size() + visitedStewardCheckpoints,
+            new OWRLapRecords.CarSnapshot(setup.power(), setup.grip(), setup.aero(), setup.gearing(),
+                Math.round(getDamagePercent()), Math.round(getTyreWearPercent()), isAbsEnabled()));
+        records.invalidateLap(record.id(), driverId, reason);
+        lapTelemetryRecorder.finish(record.id(), lapMillis)
+            .ifPresent(snapshot -> LapTelemetryStore.save(serverLevel.getServer(), snapshot));
     }
 
     public double getCurrentLapProfileRouteLength() {

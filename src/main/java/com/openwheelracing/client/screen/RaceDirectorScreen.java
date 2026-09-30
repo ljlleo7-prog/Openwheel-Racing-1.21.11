@@ -6,6 +6,7 @@ import com.openwheelracing.client.telemetry.SpeedTraceGraphRenderer;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.race.RaceDirectorLapRow;
 import com.openwheelracing.content.race.RaceDirectorSnapshot;
+import com.openwheelracing.content.race.LapTelemetryData;
 import com.openwheelracing.content.race.RaceFlagMode;
 import com.openwheelracing.content.race.TeamCarRow;
 import com.openwheelracing.network.OWRNetwork;
@@ -47,6 +48,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     private int selectedTeamCarId = -1;
     private int autoDetectRadius = AUTO_DETECT_DEFAULT_RADIUS;
     private EditBox sessionNameBox;
+    private String telemetryMessage = "";
 
     public RaceDirectorScreen(RaceDirectorMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -70,6 +72,16 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             }
             screen.rebuildWidgets();
         }
+    }
+
+    public static void applyLapTelemetry(LapTelemetryData data, String status) {
+        if (!(Minecraft.getInstance().screen instanceof RaceDirectorScreen screen)) return;
+        if (data == null) {
+            screen.telemetryMessage = status == null || status.isBlank()
+                ? "No readable telemetry file found for this lap" : status;
+            return;
+        }
+        Minecraft.getInstance().setScreen(new LapTelemetryScreen(screen, data));
     }
 
     void applySnapshotFromWeekend(RaceDirectorSnapshot snapshot) {
@@ -252,6 +264,12 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
                 OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorInvalidateLapMessage(selectedLapId));
             }
         }).bounds(leftPos + LEFT_X, topPos + 314, 170, 16).build());
+        addRenderableWidget(Button.builder(Component.literal("LOAD TELEMETRY REPLAY"), button -> {
+            if (selectedRow() != null) {
+                telemetryMessage = "Loading telemetry…";
+                OWRNetwork.sendToServer(new OWRNetwork.RequestLapTelemetryMessage(selectedLapId));
+            }
+        }).bounds(leftPos + LEFT_X, topPos + 334, 170, 16).build());
         addFlagTiles(leftPos + RIGHT_X, topPos + 116);
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.start_lights"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.START_PHASE, 1, 0)))
             .bounds(leftPos + 230, topPos + 318, 74, 14).build());
@@ -349,6 +367,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         String lapLimit = snapshot.raceLapLimit() == 0 ? Component.translatable("screen.openwheelracing.race_director.race_laps_open").getString() : Integer.toString(snapshot.raceLapLimit());
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.race_laps", lapLimit), 12, 108, 0xFFC9D1D9, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.lap_counter_placeholder", snapshot.laps().size()), 12, 120, 0xFFC9D1D9, false);
+        if (!telemetryMessage.isBlank()) graphics.drawString(font, fit(telemetryMessage, 170), LEFT_X, 354, 0xFFFFD166, false);
         drawLapRows(graphics, snapshot);
         CircuitMapRenderer.render(graphics, snapshot.trackMap(), menu.getMoistureSnapshot(), snapshot.teamCars(), MAP_X, MAP_Y, MAP_WIDTH, MAP_HEIGHT, selectedTeamCarId, snapshot.leftTeamCarId(), snapshot.rightTeamCarId());
         drawWeatherTelemetry(graphics, snapshot);

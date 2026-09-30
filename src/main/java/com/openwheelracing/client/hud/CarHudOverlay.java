@@ -32,14 +32,15 @@ public final class CarHudOverlay {
 
     public static void render(GuiGraphics graphics, DeltaTracker deltaTracker) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null || !(minecraft.player.getVehicle() instanceof OpenwheelCarEntity car)) {
+        if (minecraft.player == null || minecraft.options.hideGui) {
             return;
         }
 
         Font font = minecraft.font;
         WheelInputSettings settings = WheelInputSettings.get();
+        OpenwheelCarEntity car = minecraft.player.getVehicle() instanceof OpenwheelCarEntity vehicle ? vehicle : null;
 
-        if (settings.showDrivingHud) {
+        if (car != null && settings.showDrivingHud) {
             renderGlobalFlagMarker(graphics);
             renderLapDeltaBar(graphics, font);
             renderPitLaneTiming(graphics, font, car);
@@ -48,12 +49,14 @@ public final class CarHudOverlay {
             renderCarStatus(graphics, font, car);
         }
 
-        if (settings.showPhysicsDebugHud) {
+        if (car != null && settings.showPhysicsDebugHud) {
             renderPhysicsDebug(graphics, font, car);
         }
 
-        if (settings.showRankingHud) {
-            if (LiveRaceTimingClient.active() || LiveRaceTimingClient.hasWeekendSession()) {
+        if (LiveRaceTimingClient.raceHudRequired()) {
+            renderRaceTimingTower(graphics, font, minecraft.player.getUUID());
+        } else if (car != null && settings.showRankingHud) {
+            if (LiveRaceTimingClient.hasWeekendSession()) {
                 renderRaceTimingTower(graphics, font, minecraft.player.getUUID());
             } else {
                 renderRankingBoard(graphics, font);
@@ -521,7 +524,7 @@ public final class CarHudOverlay {
             String weekend = fit(font, snapshot.weekendName(), panelWidth - 16);
             drawScaledText(graphics, font, weekend, px + panelWidth / 2, py + 17, 0.82f, 0xFFAEBCCC, false);
             graphics.fill(px + 5, py + 29, px + panelWidth - 5, py + 30, 0x6655718B);
-            String type = snapshot.sessionType().replace('_', ' ')
+        String type = snapshot.sessionType().replace('_', ' ')
                 + (snapshot.active() ? "" : " · " + snapshot.suspensionReason().replace('_', ' '));
             type = fit(font, type, 94);
             graphics.drawString(font, type, px + 6, py + 30, 0xFF8394A7, false);
@@ -591,6 +594,9 @@ public final class CarHudOverlay {
 
     private static String raceProgressLabel(List<RaceTimingRow> rows) {
         var snapshot = LiveRaceTimingClient.snapshot();
+        if (snapshot.sessionType().equals("FORMATION_LAP")) {
+            return "FORMATION LAP";
+        }
         if (snapshot.lapLimit() > 0) {
             int leaderLap = rows.isEmpty() ? 1 : rows.getFirst().completedLaps() + 1;
             return "LAP " + Math.min(leaderLap, snapshot.lapLimit()) + "/" + snapshot.lapLimit();

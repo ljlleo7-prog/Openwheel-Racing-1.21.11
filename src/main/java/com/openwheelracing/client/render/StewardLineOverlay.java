@@ -19,6 +19,7 @@ public final class StewardLineOverlay {
     private static String trackName = "";
     private static int revision;
     private static List<TrackDefinition.StewardLine> lines = List.of();
+    private static TrackDefinition.StartFinishLine startFinish;
 
     private StewardLineOverlay() {
     }
@@ -33,6 +34,7 @@ public final class StewardLineOverlay {
         trackName = message.trackName();
         revision = message.revision();
         lines = List.copyOf(message.lines());
+        startFinish = message.startFinish();
     }
 
     public static void clear() {
@@ -41,10 +43,11 @@ public final class StewardLineOverlay {
         trackName = "";
         revision = 0;
         lines = List.of();
+        startFinish = null;
     }
 
     public static void render(RenderLevelStageEvent.AfterEntities event) {
-        if (!visible || lines.isEmpty() || Minecraft.getInstance().level == null) {
+        if (!visible || (lines.isEmpty() && startFinish == null) || Minecraft.getInstance().level == null) {
             return;
         }
         Vec3 camera = event.getLevelRenderState().cameraRenderState.pos;
@@ -55,6 +58,9 @@ public final class StewardLineOverlay {
         PoseStack poseStack = event.getPoseStack();
         for (TrackDefinition.StewardLine line : lines) {
             drawLine(consumer, poseStack.last(), camera, line, color(line.type()));
+        }
+        if (startFinish != null) {
+            drawLine(consumer, poseStack.last(), camera, startFinish.left(), startFinish.right(), 0xFFFF40FF, 7.0f);
         }
     }
 
@@ -75,12 +81,17 @@ public final class StewardLineOverlay {
     }
 
     private static void drawLine(VertexConsumer consumer, PoseStack.Pose pose, Vec3 camera, TrackDefinition.StewardLine line, int color) {
-        double x1 = line.left().x() - camera.x;
-        double y1 = line.left().y() - camera.y + Y_OFFSET;
-        double z1 = line.left().z() - camera.z;
-        double x2 = line.right().x() - camera.x;
-        double y2 = line.right().y() - camera.y + Y_OFFSET;
-        double z2 = line.right().z() - camera.z;
+        drawLine(consumer, pose, camera, line.left(), line.right(), color, 4.0f);
+    }
+
+    private static void drawLine(VertexConsumer consumer, PoseStack.Pose pose, Vec3 camera,
+                                 TrackDefinition.Point3 left, TrackDefinition.Point3 right, int color, float width) {
+        double x1 = left.x() - camera.x;
+        double y1 = left.y() - camera.y + Y_OFFSET;
+        double z1 = left.z() - camera.z;
+        double x2 = right.x() - camera.x;
+        double y2 = right.y() - camera.y + Y_OFFSET;
+        double z2 = right.z() - camera.z;
         float dx = (float) (x2 - x1);
         float dy = (float) (y2 - y1);
         float dz = (float) (z2 - z1);
@@ -91,15 +102,15 @@ public final class StewardLineOverlay {
         float nx = dx / length;
         float ny = dy / length;
         float nz = dz / length;
-        addLineVertex(consumer, pose, (float) x1, (float) y1, (float) z1, color, nx, ny, nz);
-        addLineVertex(consumer, pose, (float) x2, (float) y2, (float) z2, color, nx, ny, nz);
+        addLineVertex(consumer, pose, (float) x1, (float) y1, (float) z1, color, nx, ny, nz, width);
+        addLineVertex(consumer, pose, (float) x2, (float) y2, (float) z2, color, nx, ny, nz, width);
     }
 
-    private static void addLineVertex(VertexConsumer consumer, PoseStack.Pose pose, float x, float y, float z, int color, float normalX, float normalY, float normalZ) {
+    private static void addLineVertex(VertexConsumer consumer, PoseStack.Pose pose, float x, float y, float z, int color, float normalX, float normalY, float normalZ, float width) {
         consumer.addVertex(pose, x, y, z)
             .setColor(color)
             .setNormal(pose, normalX, normalY, normalZ)
-            .setLineWidth(4.0f);
+            .setLineWidth(width);
     }
 
     private static int color(TrackDefinition.StewardLineType type) {

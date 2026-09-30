@@ -14,6 +14,8 @@ import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.menu.CarPartsReplacementMenu;
 import com.openwheelracing.content.menu.RaceDirectorMenu;
 import com.openwheelracing.content.race.LapProfileCollector;
+import com.openwheelracing.content.race.LapTelemetryData;
+import com.openwheelracing.content.race.LapTelemetryStore;
 import com.openwheelracing.content.race.LapTimingPreferences;
 import com.openwheelracing.content.race.LapTimingScope;
 import com.openwheelracing.content.race.OWRLapProfiles;
@@ -68,7 +70,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "18";
+    private static final String PROTOCOL = "21";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -114,6 +116,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorGrandPrixSetupMessage.TYPE, codec(RaceDirectorGrandPrixSetupMessage::encode, RaceDirectorGrandPrixSetupMessage::decode), RaceDirectorGrandPrixSetupMessage::handle);
         registrar.playToServer(RaceDirectorSetArchiveModeMessage.TYPE, codec(RaceDirectorSetArchiveModeMessage::encode, RaceDirectorSetArchiveModeMessage::decode), RaceDirectorSetArchiveModeMessage::handle);
         registrar.playToServer(RaceDirectorSetPageMessage.TYPE, codec(RaceDirectorSetPageMessage::encode, RaceDirectorSetPageMessage::decode), RaceDirectorSetPageMessage::handle);
+        registrar.playToServer(RequestLapTelemetryMessage.TYPE, codec(RequestLapTelemetryMessage::encode, RequestLapTelemetryMessage::decode), RequestLapTelemetryMessage::handle);
         registrar.playToServer(TeamTerminalSenseCarsMessage.TYPE, codec(TeamTerminalSenseCarsMessage::encode, TeamTerminalSenseCarsMessage::decode), TeamTerminalSenseCarsMessage::handle);
         registrar.playToServer(TeamTerminalBindCarMessage.TYPE, codec(TeamTerminalBindCarMessage::encode, TeamTerminalBindCarMessage::decode), TeamTerminalBindCarMessage::handle);
         registrar.playToServer(TeamTerminalAiPushMessage.TYPE, codec(TeamTerminalAiPushMessage::encode, TeamTerminalAiPushMessage::decode), TeamTerminalAiPushMessage::handle);
@@ -123,6 +126,7 @@ public final class OWRNetwork {
         registrar.playToServer(RaceDirectorSetBoPMessage.TYPE, codec(RaceDirectorSetBoPMessage::encode, RaceDirectorSetBoPMessage::decode), RaceDirectorSetBoPMessage::handle);
         registrar.playToServer(RaceDirectorSetBoPLapsMessage.TYPE, codec(RaceDirectorSetBoPLapsMessage::encode, RaceDirectorSetBoPLapsMessage::decode), RaceDirectorSetBoPLapsMessage::handle);
         registrar.playToClient(RaceDirectorSnapshotMessage.TYPE, codec(RaceDirectorSnapshotMessage::encode, RaceDirectorSnapshotMessage::decode), RaceDirectorSnapshotMessage::handle);
+        registrar.playToClient(LapTelemetryResponseMessage.TYPE, codec(LapTelemetryResponseMessage::encode, LapTelemetryResponseMessage::decode), LapTelemetryResponseMessage::handle);
         registrar.playToClient(TrackMoistureSnapshotMessage.TYPE, codec(TrackMoistureSnapshotMessage::encode, TrackMoistureSnapshotMessage::decode), TrackMoistureSnapshotMessage::handle);
         registrar.playToClient(LiveryTextureCacheMessage.TYPE, codec(LiveryTextureCacheMessage::encode, LiveryTextureCacheMessage::decode), LiveryTextureCacheMessage::handle);
         registrar.playToClient(RaceFlagUpdateMessage.TYPE, codec(RaceFlagUpdateMessage::encode, RaceFlagUpdateMessage::decode), RaceFlagUpdateMessage::handle);
@@ -1007,7 +1011,8 @@ public final class OWRNetwork {
         UUID trackId = track == null ? new UUID(0L, 0L) : track.trackId();
         String trackName = track == null ? "" : track.name();
         List<TrackDefinition.StewardLine> lines = track == null ? List.of() : track.stewardLines();
-        PacketDistributor.sendToPlayer(player, new StewardLineOverlayMessage(visible, trackId, trackName, revision, lines));
+        TrackDefinition.StartFinishLine startFinish = track == null ? null : track.startFinish().orElse(null);
+        PacketDistributor.sendToPlayer(player, new StewardLineOverlayMessage(visible, trackId, trackName, revision, lines, startFinish));
     }
 
     public static void sendAiRacingLineOverlay(ServerPlayer player, boolean visible, String dimensionId, UUID trackId, String source,
@@ -1992,6 +1997,71 @@ public final class OWRNetwork {
         }
     }
 
+    public record RequestLapTelemetryMessage(long lapId) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<RequestLapTelemetryMessage> TYPE = payloadType("request_lap_telemetry_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(RequestLapTelemetryMessage message, FriendlyByteBuf buffer) {
+            buffer.writeLong(message.lapId());
+        }
+
+        private static RequestLapTelemetryMessage decode(FriendlyByteBuf buffer) {
+            return new RequestLapTelemetryMessage(buffer.readLong());
+        }
+
+        private static void handle(RequestLapTelemetryMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                if (!(context.player() instanceof ServerPlayer player)) return;
+                // Telemetry is read-only Race Director data; viewing it must not require
+                // the separate permission to change race controls.
+                if (!(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.showsBoard()
+                    || message.lapId() <= 0L) {
+                    PacketDistributor.sendToPlayer(player, new LapTelemetryResponseMessage(null, "Open the Race Director lap board first."));
+                    return;
+                }
+                if (!menu.allowLapTelemetryRequest(player.level().getGameTime())) {
+                    PacketDistributor.sendToPlayer(player, new LapTelemetryResponseMessage(null, "Wait before loading another replay."));
+                    return;
+                }
+                OWRLapRecords records = OWRLapRecords.get((ServerLevel) player.level());
+                records.getLap(message.lapId()).ifPresentOrElse(lap ->
+                    LapTelemetryStore.load(((ServerLevel) player.level()).getServer(), lap, result ->
+                        PacketDistributor.sendToPlayer(player, new LapTelemetryResponseMessage(result.orElse(null),
+                            result.isPresent() ? "" : "File missing or unreadable; check server log."))),
+                    () -> PacketDistributor.sendToPlayer(player, new LapTelemetryResponseMessage(null,
+                        "Lap record missing in this dimension.")));
+            });
+        }
+    }
+
+    public record LapTelemetryResponseMessage(LapTelemetryData data, String status) implements CustomPacketPayload {
+        public static final CustomPacketPayload.Type<LapTelemetryResponseMessage> TYPE = payloadType("lap_telemetry_response_message");
+
+        @Override
+        public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        private static void encode(LapTelemetryResponseMessage message, FriendlyByteBuf buffer) {
+            buffer.writeBoolean(message.data() != null);
+            if (message.data() != null) LapTelemetryData.encode(message.data(), buffer);
+            buffer.writeUtf(message.status() == null ? "" : message.status(), 256);
+        }
+
+        private static LapTelemetryResponseMessage decode(FriendlyByteBuf buffer) {
+            LapTelemetryData data = buffer.readBoolean() ? LapTelemetryData.decode(buffer) : null;
+            return new LapTelemetryResponseMessage(data, buffer.readUtf(256));
+        }
+
+        private static void handle(LapTelemetryResponseMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> applyLapTelemetry(message.data(), message.status()));
+        }
+    }
+
     public record TeamTerminalSenseCarsMessage() implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<TeamTerminalSenseCarsMessage> TYPE = payloadType("team_terminal_sense_cars_message");
 
@@ -2357,7 +2427,9 @@ public final class OWRNetwork {
         }
     }
 
-    public record StewardLineOverlayMessage(boolean visible, UUID trackId, String trackName, int revision, List<TrackDefinition.StewardLine> lines) implements CustomPacketPayload {
+    public record StewardLineOverlayMessage(boolean visible, UUID trackId, String trackName, int revision,
+                                            List<TrackDefinition.StewardLine> lines,
+                                            TrackDefinition.StartFinishLine startFinish) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<StewardLineOverlayMessage> TYPE = payloadType("steward_line_overlay_message");
 
         @Override
@@ -2380,6 +2452,12 @@ public final class OWRNetwork {
                 buffer.writeDouble(line.headingRadians());
                 buffer.writeDouble(line.distanceAlongTrack());
             }
+            buffer.writeBoolean(message.startFinish != null);
+            if (message.startFinish != null) {
+                writePoint(buffer, message.startFinish.left());
+                writePoint(buffer, message.startFinish.right());
+                buffer.writeDouble(message.startFinish.headingRadians());
+            }
         }
 
         private static StewardLineOverlayMessage decode(FriendlyByteBuf buffer) {
@@ -2399,7 +2477,10 @@ public final class OWRNetwork {
                 double distance = buffer.readDouble();
                 lines.add(new TrackDefinition.StewardLine(type, lineIndex, name, left, right, heading, distance));
             }
-            return new StewardLineOverlayMessage(visible, trackId, trackName, revision, lines);
+            TrackDefinition.StartFinishLine startFinish = buffer.readBoolean()
+                ? new TrackDefinition.StartFinishLine(readPoint(buffer), readPoint(buffer), buffer.readDouble())
+                : null;
+            return new StewardLineOverlayMessage(visible, trackId, trackName, revision, lines, startFinish);
         }
 
         private static void handle(StewardLineOverlayMessage message, IPayloadContext context) {
@@ -2633,6 +2714,15 @@ public final class OWRNetwork {
             Class<?> receiver = Class.forName("com.openwheelracing.client.screen.RaceDirectorScreen");
             Method method = receiver.getMethod("applySnapshot", RaceDirectorSnapshot.class);
             method.invoke(null, snapshot);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static void applyLapTelemetry(LapTelemetryData data, String status) {
+        try {
+            Class<?> receiver = Class.forName("com.openwheelracing.client.screen.RaceDirectorScreen");
+            Method method = receiver.getMethod("applyLapTelemetry", LapTelemetryData.class, String.class);
+            method.invoke(null, data, status);
         } catch (ReflectiveOperationException ignored) {
         }
     }

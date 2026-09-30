@@ -37,6 +37,15 @@ public final class LiveRaceTimingClient {
         return snapshot.sessionId() > 0L && !snapshot.weekendName().isBlank();
     }
 
+    public static boolean raceHudRequired() {
+        if (snapshot.active()) {
+            return true;
+        }
+        return hasWeekendSession()
+            && (snapshot.sessionType().equals("RACE") || snapshot.sessionType().equals("SPRINT")
+                || snapshot.sessionType().equals("FORMATION_LAP"));
+    }
+
     public static List<RaceTimingRow> rows() {
         return snapshot.rows();
     }

@@ -59,6 +59,7 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
     private long lastTelemetrySendTick = Long.MIN_VALUE;
     private UUID lastTelemetryDriverId = new UUID(0L, 0L);
     private long lastTelemetryProfileLapId = -1L;
+    private long lastLapTelemetryRequestTick = Long.MIN_VALUE;
     private RaceDirectorSnapshot snapshot = RaceDirectorSnapshot.empty();
     private com.openwheelracing.content.race.TrackMoistureSnapshot moistureSnapshot = com.openwheelracing.content.race.TrackMoistureSnapshot.EMPTY;
 
@@ -123,6 +124,12 @@ public class RaceDirectorMenu extends AbstractContainerMenu {
 
     public RaceDirectorSnapshot getSnapshot() {
         return snapshot;
+    }
+
+    public boolean allowLapTelemetryRequest(long gameTime) {
+        if (lastLapTelemetryRequestTick != Long.MIN_VALUE && gameTime - lastLapTelemetryRequestTick < 20L) return false;
+        lastLapTelemetryRequestTick = gameTime;
+        return true;
     }
 
     public void applySnapshot(RaceDirectorSnapshot snapshot) {
