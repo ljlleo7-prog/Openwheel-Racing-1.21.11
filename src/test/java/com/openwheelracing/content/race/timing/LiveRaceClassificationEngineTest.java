@@ -41,6 +41,18 @@ class LiveRaceClassificationEngineTest {
     }
 
     @Test
+    void recordedTelemetryLapsCanRecoverMissedLiveLapsButNeverLowerTheCounter() {
+        LiveRaceClassificationEngine engine = new LiveRaceClassificationEngine();
+        engine.advance(ROUTE_LENGTH, 1, 50, List.of(observation(ALPHA, "Alpha", 40, 1, 50, RaceProgressConfidence.CONFIRMED)));
+
+        assertTrue(engine.reconcileCompletedLaps(ALPHA, 2));
+        assertEquals(2, engine.currentSnapshot(2).rows().getFirst().completedLaps());
+        assertEquals(240.0, engine.currentSnapshot(2).rows().getFirst().absoluteProgressMeters(), 1.0E-6);
+        assertTrue(!engine.reconcileCompletedLaps(ALPHA, 1));
+        assertEquals(2, engine.currentSnapshot(2).rows().getFirst().completedLaps());
+    }
+
+    @Test
     void ambiguousObservationHoldsConfirmedProgressAndOrder() {
         LiveRaceClassificationEngine engine = new LiveRaceClassificationEngine();
         engine.advance(ROUTE_LENGTH, 1, 50, List.of(
@@ -145,6 +157,25 @@ class LiveRaceClassificationEngineTest {
 
         assertEquals(1, rebound.rows().getFirst().completedLaps());
         assertEquals(102.0, rebound.rows().getFirst().absoluteProgressMeters(), 1.0E-6);
+    }
+
+    @Test
+    void trackedCarCanRecoverProgressAfterExtendedUntrackedInterval() {
+        LiveRaceClassificationEngine engine = new LiveRaceClassificationEngine();
+        engine.advance(1_000.0, 1, 50, List.of(
+            observation(ALPHA, "Alpha", 900, 1, 50, RaceProgressConfidence.CONFIRMED)));
+
+        for (int tick = 2; tick < 50; tick++) {
+            engine.advance(1_000.0, tick, tick * 50L, List.of(
+                observation(ALPHA, "Alpha", 900, tick, tick * 50L, RaceProgressConfidence.UNTRACKED)));
+        }
+
+        LiveRaceTimingSnapshot recovered = engine.advance(1_000.0, 50, 2_500, List.of(
+            observation(ALPHA, "Alpha", 120, 50, 2_500, RaceProgressConfidence.CONFIRMED)));
+
+        assertEquals(1, recovered.rows().getFirst().completedLaps());
+        assertEquals(1_120.0, recovered.rows().getFirst().absoluteProgressMeters(), 1.0E-6);
+        assertEquals(RaceProgressConfidence.CONFIRMED, recovered.rows().getFirst().confidence());
     }
 
     @Test

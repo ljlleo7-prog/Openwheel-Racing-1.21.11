@@ -93,7 +93,8 @@ public final class CarHudOverlay {
 
         TrackMapSnapshot map = ClientTrackMapCache.current();
         if (map.present()) {
-            CircuitMapRenderer.renderLocal(graphics, map, car.getX(), car.getZ(), car.getYRot(), car.getLiveryColors().bodySide(), x + 7, y + panelHeight + 6, panelWidth - 14, 58);
+            List<OpenwheelCarEntity> opponents = car.level().getEntitiesOfClass(OpenwheelCarEntity.class, car.getBoundingBox().inflate(512.0), opponent -> opponent != car);
+            CircuitMapRenderer.renderLocal(graphics, map, car.getX(), car.getZ(), car.getYRot(), car.getLiveryColors().bodySide(), opponents, x + 7, y + panelHeight + 6, panelWidth - 14, 88);
         }
     }
 

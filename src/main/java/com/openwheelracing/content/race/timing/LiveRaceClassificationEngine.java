@@ -18,6 +18,8 @@ public final class LiveRaceClassificationEngine {
     public static final int MAX_REFERENCE_HISTORY = 2048;
     public static final int MAX_POSITION_CHANGES = 32;
     private static final double MAX_ACCEPTED_FORWARD_METERS = 80.0;
+    private static final double MAX_RECOVERY_SPEED_METERS_PER_SECOND = 130.0;
+    private static final double RECOVERY_DISTANCE_ALLOWANCE_METERS = 8.0;
     private static final double SEAM_ZONE = 0.25;
     private static final long STALE_AFTER_MILLIS = 5_000L;
     private static final long MISSING_RETIREMENT_TICKS = 6_000L;
@@ -108,6 +110,22 @@ public final class LiveRaceClassificationEngine {
 
     public LiveRaceTimingSnapshot currentSnapshot(long serverTick) {
         return snapshot(serverTick, Map.of());
+    }
+
+    /** Raises a participant's lap count from independently validated lap records without changing route distance. */
+    public boolean reconcileCompletedLaps(RaceParticipantKey participant, int completedLaps) {
+        ParticipantState state = participants.get(participant);
+        if (state == null || !state.initialized || completedLaps <= state.completedLaps) {
+            return false;
+        }
+        state.completedLaps = completedLaps;
+        state.absoluteProgressMeters = completedLaps * routeLengthMeters + state.routeDistanceMeters;
+        state.previousAbsoluteProgressMeters = state.absoluteProgressMeters;
+        state.latestReferenceIndex = (long) Math.floor(state.absoluteProgressMeters / referenceSpacingMeters);
+        state.referenceTimes.clear();
+        state.previousMillis = Long.MIN_VALUE;
+        revision++;
+        return true;
     }
 
     public void restore(double routeLengthMeters, List<RestoredProgress> restored) {
@@ -335,7 +353,15 @@ public final class LiveRaceClassificationEngine {
                     candidateAbsolute += routeLength;
                     forward = candidateAbsolute - absoluteProgressMeters;
                 }
-                if (forward < -1.0 || forward > MAX_ACCEPTED_FORWARD_METERS) {
+                double maxAcceptedForward = MAX_ACCEPTED_FORWARD_METERS;
+                if (lastAcceptedMillis > 0L && now > lastAcceptedMillis + 50L) {
+                    double elapsedSeconds = (now - lastAcceptedMillis) / 1000.0;
+                    double recoveryBound = elapsedSeconds * MAX_RECOVERY_SPEED_METERS_PER_SECOND
+                        + RECOVERY_DISTANCE_ALLOWANCE_METERS;
+                    maxAcceptedForward = Math.max(maxAcceptedForward,
+                        Math.min(routeLength * 0.5, recoveryBound));
+                }
+                if (forward < -1.0 || forward > maxAcceptedForward) {
                     plausible = false;
                     nextConfidence = RaceProgressConfidence.DEGRADED;
                 } else if (candidateAbsolute >= absoluteProgressMeters && routeDistanceMeters > routeLength * (1.0 - SEAM_ZONE)

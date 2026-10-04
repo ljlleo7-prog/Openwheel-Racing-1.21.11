@@ -310,7 +310,11 @@ public class OWRLapRecords extends SavedData {
     }
 
     public LapRecord recordLap(UUID driverId, String driverName, int lapMillis, long completedGameTime, String dimensionId, long startFinishPos, int checkpointCount, CarSnapshot car) {
-        LapRecord record = new LapRecord(nextLapId++, driverId, driverName, lapMillis, completedGameTime, dimensionId, startFinishPos, checkpointCount, car, false, "", "", activeSessionId, activeSessionName, false);
+        return recordLap(driverId, driverName, lapMillis, completedGameTime, -1L, dimensionId, startFinishPos, checkpointCount, car);
+    }
+
+    public LapRecord recordLap(UUID driverId, String driverName, int lapMillis, long completedGameTime, long completedWorldTime, String dimensionId, long startFinishPos, int checkpointCount, CarSnapshot car) {
+        LapRecord record = new LapRecord(nextLapId++, driverId, driverName, lapMillis, completedGameTime, completedWorldTime, dimensionId, startFinishPos, checkpointCount, car, false, "", "", activeSessionId, activeSessionName, false);
         laps.add(record);
         setBestLapIfBetter(driverId, lapMillis);
         markChanged();
@@ -510,7 +514,11 @@ public class OWRLapRecords extends SavedData {
         }
     }
 
-    public record LapRecord(long id, UUID driverId, String driverName, int lapMillis, long completedGameTime, String dimensionId, long startFinishPos, int checkpointCount, CarSnapshot car, boolean invalidated, String invalidationReason, String invalidatedBy, long sessionId, String sessionName, boolean migratedFromLegacyTicks) {
+    public record LapRecord(long id, UUID driverId, String driverName, int lapMillis, long completedGameTime, long completedWorldTime, String dimensionId, long startFinishPos, int checkpointCount, CarSnapshot car, boolean invalidated, String invalidationReason, String invalidatedBy, long sessionId, String sessionName, boolean migratedFromLegacyTicks) {
+        public LapRecord(long id, UUID driverId, String driverName, int lapMillis, long completedGameTime, String dimensionId, long startFinishPos, int checkpointCount, CarSnapshot car, boolean invalidated, String invalidationReason, String invalidatedBy, long sessionId, String sessionName, boolean migratedFromLegacyTicks) {
+            this(id, driverId, driverName, lapMillis, completedGameTime, -1L, dimensionId, startFinishPos, checkpointCount, car, invalidated, invalidationReason, invalidatedBy, sessionId, sessionName, migratedFromLegacyTicks);
+        }
+
         public static final Codec<LapRecord> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.LONG.fieldOf("id").forGetter(LapRecord::id),
             uuidCodec().fieldOf("driver_id").forGetter(LapRecord::driverId),
@@ -518,6 +526,7 @@ public class OWRLapRecords extends SavedData {
             Codec.INT.optionalFieldOf("lap_millis", 0).forGetter(LapRecord::lapMillis),
             Codec.INT.optionalFieldOf("lap_ticks", 0).forGetter(record -> 0),
             Codec.LONG.fieldOf("completed_game_time").forGetter(LapRecord::completedGameTime),
+            Codec.LONG.optionalFieldOf("completed_world_time", -1L).forGetter(LapRecord::completedWorldTime),
             Codec.STRING.fieldOf("dimension_id").forGetter(LapRecord::dimensionId),
             Codec.LONG.fieldOf("start_finish_pos").forGetter(LapRecord::startFinishPos),
             Codec.INT.fieldOf("checkpoint_count").forGetter(LapRecord::checkpointCount),
@@ -529,13 +538,13 @@ public class OWRLapRecords extends SavedData {
             Codec.STRING.optionalFieldOf("session_name", DEFAULT_SESSION_NAME).forGetter(LapRecord::sessionName)
         ).apply(instance, LapRecord::create));
 
-        private static LapRecord create(long id, UUID driverId, String driverName, int lapMillis, int legacyLapTicks, long completedGameTime, String dimensionId, long startFinishPos, int checkpointCount, CarSnapshot car, boolean invalidated, String invalidationReason, String invalidatedBy, long sessionId, String sessionName) {
+        private static LapRecord create(long id, UUID driverId, String driverName, int lapMillis, int legacyLapTicks, long completedGameTime, long completedWorldTime, String dimensionId, long startFinishPos, int checkpointCount, CarSnapshot car, boolean invalidated, String invalidationReason, String invalidatedBy, long sessionId, String sessionName) {
             int normalizedLapMillis = lapMillis > 0 ? lapMillis : legacyTicksToMillis(legacyLapTicks);
-            return new LapRecord(id, driverId, driverName, normalizedLapMillis, completedGameTime, dimensionId, startFinishPos, checkpointCount, car, invalidated, invalidationReason, invalidatedBy, sessionId, sessionName, lapMillis <= 0 && legacyLapTicks > 0);
+            return new LapRecord(id, driverId, driverName, normalizedLapMillis, completedGameTime, completedWorldTime, dimensionId, startFinishPos, checkpointCount, car, invalidated, invalidationReason, invalidatedBy, sessionId, sessionName, lapMillis <= 0 && legacyLapTicks > 0);
         }
 
         LapRecord invalidated(UUID invalidatedBy, String reason) {
-            return new LapRecord(id, driverId, driverName, lapMillis, completedGameTime, dimensionId, startFinishPos, checkpointCount, car, true, reason, invalidatedBy.toString(), sessionId, sessionName, migratedFromLegacyTicks);
+            return new LapRecord(id, driverId, driverName, lapMillis, completedGameTime, completedWorldTime, dimensionId, startFinishPos, checkpointCount, car, true, reason, invalidatedBy.toString(), sessionId, sessionName, migratedFromLegacyTicks);
         }
     }
 }

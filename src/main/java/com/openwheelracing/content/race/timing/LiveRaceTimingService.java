@@ -2,6 +2,7 @@ package com.openwheelracing.content.race.timing;
 
 import com.openwheelracing.content.ai.BasicAiDriverIdentity;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
+import com.openwheelracing.content.race.OWRLapRecords;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRoute;
@@ -54,6 +55,8 @@ public final class LiveRaceTimingService {
         }
         RuntimeState runtime = new RuntimeState(sessionId, sessionName, activeTrack.get().trackId(), route.get().routeId(),
             surveys.revision(), route.get().toModel(), lapLimit, eligibleParticipants, remainingRaceTicks);
+        OWRLapRecords.get(level).getValidSessionLaps(OWRLapRecords.get(level).getActiveSessionId())
+            .forEach(lap -> runtime.recordedLapBaseline.merge(lap.driverId(), 1, Integer::sum));
         RUNTIMES.put(level, runtime);
         RECOVERY_CHECKED.add(level);
         runtime.tick(level);
@@ -126,6 +129,18 @@ public final class LiveRaceTimingService {
         return runtime == null || runtime.sessionId != sessionId ? Set.of() : Set.copyOf(runtime.retiredParticipants);
     }
 
+    /** Reconciles the live counter against valid lap records in the active Race Director session. */
+    public static void reconcileCompletedLaps(ServerLevel level, RaceParticipantKey participant, int recordedSessionLaps) {
+        RuntimeState runtime = RUNTIMES.get(level);
+        if (runtime == null || !runtime.active || participant == null) return;
+        int baseline = runtime.recordedLapBaseline.getOrDefault(participant.id(), 0);
+        int raceLaps = Math.max(0, recordedSessionLaps - baseline);
+        if (runtime.engine.reconcileCompletedLaps(participant, raceLaps)) {
+            runtime.engineSnapshot = runtime.engine.currentSnapshot(level.getGameTime());
+            runtime.forceBroadcast = true;
+        }
+    }
+
     public static void sendCurrent(ServerPlayer player) {
         if (!(player.level() instanceof ServerLevel level)) {
             return;
@@ -180,6 +195,11 @@ public final class LiveRaceTimingService {
                 new RaceParticipantKey(saved.participantId(), enumKind(saved.participantKind())), saved.displayName(), saved.completedLaps(),
                 saved.routeDistanceMeters(), saved.stablePosition())).toList();
         runtime.engine.restore(route.get().length(), restored);
+        Map<UUID, Integer> recordedSessionLaps = new HashMap<>();
+        OWRLapRecords.get(level).getValidSessionLaps(OWRLapRecords.get(level).getActiveSessionId())
+            .forEach(lap -> recordedSessionLaps.merge(lap.driverId(), 1, Integer::sum));
+        restored.forEach(progress -> runtime.recordedLapBaseline.put(progress.participant().id(),
+            Math.max(0, recordedSessionLaps.getOrDefault(progress.participant().id(), 0) - progress.completedLaps())));
         runtime.engine.ensureRevisionAfter(checkpoint.snapshotRevision());
         runtime.engineSnapshot = runtime.engine.currentSnapshot(level.getGameTime());
         runtime.forceBroadcast = true;
@@ -226,6 +246,7 @@ public final class LiveRaceTimingService {
         private String sessionType = "";
         private final Map<UUID, UUID> lockedParticipantCars = new HashMap<>();
         private final Set<UUID> retiredParticipants = new java.util.HashSet<>();
+        private final Map<UUID, Integer> recordedLapBaseline = new HashMap<>();
         private boolean participantCarsLocked;
 
         private RuntimeState(long sessionId, String sessionName, UUID trackId, UUID routeId, int surveyRevision, SurveyRouteModel route) {

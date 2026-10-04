@@ -18,11 +18,15 @@ import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.content.item.TyreItem;
 import com.openwheelracing.content.race.LapProfileCollector;
 import com.openwheelracing.content.race.LapTelemetryRecorder;
+import com.openwheelracing.content.race.LapTelemetryLapSplitter;
 import com.openwheelracing.content.race.LapTelemetryStore;
 import com.openwheelracing.content.race.LapTimingPreferences;
 import com.openwheelracing.content.race.LapTimingScope;
 import com.openwheelracing.content.race.OWRLapProfiles;
 import com.openwheelracing.content.race.OWRLapRecords;
+import com.openwheelracing.content.race.timing.LiveRaceTimingService;
+import com.openwheelracing.content.race.timing.RaceParticipantKey;
+import com.openwheelracing.content.race.timing.RaceParticipantKind;
 import com.openwheelracing.content.race.BoPProfileState;
 import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.PitLanePenaltyData;
@@ -30,6 +34,8 @@ import com.openwheelracing.content.race.PitLaneSpeedMath;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRouteRuntime;
+import com.openwheelracing.content.track.survey.SurveyRouteGeometry;
+import com.openwheelracing.content.track.survey.SurveyRouteModel;
 import com.openwheelracing.content.track.survey.TrackSurveyData;
 import com.openwheelracing.content.track.survey.PitLaneSurveyData;
 import com.openwheelracing.content.track.survey.PitLaneSurveyRuntime;
@@ -41,6 +47,7 @@ import com.openwheelracing.registry.OWRItems;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -1797,18 +1804,21 @@ public class OpenwheelCarEntity extends Entity {
             return;
         }
 
+        // Survey completion belongs to the configured detection-line crossing, not to
+        // whether race lap timing currently has a valid start timestamp.
+        if (getControllingPassenger() instanceof ServerPlayer surveyDriver) {
+            SurveyRouteRuntime.onLapFinish(this, surveyDriver).ifPresent(result -> {
+                if (result instanceof SurveyRouteRuntime.FinishSuccess success) {
+                    messageDriver(Component.literal("Survey saved — " + Math.round(success.route().length()) + "m, " + success.route().nodes().size() + " nodes"));
+                } else if (result instanceof SurveyRouteRuntime.FinishFailure failure) {
+                    messageDriver(Component.literal("Survey failed — " + failure.reason()));
+                }
+            });
+        }
+
         double crossingTime = preciseGameTime(movementT);
         long gameTime = level().getGameTime();
         if (lapStartedAt >= 0.0) {
-            if (getControllingPassenger() instanceof ServerPlayer player) {
-                SurveyRouteRuntime.onLapFinish(this, player).ifPresent(result -> {
-                    if (result instanceof SurveyRouteRuntime.FinishSuccess success) {
-                        messageDriver(Component.literal("Survey saved — " + Math.round(success.route().length()) + "m, " + success.route().nodes().size() + " nodes"));
-                    } else if (result instanceof SurveyRouteRuntime.FinishFailure failure) {
-                        messageDriver(Component.literal("Survey failed — " + failure.reason()));
-                    }
-                });
-            }
             if (isCheckpointCheckEnabled() && visitedCheckpoints.isEmpty() && visitedStewardCheckpoints == 0) {
                 invalidateLap("no checkpoints crossed");
                 startLap(crossingTime, Component.literal("Lap started — cross all checkpoints"));
@@ -1906,37 +1916,55 @@ public class OpenwheelCarEntity extends Entity {
             invalidateLap("missed checkpoints");
             return false;
         }
-        entityData.set(CURRENT_LAP_TICKS, lapMillis);
         OWRLapRecords records = OWRLapRecords.get(serverLevel);
         LapTimingScope timingScope = LapTimingPreferences.get(player.getUUID());
         int previousBest = records.getBestLap(player.getUUID(), timingScope);
         int previousOverallBest = records.getOverallBestLapMillis(timingScope);
-        OWRLapRecords.LapRecord lapRecord = records.recordLap(
-            player.getUUID(),
-            player.getScoreboardName(),
-            lapMillis,
-            gameTime,
-            serverLevel.dimension().identifier().toString(),
-            startFinishPos.asLong(),
-            visitedCheckpoints.size() + visitedStewardCheckpoints,
-            new OWRLapRecords.CarSnapshot(
-                setup.power(),
-                setup.grip(),
-                setup.aero(),
-                setup.gearing(),
-                Math.round(getDamagePercent()),
-                Math.round(getTyreWearPercent()),
-                isAbsEnabled()
-            )
-        );
         lapTelemetryRecorder.sampleFinish(crossingTime, lapProfileCollector.latest(), position(), getSpeedKmh());
-        lapTelemetryRecorder.finish(lapRecord.id(), lapMillis)
-            .ifPresent(snapshot -> LapTelemetryStore.save(serverLevel.getServer(), snapshot));
-        activeTrack.ifPresent(track -> commitValidTimingSegments(records, player.getUUID(), serverLevel.dimension().identifier().toString(), track, timingSegments));
-        if (activeTrack.isPresent()) {
+        Optional<LapTelemetryRecorder.Snapshot> capturedTelemetry = lapTelemetryRecorder.finish(0L, lapMillis);
+        List<LapTelemetryLapSplitter.Split> reconstructedSplits = capturedTelemetry
+            .map(snapshot -> LapTelemetryLapSplitter.split(snapshot, startFinishRouteDistance(serverLevel, activeTrack), minimumLapMillis))
+            .orElse(List.of());
+        // The accumulated checkpoint set cannot prove that every inferred lap passed every
+        // required checkpoint, so never turn one validated interval into multiple valid laps.
+        if (isCheckpointCheckEnabled()) reconstructedSplits = List.of();
+        boolean reconstructed = reconstructedSplits.size() > 1;
+        int checkpointCount = visitedCheckpoints.size() + visitedStewardCheckpoints;
+        OWRLapRecords.CarSnapshot carSnapshot = new OWRLapRecords.CarSnapshot(
+            setup.power(), setup.grip(), setup.aero(), setup.gearing(), Math.round(getDamagePercent()),
+            Math.round(getTyreWearPercent()), isAbsEnabled());
+        List<OWRLapRecords.LapRecord> completedRecords = new ArrayList<>();
+        if (reconstructed) {
+            LapTelemetryRecorder.Snapshot telemetry = capturedTelemetry.orElseThrow();
+            for (int index = 0; index < reconstructedSplits.size(); index++) {
+                LapTelemetryLapSplitter.Split split = reconstructedSplits.get(index);
+                long splitGameTime = gameTime - Math.max(0L,
+                    (long) Math.ceil((lapMillis - split.endElapsedMillis()) / 50.0));
+                long splitWorldTime = serverLevel.getDayTime() - Math.max(0L, gameTime - splitGameTime);
+                OWRLapRecords.LapRecord reconstructedRecord = records.recordLap(player.getUUID(),
+                    player.getScoreboardName(), split.lapMillis(), splitGameTime, splitWorldTime,
+                    serverLevel.dimension().identifier().toString(), startFinishPos.asLong(), checkpointCount, carSnapshot);
+                completedRecords.add(reconstructedRecord);
+                LapTelemetryStore.save(serverLevel.getServer(), telemetry.slice(reconstructedRecord.id(), split));
+            }
+            messageDriver(Component.literal("Telemetry recovered " + reconstructedSplits.size() + " laps; each inferred lap includes a "
+                + LapTelemetryLapSplitter.SAMPLE_INTERVAL_PENALTY_MILLIS + " ms timing margin"));
+        } else {
+            OWRLapRecords.LapRecord lapRecord = records.recordLap(player.getUUID(), player.getScoreboardName(), lapMillis,
+                gameTime, serverLevel.getDayTime(), serverLevel.dimension().identifier().toString(), startFinishPos.asLong(), checkpointCount, carSnapshot);
+            completedRecords.add(lapRecord);
+            capturedTelemetry.ifPresent(snapshot -> LapTelemetryStore.save(serverLevel.getServer(), snapshot.withLapId(lapRecord.id(), lapMillis)));
+            activeTrack.ifPresent(track -> commitValidTimingSegments(records, player.getUUID(),
+                serverLevel.dimension().identifier().toString(), track, timingSegments));
+        }
+        int completedLapMillis = completedRecords.getLast().lapMillis();
+        entityData.set(CURRENT_LAP_TICKS, completedLapMillis);
+        reconcileLiveRaceLapCount(serverLevel, records, player.getUUID());
+        if (!reconstructed && activeTrack.isPresent()) {
+            OWRLapRecords.LapRecord lapRecord = completedRecords.getFirst();
             OWRLapProfiles.BestLapProfile profile = lapProfileCollector.finish(serverLevel.dimension().identifier().toString(),
                 activeTrack.get().trackId(), player.getScoreboardName(), OWRLapProfiles.Origin.PLAYER, lapRecord.id(),
-                records.getActiveSessionId(), lapMillis, gameTime);
+                records.getActiveSessionId(), completedLapMillis, gameTime);
             if (profile != null) {
                 if (OWRLapProfiles.get(serverLevel).putIfFaster(profile)) messageDriver(Component.literal("Best racing line saved"));
             } else {
@@ -1944,20 +1972,43 @@ public class OpenwheelCarEntity extends Entity {
             }
         }
         int bestLap = records.getBestLap(player.getUUID(), timingScope);
-        boolean personalBest = bestLap != 0 && bestLap != previousBest && bestLap == lapMillis;
-        int lapResult = previousOverallBest == 0 || lapMillis < previousOverallBest
+        boolean personalBest = bestLap != 0 && bestLap != previousBest && bestLap == completedLapMillis;
+        int lapResult = previousOverallBest == 0 || completedLapMillis < previousOverallBest
             ? LAP_RESULT_OVERALL_BEST
             : personalBest ? LAP_RESULT_PERSONAL_BEST : LAP_RESULT_SLOWER;
         entityData.set(BEST_LAP_TICKS, bestLap);
-        entityData.set(COMPLETED_LAP_TICKS, lapMillis);
+        entityData.set(COMPLETED_LAP_TICKS, completedLapMillis);
         entityData.set(COMPLETED_LAP_LINGER_TICKS, COMPLETED_LAP_LINGER_DURATION);
         entityData.set(COMPLETED_LAP_RESULT, lapResult);
         OWRNetwork.broadcastRankingBoard(serverLevel.getServer(), serverLevel);
         awardCompleteLapAdvancement(serverLevel, player);
-        messageDriver(Component.literal("Lap: " + formatLapTime(lapMillis)
+        messageDriver(Component.literal("Lap: " + formatLapTime(completedLapMillis)
             + " | CPs: " + (visitedCheckpoints.size() + visitedStewardCheckpoints)
             + (personalBest ? " | Personal best" : "")));
         return true;
+    }
+
+    private double startFinishRouteDistance(ServerLevel level, Optional<TrackDefinition> activeTrack) {
+        return activeTrack.flatMap(track -> track.startFinish().flatMap(line -> TrackSurveyData.get(level)
+            .get(track.trackId()).flatMap(route -> {
+                SurveyRouteModel model = route.toModel();
+                SurveyRouteModel.Point midpoint = new SurveyRouteModel.Point(
+                    (line.left().x() + line.right().x()) * 0.5,
+                    (line.left().y() + line.right().y()) * 0.5,
+                    (line.left().z() + line.right().z()) * 0.5);
+                return SurveyRouteGeometry.candidates(model, midpoint, line.headingRadians(), -1, model.nodes().size())
+                    .stream()
+                    .min(java.util.Comparator.comparingDouble(candidate -> candidate.horizontalDistance() * candidate.horizontalDistance()
+                        + candidate.verticalDelta() * candidate.verticalDelta()))
+                    .map(SurveyRouteGeometry.Candidate::distanceAlongRoute);
+            }))).orElse(Double.NaN);
+    }
+
+    private void reconcileLiveRaceLapCount(ServerLevel level, OWRLapRecords records, UUID driverId) {
+        long validLaps = records.getValidSessionLaps(records.getActiveSessionId()).stream()
+            .filter(lap -> lap.driverId().equals(driverId)).count();
+        LiveRaceTimingService.reconcileCompletedLaps(level,
+            new RaceParticipantKey(driverId, RaceParticipantKind.PLAYER), (int) Math.min(Integer.MAX_VALUE, validLaps));
     }
 
     private void awardCompleteLapAdvancement(ServerLevel serverLevel, Player player) {
@@ -2895,7 +2946,14 @@ public class OpenwheelCarEntity extends Entity {
         if (lineLength <= 1.0E-4) {
             return;
         }
-        double extension = COMPONENT_BODY_HALF_WIDTH;
+        Vec3 carForwardForSupport = Vec3.directionFromRotation(0.0f, getYRot());
+        Vec3 carRightForSupport = new Vec3(carForwardForSupport.z, 0.0, -carForwardForSupport.x);
+        double lineUnitX = lineDx / lineLength;
+        double lineUnitZ = lineDz / lineLength;
+        double extension = Math.abs(carForwardForSupport.x * lineUnitX + carForwardForSupport.z * lineUnitZ)
+            * COMPONENT_BODY_HALF_LENGTH
+            + Math.abs(carRightForSupport.x * lineUnitX + carRightForSupport.z * lineUnitZ)
+            * COMPONENT_BODY_HALF_WIDTH;
         double extendX = lineDx / lineLength * extension;
         double extendZ = lineDz / lineLength * extension;
         TrackDefinition.Point3 left = new TrackDefinition.Point3(line.left().x() - extendX, line.left().y(), line.left().z() - extendZ);
@@ -2918,9 +2976,8 @@ public class OpenwheelCarEntity extends Entity {
         }
         double headingX = Math.cos(line.headingRadians());
         double headingZ = Math.sin(line.headingRadians());
-        Vec3 carForward = Vec3.directionFromRotation(0.0f, getYRot());
         boolean forwardPass = actualMovement.x * headingX + actualMovement.z * headingZ > 0.0
-            && carForward.x * headingX + carForward.z * headingZ > 0.35;
+            && carForwardForSupport.x * headingX + carForwardForSupport.z * headingZ > 0.35;
         BlockPos linePosition = BlockPos.containing((line.left().x() + line.right().x()) * 0.5,
             (line.left().y() + line.right().y()) * 0.5, (line.left().z() + line.right().z()) * 0.5);
         handleStartFinishCrossing(linePosition, movementT, "track:start_finish", forwardPass, false, false, Double.NaN);
@@ -4949,7 +5006,7 @@ public class OpenwheelCarEntity extends Entity {
         if (lapTelemetryRecorder.sampleCount() < 2) return;
         OWRLapRecords records = OWRLapRecords.get(serverLevel);
         OWRLapRecords.LapRecord record = records.recordLap(driverId, driverName, Math.max(1, lapMillis),
-            serverLevel.getGameTime(), serverLevel.dimension().identifier().toString(), startFinishPos.asLong(),
+            serverLevel.getGameTime(), serverLevel.getDayTime(), serverLevel.dimension().identifier().toString(), startFinishPos.asLong(),
             visitedCheckpoints.size() + visitedStewardCheckpoints,
             new OWRLapRecords.CarSnapshot(setup.power(), setup.grip(), setup.aero(), setup.gearing(),
                 Math.round(getDamagePercent()), Math.round(getTyreWearPercent()), isAbsEnabled()));

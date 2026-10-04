@@ -1,6 +1,8 @@
 package com.openwheelracing.client.screen;
 
 import com.openwheelracing.content.race.LapTelemetryData;
+import com.openwheelracing.client.map.ClientTrackMapCache;
+import com.openwheelracing.content.track.TrackMapSnapshot;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -50,6 +52,7 @@ public final class LapTelemetryScreen extends Screen {
     private void drawRoute(GuiGraphics graphics, int left, int top, int plotWidth, int plotHeight) {
         int count = data.worldXCm().length;
         if (count < 2) return;
+        TrackMapSnapshot trackMap = ClientTrackMapCache.current();
         int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE;
         int minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
         for (int i = 0; i < count; i++) {
@@ -58,6 +61,12 @@ public final class LapTelemetryScreen extends Screen {
             minZ = Math.min(minZ, data.worldZCm()[i]);
             maxZ = Math.max(maxZ, data.worldZCm()[i]);
         }
+        if (trackMap.present()) {
+            minX = Math.min(minX, trackMap.minX() * 100);
+            maxX = Math.max(maxX, (trackMap.maxX() + 1) * 100);
+            minZ = Math.min(minZ, trackMap.minZ() * 100);
+            maxZ = Math.max(maxZ, (trackMap.maxZ() + 1) * 100);
+        }
         double spanX = Math.max(100.0, maxX - minX);
         double spanZ = Math.max(100.0, maxZ - minZ);
         double scale = Math.min((plotWidth - 20.0) / spanX, (plotHeight - 20.0) / spanZ);
@@ -65,17 +74,37 @@ public final class LapTelemetryScreen extends Screen {
         int usedHeight = (int) Math.round(spanZ * scale);
         int offsetX = left + (plotWidth - usedWidth) / 2;
         int offsetY = top + (plotHeight - usedHeight) / 2;
+        if (trackMap.present()) {
+            drawTrackSurface(graphics, trackMap.asphaltRuns(), maxX, minZ, scale, offsetX, offsetY, usedHeight, 0xFF52636A);
+            drawTrackSurface(graphics, trackMap.pitRuns(), maxX, minZ, scale, offsetX, offsetY, usedHeight, 0xFF39464D);
+        }
         for (int i = 1; i < count; i++) {
-            int x1 = offsetX + (int) Math.round((data.worldXCm()[i - 1] - minX) * scale);
+            int x1 = offsetX + (int) Math.round((maxX - data.worldXCm()[i - 1]) * scale);
             int y1 = offsetY + usedHeight - (int) Math.round((data.worldZCm()[i - 1] - minZ) * scale);
-            int x2 = offsetX + (int) Math.round((data.worldXCm()[i] - minX) * scale);
+            int x2 = offsetX + (int) Math.round((maxX - data.worldXCm()[i]) * scale);
             int y2 = offsetY + usedHeight - (int) Math.round((data.worldZCm()[i] - minZ) * scale);
-            drawLine(graphics, x1, y1, x2, y2, statusColor(data.trackingStatus()[i]));
+            drawLine(graphics, x1, y1, x2, y2, 0xFF7EE787);
         }
         int selected = Math.max(0, Math.min(count - 1, selectedSample));
-        int sx = offsetX + (int) Math.round((data.worldXCm()[selected] - minX) * scale);
+        int sx = offsetX + (int) Math.round((maxX - data.worldXCm()[selected]) * scale);
         int sy = offsetY + usedHeight - (int) Math.round((data.worldZCm()[selected] - minZ) * scale);
         graphics.fill(sx - 3, sy - 3, sx + 4, sy + 4, 0xFFFFFFFF);
+    }
+
+    private static void drawTrackSurface(GuiGraphics graphics, java.util.List<TrackMapSnapshot.CellRun> runs,
+                                         int maxX, int minZ, double scale, int offsetX, int offsetY,
+                                         int usedHeight, int color) {
+        for (TrackMapSnapshot.CellRun run : runs) {
+            int x1 = offsetX + (int) Math.round((maxX - (long) run.startX() * 100L) * scale);
+            int x2 = offsetX + (int) Math.round((maxX - ((long) run.endX() + 1) * 100L) * scale);
+            int y1 = offsetY + usedHeight - (int) Math.round(((long) run.z() * 100L - minZ) * scale);
+            int y2 = offsetY + usedHeight - (int) Math.round((((long) run.z() + 1) * 100L - minZ) * scale);
+            int left = Math.min(x1, x2);
+            int right = Math.max(x1, x2);
+            int top = Math.min(y1, y2);
+            int bottom = Math.max(y1, y2);
+            if (right > left && bottom > top) graphics.fill(left, top, right, bottom, color);
+        }
     }
 
     private void drawSpeed(GuiGraphics graphics, int left, int top, int plotWidth, int plotHeight) {

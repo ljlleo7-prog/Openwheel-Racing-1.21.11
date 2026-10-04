@@ -525,9 +525,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
                 graphics.fill(ROW_X - 2, y - 1, ROW_X + ROW_WIDTH, y + ROW_HEIGHT - 1, 0xFF3F5F7F);
             }
             int color = row.invalidated() ? 0xFFFF7777 : 0xFFE8EDF2;
+            String worldTime = formatWorldTime(row.completedWorldTime());
             String rowText = snapshot.archiveMode()
-                ? row.sessionName() + " / " + row.driverName() + "  " + formatLapTime(row.lapMillis())
-                : row.driverName() + "  " + formatLapTime(row.lapMillis());
+                ? worldTime + " " + row.sessionName() + " / " + row.driverName() + "  " + formatLapTime(row.lapMillis())
+                : worldTime + " " + row.driverName() + "  " + formatLapTime(row.lapMillis());
             graphics.drawString(font, fit(rowText, ROW_WIDTH), ROW_X, y, color, false);
         }
     }
@@ -542,15 +543,16 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.details"), LEFT_X, y, 0xFFE8EDF2, false);
         graphics.drawString(font, fit(row.driverName(), COLUMN_WIDTH - 8), LEFT_X, y + 14, 0xFFE8EDF2, false);
         graphics.drawString(font, formatLapTime(row.lapMillis()) + " / CP " + row.checkpointCount(), LEFT_X, y + 26, row.invalidated() ? 0xFFFF7777 : 0xFF7EE787, false);
+        graphics.drawString(font, "World time " + formatWorldTime(row.completedWorldTime()), LEFT_X, y + 38, 0xFFC9D1D9, false);
         if (menu.getSnapshot().archiveMode()) {
-            graphics.drawString(font, fit(row.sessionName(), COLUMN_WIDTH - 8), LEFT_X, y + 38, 0xFFC9D1D9, false);
+            graphics.drawString(font, fit(row.sessionName(), COLUMN_WIDTH - 8), LEFT_X, y + 50, 0xFFC9D1D9, false);
             return;
         }
         BlockPos pos = BlockPos.of(row.startFinishPos());
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.position", pos.getX(), pos.getY(), pos.getZ()), LEFT_X, y + 38, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.setup", row.power(), row.grip(), row.aero(), row.gearing()), LEFT_X, y + 50, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.condition", row.damagePercent(), row.tyreWearPercent()), LEFT_X, y + 62, 0xFFC9D1D9, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.abs", row.absEnabled() ? "ON" : "OFF"), LEFT_X, y + 74, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.position", pos.getX(), pos.getY(), pos.getZ()), LEFT_X, y + 50, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.setup", row.power(), row.grip(), row.aero(), row.gearing()), LEFT_X, y + 62, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.condition", row.damagePercent(), row.tyreWearPercent()), LEFT_X, y + 74, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.abs", row.absEnabled() ? "ON" : "OFF"), LEFT_X, y + 86, 0xFFC9D1D9, false);
     }
 
     private RaceDirectorLapRow selectedRow() {
@@ -713,6 +715,15 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         int seconds = millis / 1000 % 60;
         int milliseconds = millis % 1000;
         return String.format("%d:%02d.%03d", minutes, seconds, milliseconds);
+    }
+
+    private static String formatWorldTime(long worldTime) {
+        if (worldTime < 0L) return "--:--";
+        long day = Math.floorDiv(worldTime, 24_000L) + 1L;
+        long timeOfDay = Math.floorMod(worldTime, 24_000L);
+        int hour = (int) (timeOfDay / 1_000L);
+        int minute = (int) (timeOfDay % 1_000L * 60L / 1_000L);
+        return String.format(java.util.Locale.ROOT, "D%d %02d:%02d", day, hour, minute);
     }
 
     private static String telemetryLapTime(int millis) {

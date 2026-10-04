@@ -17,18 +17,23 @@ public final class SurveyRouteLocalizer {
     }
 
     public static Result locate(SurveyRouteModel route, SurveyRouteModel.Point position, double headingRadians, State state) {
-        List<SurveyRouteGeometry.Candidate> candidates = SurveyRouteGeometry.candidates(route, position, headingRadians, state.segmentIndex, LOCAL_WINDOW);
+        boolean globalSearch = state.needsReacquire;
+        List<SurveyRouteGeometry.Candidate> candidates = globalSearch
+            ? SurveyRouteGeometry.candidates(route, position, headingRadians, -1, route.nodes().size())
+            : SurveyRouteGeometry.candidates(route, position, headingRadians, state.segmentIndex, LOCAL_WINDOW);
         SurveyRouteGeometry.Candidate best = candidates.isEmpty() ? null : candidates.getFirst();
-        if (best == null || best.horizontalDistance() > MAX_HORIZONTAL || Math.abs(best.verticalDelta()) > LOW_CONFIDENCE_VERTICAL) {
+        if (!globalSearch && (best == null || best.horizontalDistance() > MAX_HORIZONTAL || Math.abs(best.verticalDelta()) > LOW_CONFIDENCE_VERTICAL)) {
             candidates = SurveyRouteGeometry.candidates(route, position, headingRadians, -1, route.nodes().size());
             best = candidates.isEmpty() ? null : candidates.getFirst();
         }
         if (best == null || best.horizontalDistance() > MAX_HORIZONTAL || Math.abs(best.verticalDelta()) > LOW_CONFIDENCE_VERTICAL) {
+            state.needsReacquire = true;
             return new Result(Status.UNTRACKED, Optional.ofNullable(best), Optional.empty(), 0.0, "outside route envelope");
         }
 
         SurveyRouteGeometry.Candidate second = distinctSecond(route, candidates, best);
         if (second != null && second.score() - best.score() <= AMBIGUITY_SCORE_MARGIN) {
+            state.needsReacquire = true;
             return new Result(Status.AMBIGUOUS, Optional.of(best), Optional.of(second), confidence(best), "multiple route positions match");
         }
 
@@ -38,6 +43,7 @@ public final class SurveyRouteLocalizer {
         state.segmentIndex = best.segmentIndex();
         state.distanceAlongRoute = best.distanceAlongRoute();
         state.status = status;
+        state.needsReacquire = false;
         return new Result(status, Optional.of(best), Optional.ofNullable(second), confidence(best), status == Status.TRACKED ? "tracked" : "near route envelope");
     }
 
@@ -72,11 +78,13 @@ public final class SurveyRouteLocalizer {
         private int segmentIndex = -1;
         private double distanceAlongRoute;
         private Status status = Status.UNTRACKED;
+        private boolean needsReacquire;
 
         public void reset() {
             segmentIndex = -1;
             distanceAlongRoute = 0.0;
             status = Status.UNTRACKED;
+            needsReacquire = false;
         }
     }
 

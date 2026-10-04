@@ -202,5 +202,40 @@ public final class LapTelemetryRecorder {
             return new LapTelemetryData(lapId, driverName, lapMillis, routeLength, elapsedMillis, routeDistanceCm,
                 coveredDistanceCm, speedCmps, worldXCm, worldYCm, worldZCm, trackingStatus);
         }
+
+        public Snapshot withLapId(long newLapId, int newLapMillis) {
+            return new Snapshot(newLapId, driverId, driverName, dimensionId, trackId, routeId, newLapMillis,
+                routeLength, elapsedMillis, routeDistanceCm, coveredDistanceCm, speedCmps, worldXCm,
+                worldYCm, worldZCm, trackingStatus);
+        }
+
+        public Snapshot slice(long newLapId, LapTelemetryLapSplitter.Split split) {
+            int length = split.endSample() - split.startSample() + 1;
+            int[] splitElapsed = new int[length];
+            int[] splitRoute = new int[length];
+            int[] splitCovered = new int[length];
+            int[] splitSpeed = new int[length];
+            int[] splitX = new int[length];
+            int[] splitY = new int[length];
+            int[] splitZ = new int[length];
+            byte[] splitStatus = new byte[length];
+            int baseCovered = coveredDistanceCm[split.startSample()];
+            int rawDuration = Math.max(1, split.endElapsedMillis() - split.startElapsedMillis());
+            double timeScale = split.lapMillis() / (double) rawDuration;
+            for (int target = 0; target < length; target++) {
+                int source = split.startSample() + target;
+                splitElapsed[target] = Math.max(0, (int) Math.round(
+                    (elapsedMillis[source] - split.startElapsedMillis()) * timeScale));
+                splitRoute[target] = routeDistanceCm[source];
+                splitCovered[target] = Math.max(0, coveredDistanceCm[source] - baseCovered);
+                splitSpeed[target] = speedCmps[source];
+                splitX[target] = worldXCm[source];
+                splitY[target] = worldYCm[source];
+                splitZ[target] = worldZCm[source];
+                splitStatus[target] = trackingStatus[source];
+            }
+            return new Snapshot(newLapId, driverId, driverName, dimensionId, trackId, routeId, split.lapMillis(),
+                routeLength, splitElapsed, splitRoute, splitCovered, splitSpeed, splitX, splitY, splitZ, splitStatus);
+        }
     }
 }

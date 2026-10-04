@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.content.race.TeamCarRow;
 import com.openwheelracing.content.race.TrackMoistureSnapshot;
+import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.track.TrackMapSnapshot;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -97,11 +98,20 @@ public final class CircuitMapRenderer {
     }
 
     public static void renderLocal(GuiGraphics graphics, TrackMapSnapshot map, double carX, double carZ, float headingDegrees, int color, int x, int y, int width, int height) {
+        renderLocal(graphics, map, carX, carZ, headingDegrees, color, List.of(), x, y, width, height);
+    }
+
+    public static void renderLocal(GuiGraphics graphics, TrackMapSnapshot map, double carX, double carZ, float headingDegrees, int color, List<OpenwheelCarEntity> opponents, int x, int y, int width, int height) {
         if (map == null || !map.present()) {
             return;
         }
+        graphics.fill(x, y, x + width, y + height, 0xCC050608);
+        graphics.renderOutline(x, y, width, height, BORDER_COLOR);
         Projection projection = new Projection(map, x + 4, y + 4, Math.max(1, width - 8), Math.max(1, height - 8));
         drawSurface(graphics, map, projection);
+        for (OpenwheelCarEntity opponent : opponents) {
+            drawMarker(graphics, projection.screenX(opponent.getX()), projection.screenY(opponent.getZ()), opponent.getYRot(), opponent.getLiveryColors().bodySide(), true);
+        }
         drawMarker(graphics, projection.screenX(carX), projection.screenY(carZ), headingDegrees, color, true);
     }
 
