@@ -543,7 +543,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.details"), LEFT_X, y, 0xFFE8EDF2, false);
         graphics.drawString(font, fit(row.driverName(), COLUMN_WIDTH - 8), LEFT_X, y + 14, 0xFFE8EDF2, false);
         graphics.drawString(font, formatLapTime(row.lapMillis()) + " / CP " + row.checkpointCount(), LEFT_X, y + 26, row.invalidated() ? 0xFFFF7777 : 0xFF7EE787, false);
-        graphics.drawString(font, "World time " + formatWorldTime(row.completedWorldTime()), LEFT_X, y + 38, 0xFFC9D1D9, false);
+        graphics.drawString(font, "Real time " + formatWorldTime(row.completedWorldTime()), LEFT_X, y + 38, 0xFFC9D1D9, false);
         if (menu.getSnapshot().archiveMode()) {
             graphics.drawString(font, fit(row.sessionName(), COLUMN_WIDTH - 8), LEFT_X, y + 50, 0xFFC9D1D9, false);
             return;
@@ -719,6 +719,10 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     private static String formatWorldTime(long worldTime) {
         if (worldTime < 0L) return "--:--";
+        if (worldTime >= 1_000_000_000_000L) {
+            return java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT)
+                .withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.ofEpochMilli(worldTime));
+        }
         long day = Math.floorDiv(worldTime, 24_000L) + 1L;
         long timeOfDay = Math.floorMod(worldTime, 24_000L);
         int hour = (int) (timeOfDay / 1_000L);

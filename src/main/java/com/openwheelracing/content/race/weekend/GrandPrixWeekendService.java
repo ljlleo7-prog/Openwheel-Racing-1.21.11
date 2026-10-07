@@ -51,10 +51,6 @@ public final class GrandPrixWeekendService {
                 continue;
             }
             GrandPrixWeekend.SessionView session = active.get();
-            if (session.state() != RaceSessionState.CONFIGURED && session.state() != RaceSessionState.OFFICIAL
-                && session.state() != RaceSessionState.ABANDONED) {
-                lockWorldTime(level, session.config().worldTime());
-            }
             if (session.state().isActive()) {
                 weekend.observeServerTick(tick);
                 if (connectedPlayers == 0 && weekend.onConnectedPlayerCountChanged(0, tick)) {
@@ -168,11 +164,4 @@ public final class GrandPrixWeekendService {
         return null;
     }
 
-    private static void lockWorldTime(ServerLevel level, long configuredTime) {
-        long current = level.getDayTime();
-        long locked = current - Math.floorMod(current, 24_000L) + configuredTime;
-        if (current != locked) {
-            level.setDayTime(locked);
-        }
-    }
 }

@@ -1933,6 +1933,7 @@ public class OpenwheelCarEntity extends Entity {
         OWRLapRecords.CarSnapshot carSnapshot = new OWRLapRecords.CarSnapshot(
             setup.power(), setup.grip(), setup.aero(), setup.gearing(), Math.round(getDamagePercent()),
             Math.round(getTyreWearPercent()), isAbsEnabled());
+        long completedAtMillis = System.currentTimeMillis();
         List<OWRLapRecords.LapRecord> completedRecords = new ArrayList<>();
         if (reconstructed) {
             LapTelemetryRecorder.Snapshot telemetry = capturedTelemetry.orElseThrow();
@@ -1940,7 +1941,7 @@ public class OpenwheelCarEntity extends Entity {
                 LapTelemetryLapSplitter.Split split = reconstructedSplits.get(index);
                 long splitGameTime = gameTime - Math.max(0L,
                     (long) Math.ceil((lapMillis - split.endElapsedMillis()) / 50.0));
-                long splitWorldTime = serverLevel.getDayTime() - Math.max(0L, gameTime - splitGameTime);
+                long splitWorldTime = completedAtMillis - Math.max(0L, (long) (lapMillis - split.endElapsedMillis()));
                 OWRLapRecords.LapRecord reconstructedRecord = records.recordLap(player.getUUID(),
                     player.getScoreboardName(), split.lapMillis(), splitGameTime, splitWorldTime,
                     serverLevel.dimension().identifier().toString(), startFinishPos.asLong(), checkpointCount, carSnapshot);
@@ -1951,7 +1952,7 @@ public class OpenwheelCarEntity extends Entity {
                 + LapTelemetryLapSplitter.SAMPLE_INTERVAL_PENALTY_MILLIS + " ms timing margin"));
         } else {
             OWRLapRecords.LapRecord lapRecord = records.recordLap(player.getUUID(), player.getScoreboardName(), lapMillis,
-                gameTime, serverLevel.getDayTime(), serverLevel.dimension().identifier().toString(), startFinishPos.asLong(), checkpointCount, carSnapshot);
+                gameTime, completedAtMillis, serverLevel.dimension().identifier().toString(), startFinishPos.asLong(), checkpointCount, carSnapshot);
             completedRecords.add(lapRecord);
             capturedTelemetry.ifPresent(snapshot -> LapTelemetryStore.save(serverLevel.getServer(), snapshot.withLapId(lapRecord.id(), lapMillis)));
             activeTrack.ifPresent(track -> commitValidTimingSegments(records, player.getUUID(),
@@ -5006,7 +5007,7 @@ public class OpenwheelCarEntity extends Entity {
         if (lapTelemetryRecorder.sampleCount() < 2) return;
         OWRLapRecords records = OWRLapRecords.get(serverLevel);
         OWRLapRecords.LapRecord record = records.recordLap(driverId, driverName, Math.max(1, lapMillis),
-            serverLevel.getGameTime(), serverLevel.getDayTime(), serverLevel.dimension().identifier().toString(), startFinishPos.asLong(),
+            serverLevel.getGameTime(), System.currentTimeMillis(), serverLevel.dimension().identifier().toString(), startFinishPos.asLong(),
             visitedCheckpoints.size() + visitedStewardCheckpoints,
             new OWRLapRecords.CarSnapshot(setup.power(), setup.grip(), setup.aero(), setup.gearing(),
                 Math.round(getDamagePercent()), Math.round(getTyreWearPercent()), isAbsEnabled()));
