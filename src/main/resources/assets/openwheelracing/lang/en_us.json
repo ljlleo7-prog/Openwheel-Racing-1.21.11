@@ -475,10 +475,10 @@
   "weather.openwheelracing.unavailable": "Weather is unavailable in this dimension.",
   "item.openwheelracing.car_dragger": "Car Dragger",
   "tooltip.openwheelracing.car_dragger.use": "Right-click a stopped car to lift it, together with its driver.",
-  "tooltip.openwheelracing.car_dragger.controls": "Look to position · Sneak + use to rotate 45° · Use to lower",
+  "tooltip.openwheelracing.car_dragger.controls": "Look up to keep lifting through blocks · Walk to carry · Sneak + use to rotate · Use to lower",
   "tooltip.openwheelracing.car_dragger.safety": "Keep holding the tool. Recovery invalidates the current lap.",
   "message.openwheelracing.car_dragger.aim": "Right-click a stopped car to attach the recovery tether.",
   "message.openwheelracing.car_dragger.unavailable": "Cannot lift: stop the car and AI, finish pit service, and stand nearby on foot.",
-  "message.openwheelracing.car_dragger.attached": "Car attached. Look to move it; sneak + use to rotate; use to lower.",
+  "message.openwheelracing.car_dragger.attached": "Car attached. Look up to lift through walls/ceilings; walk to carry; use to lower.",
   "message.openwheelracing.car_dragger.lowering": "Lowering car safely…"
 }

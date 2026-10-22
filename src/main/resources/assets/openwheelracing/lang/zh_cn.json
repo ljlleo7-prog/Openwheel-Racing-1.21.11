@@ -475,10 +475,10 @@
   "weather.openwheelracing.unavailable": "此维度没有天气。",
   "item.openwheelracing.car_dragger": "赛车搬运器",
   "tooltip.openwheelracing.car_dragger.use": "右键停止的赛车，将赛车与车手一同抬起。",
-  "tooltip.openwheelracing.car_dragger.controls": "转动视角调整位置 · 潜行使用旋转45° · 再次使用放下",
+  "tooltip.openwheelracing.car_dragger.controls": "抬头持续向上穿过方块 · 行走搬运 · 潜行使用旋转 · 再次使用放下",
   "tooltip.openwheelracing.car_dragger.safety": "搬运期间保持手持。搬运将使当前圈速无效。",
   "message.openwheelracing.car_dragger.aim": "右键停止的赛车以连接搬运牵引束。",
   "message.openwheelracing.car_dragger.unavailable": "无法搬运：请停止赛车和AI，结束维修，并下车靠近赛车。",
-  "message.openwheelracing.car_dragger.attached": "赛车已连接。转动视角移动，潜行使用旋转，再次使用放下。",
+  "message.openwheelracing.car_dragger.attached": "赛车已连接。抬头可向上穿过墙壁或天花板，行走搬运，再次使用放下。",
   "message.openwheelracing.car_dragger.lowering": "正在安全放下赛车……"
 }

@@ -311,12 +311,22 @@ public final class CarHudOverlay {
         renderComponentDamageDiagram(graphics, car, x + 9, y + 5);
 
         int tyreY = y + 100;
-        String tyreLabel = Component.translatable("hud.openwheelracing.tyres",
-            com.openwheelracing.content.item.TyreItem.tyreName(car.getTyreType(), car.getTyreCompound())).getString();
+        String compoundLabel = switch (car.getTyreType()) {
+            case SLICK -> "C" + (car.getTyreCompound() + 1);
+            case INTERMEDIATE -> "I";
+            case WET -> "W";
+        };
+        String tyreLabel = Component.translatable("hud.openwheelracing.tyres", compoundLabel).getString();
         int compoundColor = switch (car.getTyreType()) {
-            case SLICK -> 0xFFC9D1D9;
-            case INTERMEDIATE -> 0xFF7EE787;
-            case WET -> 0xFF79B8FF;
+            case SLICK -> switch (car.getTyreCompound()) {
+                case 4 -> 0xFFFF4444;
+                case 3 -> 0xFFFF9933;
+                case 2 -> 0xFFFFDD33;
+                case 1 -> 0xFFFFF2A6;
+                default -> 0xFFFFFFFF;
+            };
+            case INTERMEDIATE -> 0xFF45C96B;
+            case WET -> 0xFF4499FF;
         };
         drawScaledText(graphics, font, tyreLabel, x + 73, tyreY + 1,
             Math.min(0.85f, 128.0f / Math.max(1, font.width(tyreLabel))), compoundColor, false);

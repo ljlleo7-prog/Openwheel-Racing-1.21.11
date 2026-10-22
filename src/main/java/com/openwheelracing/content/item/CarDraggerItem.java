@@ -4,6 +4,7 @@ import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import java.util.function.Consumer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
@@ -20,8 +21,14 @@ public final class CarDraggerItem extends Item {
     }
 
     public static OpenwheelCarEntity heldCar(Player player) {
-        return player.level().getEntitiesOfClass(OpenwheelCarEntity.class,
-            player.getBoundingBox().inflate(16), car -> car.isRecoveryOwner(player)).stream().findFirst().orElse(null);
+        // A vertically extracted car can be far above the marshal. Search loaded entities
+        // only when the tool is used so release still works at any recovery height.
+        if (player.level() instanceof ServerLevel server) {
+            for (var entity : server.getAllEntities()) {
+                if (entity instanceof OpenwheelCarEntity car && car.isRecoveryOwner(player)) return car;
+            }
+        }
+        return null;
     }
 
     public static void control(Player player, OpenwheelCarEntity target) {

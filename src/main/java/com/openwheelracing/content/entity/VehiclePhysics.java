@@ -444,6 +444,25 @@ public final class VehiclePhysics {
         return (1.0 - movingBlend) * (1.0 - Math.exp(-7.0 * Math.max(0.0, dtSeconds)));
     }
 
+    static double staticContactLateralForce(double lateralSpeed, double stiffness, double limit,
+                                             double normalLoad, double dt) {
+        // A static constraint may remove slip, but must not overshoot it during a substep.
+        // Use a conservative share of supported mass because all four contacts act together
+        // and their lever arms also change patch velocity through yaw.
+        double supportedMass = Math.max(0.0, normalLoad) / 9.81;
+        double stableStiffness = Math.min(stiffness,
+            0.25 * supportedMass / Math.max(1.0E-6, dt));
+        return clamp(-lateralSpeed * stableStiffness, -limit, limit);
+    }
+
+    static double contactYawDelta(double yawDelta, double requestedDistance, double actualDistance,
+                                  boolean collision, double actualSpeed) {
+        if (!collision || requestedDistance < 1.0E-5) return yawDelta;
+        double blocked = clamp(1.0 - actualDistance / requestedDistance, 0.0, 1.0);
+        double staticBlend = 1.0 - smoothstep((Math.max(0.0, actualSpeed) - 1.5) / 1.0);
+        return yawDelta * (1.0 - blocked * staticBlend);
+    }
+
     static double blockedContactSettlingGain(double blockedFraction, double dtSeconds) {
         return clamp(blockedFraction, 0.0, 1.0)
             * (1.0 - Math.exp(-12.0 * Math.max(0.0, dtSeconds)));

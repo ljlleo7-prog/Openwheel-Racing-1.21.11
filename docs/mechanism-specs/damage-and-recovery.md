@@ -64,18 +64,21 @@ not package an occupied vehicle into an item. Safety cars inherit the same recov
 
 - Right-click a nearby, nearly stationary car on foot to attach. Active AI and tyre service must
   be stopped first. Each marshal holds one car; each car has one owner.
-- Walk and look to position the car at a point 4.5 blocks ahead. The target height is limited
-  to 0.5–3 blocks above the marshal's feet. Motion converges with a maximum speed of 0.25
-  blocks per tick and four collision checks per movement.
+- Walk and look to position the car horizontally at a point 4.5 blocks ahead. Looking up
+  continuously raises the car with no recovery height ceiling. Looking straight up lifts
+  vertically in place; looking level holds the height. Motion is bounded to 0.25 blocks per
+  tick with four movement substeps.
 - Sneak + use rotates the target heading by 45 degrees. The car turns at most 5 degrees per
   tick, checking its body footprint and passenger clearance before rotation or translation.
   Existing wall overlap may shrink or slide, but each collision box's overlap volume must
-  not increase. New obstacles still block movement. Blocked diagonal movement falls back
-  to horizontal sliding followed by lifting so a crashed car can be extracted. The seated
+  not increase during horizontal movement or rotation. Pure upward extraction ignores block
+  collisions, including walls and ceilings; entities, loaded chunks and world-border checks
+  still apply. Blocked diagonal movement falls back to horizontal sliding followed by lifting.
+  Downward release retains collision checks and lands on the first supporting surface. The seated
   driver's feet below the chassis are excluded from road-clearance checks.
 - Use again to lower vertically at 0.08 blocks per tick until obstructed by the ground.
   Normal driving resumes with zero recovery velocity. There is no throwing impulse.
-- Losing the tool, death, disconnecting, dimension changes or separation beyond 12 blocks
+- Losing the tool, death, disconnecting, dimension changes or horizontal separation beyond 12 blocks
   automatically starts lowering. Unloaded chunks and the world border block movement.
   A suspended car saved and reloaded resumes lowering without retaining player ownership.
 - Recovery bypasses drivetrain, impact processing and race marker detection, invalidates the
@@ -101,3 +104,9 @@ Wall-extraction tests `openwheelracing:stuck_car_recovery` and
 `openwheelracing:occupied_stuck_car_recovery` start with the car overlapping a tall wall,
 pull it free, verify lifting and retention of the seated driver, then check that a fresh wall
 still stops the car and that lowering completes. These run with `./gradlew runGameTestServer`.
+
+Upward-extraction tests `openwheelracing:upward_car_recovery` and
+`openwheelracing:occupied_upward_car_recovery` lift an embedded car through a thick roof to
+more than 20 blocks above the marshal, hold the elevated car with a level view, then lower it
+using the item. These cover unlimited height, owner lookup beyond the former 16-block range,
+vertical tether behavior, and retention of the seated driver.

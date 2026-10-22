@@ -27,6 +27,8 @@ public final class CarRecoveryGameTests {
         DeferredRegister.create(Registries.TEST_FUNCTION, OpenwheelRacing.MODID);
 
     static {
+        FUNCTIONS.register("upward_car_recovery", () -> helper -> upwardRecovery(helper, false));
+        FUNCTIONS.register("occupied_upward_car_recovery", () -> helper -> upwardRecovery(helper, true));
         FUNCTIONS.register("stuck_car_recovery", () -> helper -> stuckCarRecovery(helper, false));
         FUNCTIONS.register("occupied_stuck_car_recovery", () -> helper -> stuckCarRecovery(helper, true));
         FUNCTIONS.register("empty_car_recovery", () -> helper -> emptyCarRecovery(helper, OWREntities.PROTOTYPE_CAR.get()));
@@ -38,6 +40,55 @@ public final class CarRecoveryGameTests {
 
     public static void register(IEventBus bus) {
         FUNCTIONS.register(bus);
+    }
+
+    private static void upwardRecovery(GameTestHelper helper, boolean occupied) {
+        for (int x = 0; x < 12; x++) {
+            for (int z = 0; z < 12; z++) helper.setBlock(new BlockPos(x, 0, z), Blocks.STONE);
+        }
+        for (int x = 5; x <= 8; x++) {
+            for (int z = 4; z <= 9; z++) {
+                for (int y = 3; y <= 5; y++) helper.setBlock(new BlockPos(x, y, z), Blocks.STONE);
+            }
+        }
+        for (int y = 1; y <= 7; y++) {
+            for (int z = 4; z <= 9; z++) helper.setBlock(new BlockPos(7, y, z), Blocks.STONE);
+        }
+        ServerPlayer marshal = new FakePlayer(helper.getLevel(), new GameProfile(UUID.randomUUID(), "lift-marshal"));
+        Vec3 start = helper.absoluteVec(new Vec3(6.5, 1, 2));
+        marshal.setPos(start.x, start.y, start.z);
+        helper.getLevel().addNewPlayer(marshal);
+        marshal.setYRot(0);
+        marshal.setXRot(0);
+        marshal.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(OWRItems.CAR_DRAGGER.get()));
+        OpenwheelCarEntity car = helper.spawn(OWREntities.PROTOTYPE_CAR.get(), new Vec3(6.5, 1, 6.5));
+        double groundY = car.getY();
+        var driver = helper.makeMockPlayer(GameType.SURVIVAL);
+        if (occupied) {
+            driver.interactOn(car, InteractionHand.MAIN_HAND);
+            helper.assertTrue(car.hasPassenger(driver), "Driver must be seated before upward recovery");
+        }
+        marshal.interactOn(car, InteractionHand.MAIN_HAND);
+        helper.assertTrue(car.isRecoveryOwner(marshal), "Embedded car must attach under the roof");
+        marshal.setXRot(-90);
+        helper.runAfterDelay(100, () -> {
+            helper.assertTrue(car.getY() > groundY + 20, "Looking up must lift through the thick roof beyond previous height/tether limits");
+            helper.assertTrue(car.isRecoveryOwner(marshal), "Vertical distance must not drop the car");
+            helper.assertTrue(!occupied || car.hasPassenger(driver), "Driver must remain seated through extraction");
+            marshal.setXRot(0);
+        });
+        helper.runAfterDelay(110, () -> {
+            helper.assertTrue(car.getY() > groundY + 20, "Looking level must hold the elevated height");
+            OWRItems.CAR_DRAGGER.get().use(helper.getLevel(), marshal, InteractionHand.MAIN_HAND);
+        });
+        helper.runAfterDelay(150, () -> {
+            helper.assertTrue(car.getY() < groundY + 23, "Use must find and lower a car more than 16 blocks above the marshal");
+            helper.assertTrue(!occupied || car.hasPassenger(driver), "Lowering must retain the driver");
+            driver.stopRiding();
+            helper.getLevel().removePlayerImmediately(marshal, net.minecraft.world.entity.Entity.RemovalReason.DISCARDED);
+            car.discard();
+            helper.succeed();
+        });
     }
 
     private static void stuckCarRecovery(GameTestHelper helper, boolean occupied) {

@@ -384,7 +384,6 @@ public class OpenwheelCarEntity extends Entity {
     private static final double WHEEL_RADIUS_METERS = VehiclePhysics.NOMINAL_WHEEL_RADIUS_METERS;
     private static final double WHEEL_ROTATIONAL_INERTIA = 1.20;
     private static final double STATIC_TYRE_SPEED_THRESHOLD = 1.5;
-    private static final double SAND_DRIVE_RELEASE_SPEED = 0.35;
     private static final double TYRE_INITIAL_TEMPERATURE_C = 75.0;
     private static final double TYRE_AMBIENT_TEMPERATURE_C = VehiclePhysics.TYRE_AMBIENT_TEMPERATURE_C;
     private static final double TYRE_WEAR_BASE_RATE = 0.000030;
@@ -533,6 +532,13 @@ public class OpenwheelCarEntity extends Entity {
     private float recoveryYaw;
 
     private double yawRate;
+    private float terrainBumpPitch;
+    private float previousTerrainBumpPitch;
+
+    public float getTerrainBumpPitch(float partialTick) {
+        return previousTerrainBumpPitch + (terrainBumpPitch - previousTerrainBumpPitch) * partialTick;
+    }
+
     private int clutchReleaseTicks;
     private int clutchReleaseRpm;
     private double relaxedFlLatForce;
@@ -2086,6 +2092,13 @@ public class OpenwheelCarEntity extends Entity {
     @Override
     public void tick() {
         super.tick();
+        previousTerrainBumpPitch = terrainBumpPitch;
+        SurfaceProfile bumpSurface = getCurrentSurface();
+        float targetBumpPitch = LooseSurfacePhysics.bumpPitchDegrees(
+            !entityData.get(RECOVERING) && onGround()
+                && (bumpSurface == SurfaceProfile.SAND || bumpSurface == SurfaceProfile.GRAVEL),
+            getSpeedKmh() / 3.6, tickCount, getUUID().hashCode());
+        terrainBumpPitch += (targetBumpPitch - terrainBumpPitch) * 0.65f;
 
         if (entityData.get(RECOVERING)) {
             if (!level().isClientSide()) tickRecovery();
@@ -2093,6 +2106,7 @@ public class OpenwheelCarEntity extends Entity {
         }
 
         if (!level().isClientSide()) {
+            tickTerrainSounds();
             syncBoPFromBoundDriver();
             boolean ridden = getControllingPassenger() != null;
             if (wasRiddenLastTick && !ridden && getDeltaMovement().horizontalDistance() > MAX_REASONABLE_MOVEMENT_BLOCKS_PER_TICK) {
@@ -2181,13 +2195,19 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private boolean canMoveRecoveryEnvelope(AABB before, AABB after) {
+        return canMoveRecoveryEnvelope(before, after, false);
+    }
+
+    private boolean canMoveRecoveryEnvelope(AABB before, AABB after, boolean upwardExtraction) {
         AABB swept = before.minmax(after);
         if (!level().hasChunksAt(BlockPos.containing(swept.minX, swept.minY, swept.minZ),
                 BlockPos.containing(swept.maxX, swept.maxY, swept.maxZ))
             || !level().getWorldBorder().isWithinBounds(after) || after.minY < level().getMinY()) return false;
         CarRecoveryCollision.Bounds previousBounds = recoveryCollisionBounds(before);
         CarRecoveryCollision.Bounds nextBounds = recoveryCollisionBounds(after);
-        for (VoxelShape shape : level().getCollisions(this, swept)) {
+        Iterable<VoxelShape> collisions = upwardExtraction
+            ? level().getEntityCollisions(this, swept) : level().getCollisions(this, swept);
+        for (VoxelShape shape : collisions) {
             for (AABB obstacle : shape.toAabbs()) {
                 if (!CarRecoveryCollision.allows(previousBounds, nextBounds, recoveryCollisionBounds(obstacle))) return false;
             }
@@ -2200,7 +2220,10 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private boolean tryRecoveryStep(Vec3 step) {
-        if (!canMoveRecoveryEnvelope(recoveryEnvelope(position()), recoveryEnvelope(position().add(step)))) return false;
+        // Pure upward extraction deliberately ignores blocks, including ceilings. Horizontal
+        // movement and automatic lowering retain normal collision checks.
+        boolean upwardExtraction = !recoveryLowering && step.y > 0 && step.horizontalDistanceSqr() < 1.0E-16;
+        if (!canMoveRecoveryEnvelope(recoveryEnvelope(position()), recoveryEnvelope(position().add(step)), upwardExtraction)) return false;
         setPos(getX() + step.x, getY() + step.y, getZ() + step.z);
         return true;
     }
@@ -2208,7 +2231,7 @@ public class OpenwheelCarEntity extends Entity {
     private void tickRecovery() {
         Player marshal = recoveryOwner == null ? null : level().getPlayerByUUID(recoveryOwner);
         if (marshal == null || !marshal.isAlive() || marshal.isSpectator() || marshal.isPassenger()
-            || distanceToSqr(marshal) > 144.0
+            || position().subtract(marshal.position()).horizontalDistanceSqr() > 144.0
             || !(marshal.getMainHandItem().is(OWRItems.CAR_DRAGGER.get())
                 || marshal.getOffhandItem().is(OWRItems.CAR_DRAGGER.get()))) {
             recoveryLowering = true;
@@ -2218,9 +2241,13 @@ public class OpenwheelCarEntity extends Entity {
         if (recoveryLowering) {
             movement = new Vec3(0, -CarRecoveryMotion.LOWER_STEP, 0);
         } else {
-            Vec3 target = marshal.getEyePosition().add(marshal.getLookAngle().scale(4.5));
-            target = new Vec3(target.x, Math.max(marshal.getY() + 0.5,
-                Math.min(marshal.getY() + 3.0, target.y)), target.z);
+            Vec3 look = marshal.getLookAngle();
+            Vec3 target = marshal.getEyePosition().add(look.scale(4.5));
+            // Looking upward continuously raises the car; looking level holds its height.
+            // Height is not limited by the aim distance or by the marshal's elevation.
+            double targetY = Math.max(getY(), target.y);
+            if (look.y > 0.25) targetY = Math.max(getY(), marshal.getEyeY()) + look.y;
+            target = look.y > 0.95 ? new Vec3(getX(), targetY, getZ()) : new Vec3(target.x, targetY, target.z);
             Vec3 error = target.subtract(position());
             movement = error.scale(CarRecoveryMotion.stepScale(error.length()));
             // Rotation is gradual; the collision envelope includes the seated driver's headroom.
@@ -2839,9 +2866,9 @@ public class OpenwheelCarEntity extends Entity {
         KERB(                       0.78,                          0.991,                          0.01,     1.8,     1.10,     true),
         PIT_LANE(                   VehiclePhysics.PIT_LANE_GRIP,   VehiclePhysics.PIT_LANE_DRAG,   0.00,     0.6,     0.95,     true),
         DIRT(                       0.58,  0.925,  0.10,     1.4,     1.10,     false),
-        GRASS(                      0.42,  0.900,  0.14,     1.6,     1.15,     false),
-        GRAVEL(                     0.45,  0.910,  0.24,     2.0,     1.15,     false),
-        SAND(                       0.28,  0.860,  0.40,     2.4,     0.90,     false),
+        GRASS(                      0.42,  0.960,  0.02,     1.6,     1.15,     false),
+        GRAVEL(                     0.45,  0.955,  0.025,     2.0,     1.15,     false),
+        SAND(                       0.28,  0.950,  0.035,     2.4,     0.90,     false),
         WATER(                      0.02,  0.720,  0.35,     0.2,     4.00,     false);
 
         final double grip;
@@ -2858,6 +2885,27 @@ public class OpenwheelCarEntity extends Entity {
             this.wearMult       = wearMult;
             this.coolingMult    = coolingMult;
             this.countsAsTrack  = countsAsTrack;
+        }
+    }
+
+    private void tickTerrainSounds() {
+        double speed = getDeltaMovement().horizontalDistance() * 20.0;
+        if (!onGround() || speed < 0.8 || tickCount % (speed > 12.0 ? 3 : 5) != 0) return;
+        // One contact per side keeps mixed track/runoff audible without four overlapping samples.
+        for (double side : new double[] {-0.75, 0.75}) {
+            Vec3 contact = getWheelSoundPosition(side, 0.0);
+            SurfaceProfile surface = getSurfaceAt(contact);
+            var sound = switch (surface) {
+                case SAND -> SoundEvents.SAND_STEP;
+                case GRASS -> SoundEvents.GRASS_STEP;
+                case GRAVEL -> SoundEvents.GRAVEL_STEP;
+                default -> null;
+            };
+            if (sound != null) {
+                level().playSound(null, contact.x, contact.y, contact.z, sound, SoundSource.PLAYERS,
+                    (float) (0.12 + 0.23 * Math.min(1.0, speed / 20.0)),
+                    0.85f + random.nextFloat() * 0.3f);
+            }
         }
     }
 
@@ -3941,15 +3989,14 @@ public class OpenwheelCarEntity extends Entity {
 
             double subSpeedBlocksPerTick = subSpeed / 20.0;
             double driveDirection = gear == REVERSE_GEAR ? -1.0 : gear > NEUTRAL_GEAR ? 1.0 : 0.0;
-            boolean boggedInSand = surface == SurfaceProfile.SAND && subSpeed > SAND_DRIVE_RELEASE_SPEED;
             double subDriveForceRequest = driveDirection != 0.0 && throttle > 0.0
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
-                    && subSpeedBlocksPerTick < pitSpeedLimit && !boggedInSand
+                    && subSpeedBlocksPerTick < pitSpeedLimit
                 ? driveDirection * icePowerWatts * throttle / Math.max(MIN_POWER_SPEED, Math.abs(velocityLong))
                 : 0.0;
             if (clutchReleasing && driveDirection != 0.0
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
-                    && subSpeedBlocksPerTick < pitSpeedLimit && !boggedInSand) {
+                    && subSpeedBlocksPerTick < pitSpeedLimit) {
                 double releaseT = clutchReleaseTicks / (double) CLUTCH_RELEASE_TICKS;
                 double storedPower = combustionPowerWatts(Math.max(engineRpm, clutchReleaseRpm)) * profile.powerMultiplier() * setup.powerMultiplier() * setup.accelerationMultiplier() * damageFactor * entityData.get(BOP_POWER_MULTIPLIER);
                 double clutchForce = driveDirection * storedPower * releaseT / MIN_POWER_SPEED;
@@ -3977,7 +4024,7 @@ public class OpenwheelCarEntity extends Entity {
             }
             if (driveDirection > 0.0 && ersPower.powerWatts() != 0.0
                     && Math.abs(velocityLong) / 20.0 < gearTopSpeed
-                    && subSpeedBlocksPerTick < pitSpeedLimit && !boggedInSand) {
+                    && subSpeedBlocksPerTick < pitSpeedLimit) {
                 pendingErsDriveForce = ersPower.powerWatts() / Math.max(MIN_POWER_SPEED, Math.abs(velocityLong));
             }
 
@@ -4004,7 +4051,12 @@ public class OpenwheelCarEntity extends Entity {
             double subRollingForce = ROLLING_RESISTANCE
                 * WetTyrePhysics.rollingResistanceForceMultiplier(getTyreType())
                 * tyreWearDragFactor * componentDragFactor * (carMassKg * GRAVITY + subDownforce);
-            double subSinkDragForce = (surface.sinkDrag + wetResistance) * (carMassKg * GRAVITY + subDownforce);
+            // Grain impacts grow with speed; low-speed rolling resistance still permits recovery.
+            double terrainResistance = LooseSurfacePhysics.resistanceCoefficient(
+                surface == SurfaceProfile.SAND, surface == SurfaceProfile.GRAVEL,
+                surface == SurfaceProfile.GRASS, subSpeed);
+            double subSinkDragForce = (surface.sinkDrag + terrainResistance + wetResistance)
+                * (carMassKg * GRAVITY + subDownforce);
             double unloadedRearDriveForce = asphaltMuLongitudinal * surface.grip
                 * Math.max(300.0, subStaticRearLoad + subAeroRearLoad);
             double subAvailableRearDriveForce = VehiclePhysics.drivenAxleForceWithLongitudinalLoadTransfer(
@@ -4427,7 +4479,9 @@ public class OpenwheelCarEntity extends Entity {
 
         forward = Vec3.directionFromRotation(0.0f, getYRot());
         right = new Vec3(forward.z, 0.0, -forward.x);
-        double newY = onGround() ? 0.0 : delta.y - 0.04;
+        double newY = onGround() ? LooseSurfacePhysics.bumpVelocity(
+            surface == SurfaceProfile.SAND || surface == SurfaceProfile.GRAVEL,
+            Math.hypot(velocityLong, velocityLat), tickCount, getUUID().hashCode()) : delta.y - 0.04;
         delta = new Vec3(
             (forward.x * velocityLong + right.x * velocityLat) / 20.0,
             newY,
@@ -4467,7 +4521,7 @@ public class OpenwheelCarEntity extends Entity {
         if (actualMovement != unclampedActualMovement) {
             logMovementWarning("actual movement clamped", beforeMove, unclampedActualMovement, actualMovement, throttle, brake, steering, surface);
         }
-        reconcileBlockedContactRotation(delta, actualMovement);
+        reconcileBlockedContactRotation(delta, actualMovement, yawDelta);
         double requestedActualDelta = Math.abs(unclampedActualMovement.horizontalDistance() - delta.horizontalDistance());
         if (requestedActualDelta > 1.0 && unclampedActualMovement.horizontalDistance() > MAX_REASONABLE_MOVEMENT_BLOCKS_PER_TICK) {
             logMovementWarning("movement/collision discrepancy", beforeMove, delta, unclampedActualMovement, throttle, brake, steering, surface);
@@ -4506,7 +4560,11 @@ public class OpenwheelCarEntity extends Entity {
         previousHorizontalSpeed = horizontalSpeed;
     }
 
-    private void reconcileBlockedContactRotation(Vec3 requestedMovement, Vec3 actualMovement) {
+    private void reconcileBlockedContactRotation(Vec3 requestedMovement, Vec3 actualMovement, double appliedYawDelta) {
+        double retainedYawDelta = VehiclePhysics.contactYawDelta(appliedYawDelta,
+            requestedMovement.horizontalDistance(), actualMovement.horizontalDistance(),
+            horizontalCollision, actualMovement.horizontalDistance() * 20.0);
+        setYRot(getYRot() + (float) Math.toDegrees(retainedYawDelta - appliedYawDelta));
         if (!horizontalCollision) {
             return;
         }
@@ -5742,7 +5800,7 @@ public class OpenwheelCarEntity extends Entity {
         double longitudinalSlip = VehiclePhysics.kinematicLongitudinalSlip(
             wheelAngularSpeed, WHEEL_RADIUS_METERS, wheelLongVelocity);
         double longitudinalForce = pacejkaLongitudinalForce(longitudinalSlip, longitudinalStiffness, longitudinalLimit);
-        double lateralTarget = lateralTyreForceTarget(slipAngle, wheelLatVelocity, lateralStiffness, lateralLimit, muLat * normalLoad, carSpeed);
+        double lateralTarget = lateralTyreForceTarget(slipAngle, wheelLatVelocity, lateralStiffness, lateralLimit, muLat * normalLoad, carSpeed, normalLoad, dt);
         double relaxationGain = carSpeed < STATIC_TYRE_SPEED_THRESHOLD
             ? 1.0
             : VehiclePhysics.tyreRelaxationGainForPatch(wheelLongVelocity, wheelLatVelocity, relaxationLength, dt);
@@ -5776,12 +5834,13 @@ public class OpenwheelCarEntity extends Entity {
             relaxedLateralForce, yawMoment, wheelAngularSpeed, wheelLongVelocity);
     }
 
-    private static double lateralTyreForceTarget(double slipAngle, double wheelLatVelocity, double stiffness, double lateralLimit, double staticLimit, double carSpeed) {
+    private static double lateralTyreForceTarget(double slipAngle, double wheelLatVelocity, double stiffness, double lateralLimit, double staticLimit, double carSpeed, double normalLoad, double dt) {
         double dynamicForce = pacejkaLateralForce(slipAngle, stiffness, lateralLimit);
         if (carSpeed >= STATIC_TYRE_SPEED_THRESHOLD) {
             return dynamicForce;
         }
-        double staticForce = clamp(-wheelLatVelocity * stiffness, -staticLimit, staticLimit);
+        double staticForce = VehiclePhysics.staticContactLateralForce(
+            wheelLatVelocity, stiffness, staticLimit, normalLoad, dt);
         double blend = smoothstep(carSpeed / STATIC_TYRE_SPEED_THRESHOLD);
         return staticForce + (dynamicForce - staticForce) * blend;
     }

@@ -59,3 +59,16 @@ For each surface, define visual role, driving effect, crafting cost, and future 
 ## Acceptance Criteria
 
 - What must be true for the first track-building loop to feel complete?
+
+## Loose Runoff Behavior
+
+Sand and gravel retain low grip, but allow engine drive at all speeds. Sinking
+resistance is small (sand 0.035, gravel 0.025, grass 0.02). Additional rolling
+resistance and speed-dependent grain collision losses slow cars progressively,
+with grain losses capped at 30 m/s. Grass also has reduced resistance so drivers
+can recover from runoff. These losses oppose travel and cannot reverse the car.
+Sand and gravel produce grounded hops below 0.1 blocks, spaced 9–15 ticks apart
+and disabled below 2 m/s. Pitch rocks by up to 2.5 degrees with varied pulse
+duration and strength. Per-car seeded variation keeps hops and pitch coordinated
+without frame-to-frame randomness. Sand, grass, and gravel play vanilla footstep samples
+at the left and right contacts while moving, including mixed-surface runoff.

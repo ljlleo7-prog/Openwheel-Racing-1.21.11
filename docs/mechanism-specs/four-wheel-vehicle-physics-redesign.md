@@ -359,3 +359,27 @@ Start with Phase 1 and Phase 2 together in one controlled patch:
 6. Build and test: stationary steering release, low-speed donut attempt, medium-speed corner exit, high-speed straight after steering release.
 
 This directly addresses the current issue while keeping the model physically inspectable.
+
+## Low-Speed Contact Regression (2026-10-22)
+
+Static lateral stiffness is capped by a conservative supported-mass impulse
+budget per substep. This prevents the static branch from reversing contact slip
+through numerical overshoot. The existing blend to dynamic tyre forces remains;
+at or above 1.5 m/s the dynamic force calculation is unchanged.
+Slow blocked movement also removes the blocked fraction of the yaw already
+applied that tick. This correction fades out from 1.5 to 2.5 m/s of actual
+movement, preserving fast collision response and all unobstructed rotation.
+
+Before/after unit comparison (`LowSpeedContactStabilityTest`):
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| 0.01 m/s patch slip, 200 kg supported mass, 100000 stiffness, 0.0125 s step | -0.0525 m/s (reversed) | 0.0075 m/s (settles) |
+| Fully blocked 0.02 rad yaw step | 0.02 rad retained | 0 rad retained |
+| Unblocked positive/negative yaw | Preserved | Preserved |
+| Fast wall contact at 10 m/s | Preserved | Preserved |
+
+The initial regression run failed the slip and blocked-yaw tests and passed the
+preservation test. Additional coverage checks four-contact spin settling and
+steering direction in forward and reverse. These are numerical unit checks;
+in-game launch and wall-contact driving still requires manual validation.
