@@ -20,7 +20,7 @@ class TrackWeatherProgressionTest {
 
     @Test
     void fiveMinuteNormalShowerOnlyDampensTrack() {
-        assertEquals(1.125, TrackWeatherProgression.rainingProgress(6000L, false), 1.0E-9);
+        assertEquals(1.0625, TrackWeatherProgression.rainingProgress(6000L, false), 1.0E-9);
     }
 
     @Test

@@ -30,6 +30,7 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.furnace.FurnaceFuelBurnTimeEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
@@ -43,8 +44,11 @@ public final class OpenwheelRacing {
 
     public OpenwheelRacing(IEventBus modBus) {
         modBus.addListener(BasicAiFleetChunkTickets::register);
+        com.openwheelracing.content.block.TrackWeatherGameTests.register(modBus);
+        com.openwheelracing.content.recovery.CarRecoveryGameTests.register(modBus);
         modBus.addListener(this::commonSetup);
         modBus.addListener(OWRNetwork::register);
+        modBus.addListener(com.openwheelracing.network.RegionalWeatherPayload::register);
         OWRDataComponents.register(modBus);
         OWREntities.register(modBus);
         OWRFluids.register(modBus);
@@ -61,6 +65,7 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedOut);
         NeoForge.EVENT_BUS.addListener(this::onPlayerChangedDimension);
         NeoForge.EVENT_BUS.addListener(this::onPlayerRespawn);
+        NeoForge.EVENT_BUS.addListener(this::onServerAboutToStart);
         NeoForge.EVENT_BUS.addListener(this::onServerStarted);
         NeoForge.EVENT_BUS.addListener(this::onServerStopped);
         NeoForge.EVENT_BUS.addListener(TrackMapAutoDetector::onServerTick);
@@ -95,14 +100,19 @@ public final class OpenwheelRacing {
         syncPlayerCircuit(event);
     }
 
+    private void onServerAboutToStart(ServerAboutToStartEvent event) {
+        // Reset before chunk-load events register the initial weather sweeps.
+        TrackWeatherChunkProgression.clearAll();
+    }
+
     private void onServerStarted(ServerStartedEvent event) {
         TrackMapAutoDetector.clearJobs();
-        TrackWeatherChunkProgression.clearAll();
         TrackMoistureTelemetryService.clearAll();
         OWRLegacyDimensionDataImporter.importOnServerStarted(event.getServer());
     }
 
     private void onServerStopped(ServerStoppedEvent event) {
+        TrackWeatherChunkProgression.clearAll();
         BasicAiFleetManager.clearAll();
         LiveRaceTimingService.clearAll();
         RaceAutoFlagService.clearAll();
@@ -115,6 +125,7 @@ public final class OpenwheelRacing {
         if (!(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer serverPlayer) || !(serverPlayer.level() instanceof net.minecraft.server.level.ServerLevel level)) {
             return;
         }
+        com.openwheelracing.network.RegionalWeatherPayload.send(serverPlayer);
         OWRNetwork.sendRankingBoard(serverPlayer, level);
         OWRNetwork.sendRaceFlag(serverPlayer, level, false);
         OWRNetwork.sendVehiclePhysicsPreset(serverPlayer);

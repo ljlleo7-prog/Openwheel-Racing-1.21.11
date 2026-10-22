@@ -16,6 +16,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class CameraMixin {
     @Inject(method = "setup", at = @At("TAIL"))
     private void openwheelracing$setupTCamera(Level level, Entity viewEntity, boolean detached, boolean mirrored, float partialTick, CallbackInfo ci) {
+        com.openwheelracing.content.weather.RegionalWeather.updateCamera(viewEntity.blockPosition());
         if (!OWRCameraMode.isTCamera() || !(viewEntity.getVehicle() instanceof OpenwheelCarEntity car)) {
             return;
         }

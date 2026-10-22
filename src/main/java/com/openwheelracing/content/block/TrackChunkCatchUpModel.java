@@ -2,7 +2,7 @@ package com.openwheelracing.content.block;
 
 public final class TrackChunkCatchUpModel {
     private static final double RANDOM_TICKS_PER_BLOCK_TICK = 3.0 / 4096.0;
-    private static final double[] RAIN_CHANCE = {0.0, 0.016, 0.012, 0.0};
+    private static final double[] RAIN_CHANCE = {0.024, 0.016, 0.012, 0.0};
     private static final double[] DRY_CHANCE = {0.0, 0.008, 0.006, 0.004};
 
     private TrackChunkCatchUpModel() {

@@ -10,6 +10,7 @@ import com.openwheelracing.content.race.LapTelemetryData;
 import com.openwheelracing.content.race.RaceFlagMode;
 import com.openwheelracing.content.race.TeamCarRow;
 import com.openwheelracing.network.OWRNetwork;
+import com.openwheelracing.content.weather.RegionalWeather;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -591,6 +592,18 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     private void drawWeatherTelemetry(GuiGraphics graphics, RaceDirectorSnapshot snapshot) {
         var moisture = menu.getMoistureSnapshot();
+        if (minecraft != null && minecraft.level != null && minecraft.player != null
+            && RegionalWeather.enabled(minecraft.level)) {
+            BlockPos forecastPosition = snapshot.trackMap().present()
+                ? new BlockPos(snapshot.trackMap().minX() + (snapshot.trackMap().maxX() - snapshot.trackMap().minX()) / 2, 64,
+                    snapshot.trackMap().minZ() + (snapshot.trackMap().maxZ() - snapshot.trackMap().minZ()) / 2) : minecraft.player.blockPosition();
+            var lines = RegionalWeather.forecastLines(minecraft.level, forecastPosition);
+            int forecastY = MAP_Y + MAP_HEIGHT - lines.size() * 10;
+            graphics.fill(MAP_X - 2, forecastY - 2, MAP_X + MAP_WIDTH + 2, MAP_Y + MAP_HEIGHT, 0xE0101418);
+            for (int i = 0; i < lines.size(); i++) {
+                graphics.drawString(font, fit(lines.get(i).getString(), MAP_WIDTH), MAP_X, forecastY + i * 10, 0xFFE8EDF2, false);
+            }
+        }
         if (moisture.totalSamples() <= 0) return;
         int x = MAP_X;
         int y = 42;

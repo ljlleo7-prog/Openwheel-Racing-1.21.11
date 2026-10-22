@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:function",
+  "function": "openwheelracing:empty_safety_car_recovery",
+  "environment": "minecraft:default",
+  "structure": "openwheelracing:car_recovery",
+  "max_ticks": 120,
+  "sky_access": true
+}

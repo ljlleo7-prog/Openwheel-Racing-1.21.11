@@ -1,5 +1,6 @@
 package com.openwheelracing.content.block;
 
+import com.openwheelracing.content.weather.RegionalWeather;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -19,6 +20,8 @@ public final class TrackWeatherChunkProgression {
     private static final int COLUMNS_PER_TICK = 2_048;
     private static final int BLOCK_UPDATES_PER_TICK = 256;
     private static final int SURFACE_SEARCH_DEPTH = 4;
+    private static final long SWEEP_INTERVAL_TICKS = 20;
+    private static final int COLUMNS_PER_CHUNK_SLICE = 16;
     private static final Map<ServerLevel, LevelQueue> QUEUES = new IdentityHashMap<>();
 
     private TrackWeatherChunkProgression() {
@@ -27,10 +30,11 @@ public final class TrackWeatherChunkProgression {
     public static void onChunkLoad(ChunkEvent.Load event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         long chunkPos = event.getChunk().getPos().toLong();
-        if (!TrackWeatherChunkData.get(level).contains(chunkPos) && outsideKnownTrackBounds(level, event.getChunk().getPos())) return;
+        if (!RegionalWeather.enabled(level) && !TrackWeatherChunkData.get(level).contains(chunkPos)
+            && outsideKnownTrackBounds(level, event.getChunk().getPos())) return;
         LevelQueue queue = QUEUES.computeIfAbsent(level, ignored -> new LevelQueue());
         if (!queue.queued.add(chunkPos)) return;
-        TrackWeatherPhase.Sample current = TrackWeatherPhase.sample(level);
+        TrackWeatherPhase.Sample current = TrackWeatherPhase.sample(level, event.getChunk().getPos().getMiddleBlockPosition(64));
         TrackWeatherChunkData.Checkpoint checkpoint = TrackWeatherChunkData.get(level).get(chunkPos);
         long sampledAt = checkpoint == null ? current.weatherEpoch() : checkpoint.sampledAt();
         double startProgress = checkpoint == null
@@ -44,19 +48,39 @@ public final class TrackWeatherChunkProgression {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         long chunkPos = event.getChunk().getPos().toLong();
         LevelQueue queue = QUEUES.get(level);
-        if (queue != null && queue.queued.remove(chunkPos)) {
-            queue.work.removeIf(work -> work.chunkPos == chunkPos);
+        if (queue != null) {
+            queue.loadedTrack.remove(chunkPos);
+            if (queue.queued.remove(chunkPos)) queue.work.removeIf(work -> work.chunkPos == chunkPos);
         }
         TrackWeatherChunkData data = TrackWeatherChunkData.get(level);
         if (data.contains(chunkPos)) {
-            data.put(chunkPos, level.getGameTime(), TrackWeatherPhase.sample(level).progress());
+            data.put(chunkPos, level.getGameTime(), TrackWeatherPhase.sample(level, event.getChunk().getPos().getMiddleBlockPosition(64)).progress());
         }
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
         for (ServerLevel level : event.getServer().getAllLevels()) {
             TrackAmbientTemperature.tick(level);
+            enqueueRegionalSweep(level);
             process(level);
+        }
+    }
+
+    static void observeTrack(ServerLevel level, BlockPos pos) {
+        QUEUES.computeIfAbsent(level, ignored -> new LevelQueue()).loadedTrack.add(new ChunkPos(pos).toLong());
+    }
+
+    private static void enqueueRegionalSweep(ServerLevel level) {
+        if (!RegionalWeather.enabled(level)) return;
+        LevelQueue queue = QUEUES.get(level);
+        if (queue == null || level.getGameTime() < queue.nextSweep) return;
+        queue.nextSweep = level.getGameTime() + SWEEP_INTERVAL_TICKS;
+        for (long chunkPos : queue.loadedTrack) {
+            if (!queue.queued.add(chunkPos)) continue;
+            var pos = new ChunkPos(chunkPos).getMiddleBlockPosition(64);
+            var phase = TrackWeatherPhase.sample(level, pos);
+            queue.work.addLast(new ChunkWork(chunkPos, level.getGameTime(), phase.progress(),
+                level.getGameTime(), phase.progress(), phase.weatherEpoch()));
         }
     }
 
@@ -101,7 +125,8 @@ public final class TrackWeatherChunkProgression {
                 if (!state.hasProperty(WettableTrack.MOISTURE)) continue;
                 work.foundTrack = true;
                 TrackMoisture current = WettableTrack.moisture(state);
-                TrackMoisture target = WettableTrackWeather.randomizedTarget(pos, new TrackWeatherPhase.Sample(work.endProgress, work.weatherEpoch));
+                TrackMoisture target = WettableTrackWeather.randomizedTarget(pos, RegionalWeather.enabled(level)
+                    ? TrackWeatherPhase.sample(level, pos) : new TrackWeatherPhase.Sample(work.endProgress, work.weatherEpoch));
                 TrackMoisture caughtUp = caughtUpMoisture(level, pos, current, target, work);
                 TrackMoistureTelemetryService.observe(level, pos, caughtUp);
                 if (caughtUp != current) {
@@ -113,20 +138,30 @@ public final class TrackWeatherChunkProgression {
             }
             work.column++;
             columns++;
-            if (work.column >= 256) finish(queue, work, work.foundTrack, level);
+            if (work.column >= 256) {
+                finish(queue, work, work.foundTrack, level);
+            } else if (work.column % COLUMNS_PER_CHUNK_SLICE == 0) {
+                queue.work.removeFirst();
+                queue.work.addLast(work);
+            }
             if (updated && updates >= BLOCK_UPDATES_PER_TICK) break;
         }
-        if (queue.work.isEmpty()) QUEUES.remove(level);
+        if (queue.work.isEmpty() && queue.loadedTrack.isEmpty()) QUEUES.remove(level);
     }
 
     private static TrackMoisture caughtUpMoisture(ServerLevel level, BlockPos pos, TrackMoisture current,
                                                    TrackMoisture target, ChunkWork work) {
+        if (RegionalWeather.enabled(level)) {
+            int nextLevel = TrackWeatherResponseModel.transitionLevel(current.level(), target.level(),
+                RegionalWeather.sample(level, pos).wet(), RegionalWeather.exposed(level, pos.above()));
+            return TrackMoisture.values()[nextLevel];
+        }
         if (current == target) return current;
         boolean wetting = target.level() > current.level();
         if (wetting && !level.isRainingAt(pos.above())) return current;
         long elapsed = Math.max(0L, work.sampledUntil - work.sampledAt);
         int result = current.level();
-        double threshold = WettableTrackWeather.stableUnit(pos.asLong(), work.weatherEpoch);
+        double threshold = TrackMoistureField.threshold(pos.getX(), pos.getZ(), work.weatherEpoch);
         boolean day = level.getDayTime() % 24000L < 12000L;
         while (wetting ? result < target.level() : result > target.level()) {
             int transitionStage = wetting ? result : result - 1;
@@ -144,12 +179,19 @@ public final class TrackWeatherChunkProgression {
     private static void finish(LevelQueue queue, ChunkWork work, boolean trackChunk, ServerLevel level) {
         queue.work.removeFirst();
         queue.queued.remove(work.chunkPos);
-        if (trackChunk) TrackWeatherChunkData.get(level).put(work.chunkPos, work.sampledUntil, work.endProgress);
+        if (trackChunk) {
+            queue.loadedTrack.add(work.chunkPos);
+            TrackWeatherChunkData.get(level).put(work.chunkPos, work.sampledUntil, work.endProgress);
+        } else {
+            queue.loadedTrack.remove(work.chunkPos);
+        }
     }
 
     private static final class LevelQueue {
         final ArrayDeque<ChunkWork> work = new ArrayDeque<>();
         final LongOpenHashSet queued = new LongOpenHashSet();
+        final LongOpenHashSet loadedTrack = new LongOpenHashSet();
+        long nextSweep;
     }
 
     private static final class ChunkWork {

@@ -3,7 +3,7 @@ package com.openwheelracing.content.block;
 public final class TrackMoistureModel {
     // Random ticks average roughly 4096 game ticks between attempts per block.
     // Calibrate rain transitions to multi-minute stages instead of near-instant wetting.
-    private static final double[] RAIN_CHANCE = {0.0, 0.016, 0.012, 0.0};
+    private static final double[] RAIN_CHANCE = {0.024, 0.016, 0.012, 0.0};
     private static final double[] DRY_CHANCE = {0.0, 0.008, 0.006, 0.004};
 
     private TrackMoistureModel() {

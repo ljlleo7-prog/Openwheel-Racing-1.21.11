@@ -14,6 +14,21 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class MinecraftMixin {
     @Shadow public net.minecraft.client.Options options;
 
+    @Inject(method = "tick", at = @At("HEAD"))
+    private void openwheelracing$clearDisconnectedWeather(CallbackInfo ci) {
+        if (((Minecraft) (Object) this).level == null) {
+            com.openwheelracing.content.weather.RegionalWeather.clearClient();
+        }
+    }
+
+    @Inject(method = "tick", at = @At("TAIL"))
+    private void openwheelracing$tickWeatherVisuals(CallbackInfo ci) {
+        Minecraft minecraft = (Minecraft) (Object) this;
+        if (minecraft.level != null && !minecraft.isPaused()) {
+            com.openwheelracing.content.weather.RegionalWeather.tickClientVisuals(minecraft.level);
+        }
+    }
+
     @Inject(method = "handleKeybinds", at = @At("HEAD"), cancellable = true)
     private void openwheelracing$handleOnboardOverrides(CallbackInfo ci) {
         if (OWRClientInputHandler.onboardCar() == null) {

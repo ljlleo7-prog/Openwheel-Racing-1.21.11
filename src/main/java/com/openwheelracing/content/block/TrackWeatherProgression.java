@@ -40,6 +40,12 @@ public final class TrackWeatherProgression {
             - Math.max(0L, dryTicks) / (NATURAL_DRY_STAGE_SECONDS * 20.0));
     }
 
+    public static double naturalDryingProgress(double startingProgress, long dryTicks) {
+        // The extra half-stage is timing headroom for blocks that dry later than the mean.
+        return Math.max(-0.5, Math.min(3.0, startingProgress)
+            - Math.max(0L, dryTicks) / (NATURAL_DRY_STAGE_SECONDS * 20.0));
+    }
+
     public static int dryingTargetLevel(int levelWhenRainStopped, long dryTicks) {
         return (int) Math.floor(dryingProgress(levelWhenRainStopped, dryTicks));
     }

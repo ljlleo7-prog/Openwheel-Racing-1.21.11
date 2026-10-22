@@ -65,6 +65,7 @@ public final class OWRCommands {
 
     public static void register(RegisterCommandsEvent event) {
         register(event.getDispatcher());
+        com.openwheelracing.content.weather.WeatherCommands.register(event.getDispatcher());
     }
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {

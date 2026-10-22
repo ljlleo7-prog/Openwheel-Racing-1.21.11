@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "I I",
+    " E ",
+    " J "
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "E": "openwheelracing:racing_electronics",
+    "J": "openwheelracing:jack"
+  },
+  "result": {
+    "id": "openwheelracing:car_dragger",
+    "count": 1
+  }
+}

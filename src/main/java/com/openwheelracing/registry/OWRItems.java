@@ -49,6 +49,10 @@ public final class OWRItems {
         () -> new SafetyCarItem(new Item.Properties().setId(key("safety_car_spawn")))
     );
 
+    public static final DeferredHolder<Item, Item> CAR_DRAGGER = ITEMS.register("car_dragger",
+        () -> new com.openwheelracing.content.item.CarDraggerItem(new Item.Properties().setId(key("car_dragger")).stacksTo(1))
+    );
+
     private OWRItems() {
     }
 

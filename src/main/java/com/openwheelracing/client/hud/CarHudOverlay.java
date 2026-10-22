@@ -304,13 +304,22 @@ public final class CarHudOverlay {
 
     private static void renderCarStatus(GuiGraphics graphics, Font font, OpenwheelCarEntity car) {
         int width = 146;
-        int height = 184;
+        int height = 196;
         int x = graphics.guiWidth() - width - 8;
         int y = graphics.guiHeight() - height - 8;
 
         renderComponentDamageDiagram(graphics, car, x + 9, y + 5);
 
-        int tyreY = y + 88;
+        int tyreY = y + 100;
+        String tyreLabel = Component.translatable("hud.openwheelracing.tyres",
+            com.openwheelracing.content.item.TyreItem.tyreName(car.getTyreType(), car.getTyreCompound())).getString();
+        int compoundColor = switch (car.getTyreType()) {
+            case SLICK -> 0xFFC9D1D9;
+            case INTERMEDIATE -> 0xFF7EE787;
+            case WET -> 0xFF79B8FF;
+        };
+        drawScaledText(graphics, font, tyreLabel, x + 73, tyreY + 1,
+            Math.min(0.85f, 128.0f / Math.max(1, font.width(tyreLabel))), compoundColor, false);
         float min = car.getTyreWorkingTemperatureMinCelsius();
         float max = car.getTyreWorkingTemperatureMaxCelsius();
         drawTyreStatus(graphics, font, x + 22, tyreY + 18, car.getTyreTemperatureFlCelsius(), car.getTyreCarcassTemperatureFlCelsius(), min, max, car.getTyreWearFlPercent());
@@ -322,9 +331,9 @@ public final class CarHudOverlay {
         drawVerticalMeter(graphics, x + 121, tyreY + 18, 10, 50, car.getDamagePercent() / 100.0f, damageColor, 0xFF251B1B);
         graphics.drawString(font, "DMG", x + 110, tyreY + 73, damageColor, false);
 
-        drawStatusChip(graphics, font, "ABS", x + 9, y + 168, car.isAbsEnabled() ? 0xFF7EE787 : 0xFFFFD044);
-        drawStatusChip(graphics, font, "TC", x + 45, y + 168, car.isTractionControlEnabled() ? 0xFF7EE787 : 0xFFFFD044);
-        drawStatusChip(graphics, font, "DRS", x + 80, y + 168, car.isDrsActive() ? 0xFF00DD44 : 0xFF555B63);
+        drawStatusChip(graphics, font, "ABS", x + 9, y + 180, car.isAbsEnabled() ? 0xFF7EE787 : 0xFFFFD044);
+        drawStatusChip(graphics, font, "TC", x + 45, y + 180, car.isTractionControlEnabled() ? 0xFF7EE787 : 0xFFFFD044);
+        drawStatusChip(graphics, font, "DRS", x + 80, y + 180, car.isDrsActive() ? 0xFF00DD44 : 0xFF555B63);
     }
 
     private static void renderComponentDamageDiagram(GuiGraphics graphics, OpenwheelCarEntity car, int x, int y) {

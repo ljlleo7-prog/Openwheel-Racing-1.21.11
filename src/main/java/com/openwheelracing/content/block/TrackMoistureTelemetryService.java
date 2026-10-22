@@ -87,7 +87,7 @@ public final class TrackMoistureTelemetryService {
         }
         int surfaceRevision = SURFACES.containsKey(level) ? SURFACES.get(level).revision : 0;
         return new TrackMoistureSnapshot(revision, counts[0], counts[1], counts[2], counts[3], loaded, estimated,
-            surfaceRevision, (float) TrackAmbientTemperature.get(level), rows, java.util.List.of());
+            surfaceRevision, (float) TrackAmbientTemperature.get(level, BlockPos.containing(survey.nodes().getFirst().position().x(), survey.nodes().getFirst().position().y(), survey.nodes().getFirst().position().z())), rows, java.util.List.of());
     }
 
     private static Sample moistureAt(ServerLevel level, double x, double y, double z) {
@@ -105,7 +105,7 @@ public final class TrackMoistureTelemetryService {
                 }
             }
         }
-        TrackWeatherPhase.Sample weather = TrackWeatherPhase.sample(level);
+        TrackWeatherPhase.Sample weather = TrackWeatherPhase.sample(level, base);
         return new Sample(WettableTrackWeather.randomizedTarget(base, weather).level(), true);
     }
 

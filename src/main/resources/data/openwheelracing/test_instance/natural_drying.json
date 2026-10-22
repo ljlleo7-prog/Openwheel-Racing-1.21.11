@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:function",
+  "function": "openwheelracing:natural_drying",
+  "environment": "minecraft:default",
+  "structure": "minecraft:empty",
+  "max_ticks": 300,
+  "sky_access": true
+}

@@ -1,20 +1,32 @@
 package com.openwheelracing.content.block;
 
+import com.openwheelracing.content.weather.RegionalWeather;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.Level;
 
 final class WettableTrackWeather {
     private WettableTrackWeather() {
     }
 
+    static void onPlace(Level level, BlockPos pos) {
+        if (level instanceof ServerLevel server && RegionalWeather.enabled(server)) {
+            TrackWeatherChunkProgression.observeTrack(server, pos);
+        }
+    }
+
     static void randomTick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
-        boolean locallyRaining = level.isRainingAt(pos.above());
+        if (RegionalWeather.enabled(level)) {
+            // Regional weather is evaluated lazily in spatial sweeps, independently of random ticks.
+            return;
+        }
         TrackMoisture current = WettableTrack.moisture(state);
-        TrackWeatherPhase.Sample weather = TrackWeatherPhase.sample(level);
+        TrackWeatherPhase.Sample weather = TrackWeatherPhase.sample(level, pos);
         TrackMoisture phaseTarget = randomizedTarget(pos, weather);
+        boolean locallyRaining = level.isRainingAt(pos.above());
         boolean wetting = locallyRaining && current.level() < phaseTarget.level();
         boolean drying = !locallyRaining && current.level() > phaseTarget.level();
         TrackMoisture target = wetting ? current.wetter() : drying ? current.drier() : current;
@@ -33,11 +45,8 @@ final class WettableTrackWeather {
     }
 
     static TrackMoisture randomizedTarget(BlockPos pos, TrackWeatherPhase.Sample weather) {
-        double progress = Math.max(0.0, Math.min(3.0, weather.progress()));
-        int lower = (int) Math.floor(progress);
-        if (lower >= 3) return TrackMoisture.SOAKING;
-        double threshold = stableUnit(pos.asLong(), weather.weatherEpoch());
-        int target = lower + (threshold < progress - lower ? 1 : 0);
+        double threshold = TrackMoistureField.threshold(pos.getX(), pos.getZ(), weather.weatherEpoch());
+        int target = TrackWeatherResponseModel.targetLevel(weather.progress(), threshold, weather.drying());
         return TrackMoisture.values()[target];
     }
 

@@ -55,10 +55,22 @@ public class TyreItem extends Item {
 
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext context, TooltipDisplay display, Consumer<Component> tooltip, TooltipFlag flag) {
-        TyreType type = getType(stack);
-        if (type == TyreType.SLICK) tooltip.accept(Component.translatable("tooltip.openwheelracing.tires.compound", getCompound(stack) + 1).withStyle(ChatFormatting.GREEN));
-        else tooltip.accept(Component.translatable("tooltip.openwheelracing.tires.type", type.displayName()).withStyle(ChatFormatting.AQUA));
+        tooltip.accept(tyreDescription(getType(stack), getCompound(stack)));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.tires.remaining", getRemainingPercent(stack)).withStyle(ChatFormatting.YELLOW));
+    }
+
+    public static Component tyreName(TyreType type, int compound) {
+        return switch (type) {
+            case SLICK -> Component.literal("C" + (clampCompound(compound) + 1));
+            case INTERMEDIATE -> Component.translatable("tyre.openwheelracing.intermediate");
+            case WET -> Component.translatable("tyre.openwheelracing.wet");
+        };
+    }
+
+    public static Component tyreDescription(TyreType type, int compound) {
+        return type == TyreType.SLICK
+            ? Component.translatable("tooltip.openwheelracing.tires.compound", clampCompound(compound) + 1).withStyle(ChatFormatting.GREEN)
+            : Component.translatable("tooltip.openwheelracing.tires.type", tyreName(type, compound)).withStyle(ChatFormatting.AQUA);
     }
 
     public static int normalizeRemainingPercent(double remainingPercent) {

@@ -1,11 +1,13 @@
 package com.openwheelracing.content.block;
 
 import com.mojang.serialization.MapCodec;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import org.jspecify.annotations.Nullable;
@@ -41,6 +43,12 @@ public class DirectionalTrackBlock extends HorizontalDirectionalBlock implements
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<net.minecraft.world.level.block.Block, BlockState> builder) {
         builder.add(FACING, MOISTURE);
+    }
+
+    @Override
+    protected void onPlace(BlockState state, Level level, BlockPos pos, BlockState previousState, boolean movedByPiston) {
+        super.onPlace(state, level, pos, previousState, movedByPiston);
+        WettableTrackWeather.onPlace(level, pos);
     }
 
     @Override

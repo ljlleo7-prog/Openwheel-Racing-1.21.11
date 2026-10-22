@@ -8,6 +8,7 @@ public final class PitLaneSpeedMath {
     public static final double AVERAGE_LIMIT_KMH = 80.0;
     public static final double RECOVERY_DISTANCE_METERS = 3.0;
     public static final double MAX_ENTRY_APPROACH_DISTANCE_METERS = 300.0;
+    public static final double ROUTE_END_EXIT_MARGIN_METERS = 2.0;
 
     private PitLaneSpeedMath() {
     }
@@ -32,6 +33,20 @@ public final class PitLaneSpeedMath {
             distanceAlong += length;
         }
         return Optional.ofNullable(best);
+    }
+
+    /** Returns true once the car has passed the surveyed route's final endpoint. */
+    public static boolean beyondRouteEnd(List<Point> points, Point position, double marginMeters) {
+        if (points.size() < 2) return false;
+        Point previous = points.get(points.size() - 2);
+        Point end = points.getLast();
+        double dx = end.x() - previous.x();
+        double dz = end.z() - previous.z();
+        double length = Math.hypot(dx, dz);
+        if (length <= 1.0E-6) return false;
+        double pastEnd = (position.x() - end.x()) * (dx / length)
+            + (position.z() - end.z()) * (dz / length);
+        return pastEnd >= Math.max(0.0, marginMeters);
     }
 
     public static double projectedSpeedKmh(Projection projection, double movementX, double movementZ) {

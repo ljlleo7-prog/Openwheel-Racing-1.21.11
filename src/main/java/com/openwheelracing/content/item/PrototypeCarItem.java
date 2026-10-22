@@ -174,7 +174,7 @@ public class PrototypeCarItem extends Item {
         PrototypeCarSetup setup = getSetup(stack);
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.single_seat").withStyle(ChatFormatting.GRAY));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.power", setup.power()).withStyle(ChatFormatting.RED));
-        tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.grip", setup.grip() + 1).withStyle(ChatFormatting.GREEN));
+        tooltip.accept(TyreItem.tyreDescription(getTyreType(stack), setup.grip()));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.aero", setup.aero()).withStyle(ChatFormatting.AQUA));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.gearing", setup.gearing()).withStyle(ChatFormatting.GOLD));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.livery", CarLivery.fromIndex(getLivery(stack)).displayName()).withStyle(ChatFormatting.BLUE));

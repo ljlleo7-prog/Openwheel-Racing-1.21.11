@@ -3,6 +3,7 @@ package com.openwheelracing.content.block;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.core.BlockPos;
 
 public final class TrackAmbientTemperature {
     private static final double RAIN_TARGET_C = 20.0;
@@ -13,10 +14,15 @@ public final class TrackAmbientTemperature {
     private static final long UPDATE_INTERVAL_TICKS = 20L;
     private static final Map<ServerLevel, State> STATES = new IdentityHashMap<>();
 
+    public static double get(ServerLevel level, BlockPos pos) {
+        return RegionalTemperature.get(level, pos);
+    }
+
     private TrackAmbientTemperature() {
     }
 
     public static double get(ServerLevel level) {
+        if (RegionalTemperature.enabled(level)) return RegionalTemperature.get(level, BlockPos.ZERO);
         State state = STATES.get(level);
         if (state != null) return state.temperatureC;
         double initial = level.isRaining() ? RAIN_TARGET_C : dryTarget(level);
@@ -25,6 +31,7 @@ public final class TrackAmbientTemperature {
     }
 
     public static void tick(ServerLevel level) {
+        if (RegionalTemperature.enabled(level)) return;
         State state = STATES.computeIfAbsent(level, ignored -> new State(level.isRaining() ? RAIN_TARGET_C : dryTarget(level), level.getGameTime()));
         long now = level.getGameTime();
         long elapsedTicks = now - state.updatedAt;
@@ -38,6 +45,7 @@ public final class TrackAmbientTemperature {
 
     public static void clearAll() {
         STATES.clear();
+        RegionalTemperature.clearAll();
     }
 
     static double progress(double currentC, double targetC, double elapsedSeconds, double timeConstantSeconds) {
