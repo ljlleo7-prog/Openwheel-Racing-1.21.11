@@ -546,6 +546,8 @@ public final class CarHudOverlay {
             graphics.fill(px + 5, py + 29, px + panelWidth - 5, py + 30, 0x6655718B);
         String type = snapshot.sessionType().replace('_', ' ')
                 + (snapshot.active() ? "" : " · " + snapshot.suspensionReason().replace('_', ' '));
+            if (snapshot.sessionType().equals("FORMATION_LAP") || snapshot.sessionType().equals("AWAITING_START")
+                || snapshot.sessionType().equals("RACE_COUNTDOWN")) type = "";
             type = fit(font, type, 94);
             graphics.drawString(font, type, px + 6, py + 30, 0xFF8394A7, false);
             graphics.drawString(font, raceProgress, px + panelWidth - 6 - font.width(raceProgress), py + 30, 0xFF7EE787, false);
@@ -615,7 +617,13 @@ public final class CarHudOverlay {
     private static String raceProgressLabel(List<RaceTimingRow> rows) {
         var snapshot = LiveRaceTimingClient.snapshot();
         if (snapshot.sessionType().equals("FORMATION_LAP")) {
-            return "FORMATION LAP";
+            return Component.translatable("hud.openwheelracing.race.formation_lap").getString();
+        }
+        if (snapshot.sessionType().equals("AWAITING_START")) {
+            return Component.translatable("hud.openwheelracing.race.awaiting_start").getString();
+        }
+        if (snapshot.sessionType().equals("RACE_COUNTDOWN")) {
+            return Component.translatable("hud.openwheelracing.race.start_countdown").getString();
         }
         if (snapshot.lapLimit() > 0) {
             int leaderLap = rows.isEmpty() ? 1 : rows.getFirst().completedLaps() + 1;

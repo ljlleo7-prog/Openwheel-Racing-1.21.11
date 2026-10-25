@@ -82,7 +82,7 @@ public class OWRRaceControlState extends SavedData {
         this.sectorFlags = new java.util.HashMap<>(signals.sectorFlags());
         this.driverFlags = new java.util.HashMap<>(signals.driverFlags());
         this.autoFlagging = signals.autoFlagging();
-        this.startPhase = clamp(signals.startPhase(), 0, 6);
+        this.startPhase = clamp(signals.startPhase(), 0, RaceStartLights.FORMATION_GREEN);
         this.pitEntrySignal = RaceSignal.fromOrdinal(signals.pitEntrySignal());
         this.pitExitSignal = RaceSignal.fromOrdinal(signals.pitExitSignal());
         this.pitWeatherSignal = RaceSignal.fromOrdinal(signals.pitWeatherSignal());
@@ -232,7 +232,7 @@ public class OWRRaceControlState extends SavedData {
         markChanged();
     }
     public void setAutoFlagging(boolean enabled) { if (autoFlagging != enabled) { autoFlagging = enabled; markChanged(); } }
-    public void setStartPhase(int phase) { int next = clamp(phase, 0, 6); if (startPhase != next) { startPhase = next; markChanged(); } }
+    public void setStartPhase(int phase) { int next = clamp(phase, 0, RaceStartLights.FORMATION_GREEN); if (startPhase != next) { startPhase = next; markChanged(); } }
     public void setPitSignal(PitLightMode mode, RaceSignal signal) {
         RaceSignal next = signal == null ? RaceSignal.OFF : signal;
         switch (mode) { case ENTRY -> pitEntrySignal = next; case EXIT -> pitExitSignal = next; case WEATHER -> pitWeatherSignal = next; }

@@ -19,6 +19,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -51,6 +52,13 @@ public final class GrandPrixWeekendService {
                 continue;
             }
             GrandPrixWeekend.SessionView session = active.get();
+            if (session.state().isActive() && OWRRaceControlState.get(level).getGlobalFlag() == com.openwheelracing.content.race.RaceFlagMode.RED) {
+                weekend.suspend(RaceSessionSuspensionReason.DIRECTOR, tick, null, "RED_FLAG");
+                LiveRaceTimingService.stop(level, "RED_FLAG");
+                resetCarTiming(level);
+                registry.markDirty();
+                session = weekend.activeSession(tick).orElseThrow();
+            }
             if (session.state().isActive()) {
                 weekend.observeServerTick(tick);
                 if (connectedPlayers == 0 && weekend.onConnectedPlayerCountChanged(0, tick)) {
@@ -61,7 +69,8 @@ public final class GrandPrixWeekendService {
                     registry.markDirty();
                 }
                 session = weekend.activeSession(tick).orElse(session);
-                if (session.state() == RaceSessionState.STAGING || session.state() == RaceSessionState.COUNTDOWN) {
+                if (session.state() == RaceSessionState.STAGING || session.state() == RaceSessionState.FORMATION_COUNTDOWN
+                    || session.state() == RaceSessionState.COUNTDOWN) {
                     holdGridCars(level, weekend, session);
                 }
                 if (session.state() == RaceSessionState.RUNNING && shouldFinishTimedSession(level, weekend, session)) {
@@ -75,32 +84,56 @@ public final class GrandPrixWeekendService {
                 .filter(entry -> entry.status() == GrandPrixWeekend.EntryStatus.ENTERED)
                 .map(GrandPrixWeekend.Entry::driverId)
                 .collect(Collectors.toUnmodifiableSet());
+            if (session.state() == RaceSessionState.FORMATION_COUNTDOWN) {
+                OWRRaceControlState.get(level).setStartPhase(FormationLapProcedure.redLightCount(session.countdownRemainingTicks()));
+                if (session.countdownRemainingTicks() == 0L) {
+                    weekend.releaseFormation(tick);
+                    OWRRaceControlState.get(level).setStartPhase(FormationLapProcedure.GREEN_LIGHT_PHASE);
+                    registry.markDirty();
+                    session = weekend.activeSession(tick).orElseThrow();
+                }
+            }
+            if (session.state() == RaceSessionState.FORMATION_LAP) {
+                OWRRaceControlState.get(level).setStartPhase(FormationLapProcedure.GREEN_LIGHT_PHASE);
+                var timing = LiveRaceTimingService.latestSnapshot(level);
+                if (timing.isPresent() && timing.get().active() && timing.get().sessionId() == session.config().sessionId()
+                    && !timing.get().rows().isEmpty()) {
+                    var leader = timing.get().rows().getFirst();
+                    if (leader.confidence().canInitiatePositionChange()
+                        && FormationLapProcedure.leaderReturning(leader.absoluteProgressMeters(), timing.get().routeLengthMeters())) {
+                        weekend.awaitRaceStart(tick);
+                        OWRRaceControlState.get(level).setStartPhase(0);
+                        registry.markDirty();
+                        session = weekend.activeSession(tick).orElseThrow();
+                    }
+                }
+            }
             if (session.state() == RaceSessionState.COUNTDOWN) {
-                long total = session.config().countdownTicks();
+                long total = weekend.countdownDurationTicks();
                 long elapsed = Math.max(0L, total - session.countdownRemainingTicks());
-                int phase = total == 0L ? 5 : Math.min(5, 1 + (int) (elapsed * 5L / total));
+                int phase = RaceStartProcedure.redLightCount(elapsed);
                 OWRRaceControlState.get(level).setStartPhase(phase);
                 if (session.countdownRemainingTicks() == 0L) {
-                    OWRLapRecords.get(level).activateSession(session.config().sessionId(), session.config().name());
-                    int timingLapLimit = session.config().format() == GrandPrixWeekend.SessionFormat.LAP_COUNT_RACE
-                        ? session.config().lapLimit() : 0;
-                    LiveRaceTimingService.StartResult timing = LiveRaceTimingService.start(level, session.config().sessionId(),
-                        session.config().name(), timingLapLimit, eligible,
-                        session.config().durationTicks() > 0L ? session.config().durationTicks() : -1L);
+                    LiveRaceTimingService.StartResult timing = startTiming(level, weekend, session, false);
                     if (timing.started()) {
-                        LiveRaceTimingService.lockParticipantCars(level, session.config().sessionId());
                         weekend.start(tick, null, "SERVER");
                         OWRRaceControlState.get(level).setStartPhase(6);
                     } else {
                         weekend.suspend(RaceSessionSuspensionReason.DIRECTOR, tick, null, "SERVER");
                     }
                     registry.markDirty();
-                    session = weekend.activeSession(tick).orElse(session);
+                    session = weekend.activeSession(tick).orElseThrow();
                 }
+            }
+            if (session.state() == RaceSessionState.RUNNING) {
+                OWRRaceControlState.get(level).setStartPhase(6);
+            }
+            if (session.state() == RaceSessionState.SUSPENDED) {
+                OWRRaceControlState.get(level).setStartPhase(0);
             }
             long remaining = session.config().durationTicks() > 0L ? session.remainingTicks() : -1L;
             LiveRaceTimingService.updateWeekendContext(level, session.config().sessionId(), weekend.name(),
-                session.config().type().name(), eligible, remaining);
+                hudPhase(session), eligible, remaining);
         }
         for (ServerLevel level : server.getAllLevels()) {
             if (!openDimensions.contains(level.dimension().identifier().toString())) {
@@ -109,7 +142,95 @@ public final class GrandPrixWeekendService {
         }
     }
 
+    public static Optional<GrandPrixWeekend> gridWeekend(ServerLevel level) {
+        return OWRGrandPrixRegistry.get(level.getServer()).weekends().stream()
+            .filter(weekend -> weekend.state() == GrandPrixWeekend.EventState.OPEN
+                && weekend.dimensionId().equals(level.dimension().identifier().toString()))
+            .filter(weekend -> weekend.activeSession(level.getGameTime())
+                .map(session -> session.config().type().usesGrid() && !session.state().isTerminal()).orElse(false))
+            .findFirst();
+    }
+
+    public static boolean isGridSession(ServerLevel level, long sessionId) {
+        return gridWeekend(level).flatMap(weekend -> weekend.activeSession(level.getGameTime()))
+            .map(session -> session.config().sessionId() == sessionId).orElse(false);
+    }
+
+    public static boolean ownsStartLights(ServerLevel level) {
+        return gridWeekend(level).isPresent();
+    }
+
+    public static boolean allowsLapRecording(ServerLevel level) {
+        return gridWeekend(level).flatMap(weekend -> weekend.activeSession(level.getGameTime()))
+            .map(session -> session.state() == RaceSessionState.RUNNING).orElse(true);
+    }
+
+    public static String hudPhase(GrandPrixWeekend.SessionView session) {
+        RaceSessionState phase = session.state() == RaceSessionState.SUSPENDED ? session.suspendedFrom() : session.state();
+        return switch (phase) {
+            case FORMATION_COUNTDOWN, FORMATION_LAP -> "FORMATION_LAP";
+            case AWAITING_START -> "AWAITING_START";
+            case COUNTDOWN -> "RACE_COUNTDOWN";
+            default -> session.config().type().name();
+        };
+    }
+
+    /** One initialization path for both automatic lights-out and an explicit director start. */
+    public static LiveRaceTimingService.StartResult startTiming(ServerLevel level, GrandPrixWeekend weekend,
+                                                                GrandPrixWeekend.SessionView session, boolean formation) {
+        Set<UUID> eligible = weekend.entries().stream()
+            .filter(entry -> entry.status() == GrandPrixWeekend.EntryStatus.ENTERED)
+            .map(GrandPrixWeekend.Entry::driverId).collect(Collectors.toUnmodifiableSet());
+        OWRLapRecords.get(level).activateSession(session.config().sessionId(), session.config().name());
+        int laps = !formation && session.config().format() == GrandPrixWeekend.SessionFormat.LAP_COUNT_RACE
+            ? session.config().lapLimit() : 0;
+        LiveRaceTimingService.StartResult result = LiveRaceTimingService.start(level, session.config().sessionId(),
+            session.config().name(), laps, eligible,
+            !formation && session.config().durationTicks() > 0L ? session.config().durationTicks() : -1L);
+        if (result.started()) {
+            resetCarTiming(level);
+            if (!formation && session.config().type().usesGrid()) {
+                LiveRaceTimingService.lockParticipantCars(level, session.config().sessionId());
+            }
+            LiveRaceTimingService.updateWeekendContext(level, session.config().sessionId(), weekend.name(),
+                formation ? "FORMATION_LAP" : session.config().type().name(), eligible, -1L);
+        }
+        return result;
+    }
+
+    public static void resetCarTiming(ServerLevel level) {
+        for (var entity : level.getAllEntities()) {
+            if (entity instanceof OpenwheelCarEntity car && car.participatesInRaceTiming()) car.resetSessionLapTiming();
+        }
+    }
+
+    public static void stageGridCars(ServerLevel level, GrandPrixWeekend weekend) {
+        positionGridCars(level, weekend, weekend.activeSession(level.getGameTime()).orElseThrow(), true);
+    }
+
     private static void holdGridCars(ServerLevel level, GrandPrixWeekend weekend, GrandPrixWeekend.SessionView session) {
+        positionGridCars(level, weekend, session, false);
+    }
+
+    private static boolean atSlot(OpenwheelCarEntity car, TrackDefinition.GridSlot slot) {
+        return com.openwheelracing.content.ai.AiGridApproach.evaluate(
+            new com.openwheelracing.content.ai.AiGridApproach.Target(slot.position().x(), slot.position().y(), slot.position().z(), slot.headingRadians()),
+            car.getX(), car.getY(), car.getZ(), Math.toRadians(car.getYRot() + 90.0f), car.getSpeedKmh() / 3.6).ready();
+    }
+
+    private static Map<UUID, OpenwheelCarEntity> gridCars(ServerLevel level) {
+        Map<UUID, OpenwheelCarEntity> cars = new java.util.HashMap<>();
+        for (var entity : level.getAllEntities()) {
+            if (!(entity instanceof OpenwheelCarEntity car) || !car.participatesInRaceTiming()) continue;
+            UUID driver = car.getControllingPassenger() instanceof ServerPlayer player ? player.getUUID()
+                : car.getBasicAiIdentity().map(com.openwheelracing.content.ai.BasicAiDriverIdentity::driverId).orElse(null);
+            if (driver != null) cars.putIfAbsent(driver, car);
+        }
+        return cars;
+    }
+
+    private static void positionGridCars(ServerLevel level, GrandPrixWeekend weekend,
+                                         GrandPrixWeekend.SessionView session, boolean initialPlacement) {
         TrackDefinition track = TrackDefinitionsData.get(level).get(weekend.trackId()).orElse(null);
         if (track == null || session.grid().isEmpty()) {
             return;
@@ -117,13 +238,12 @@ public final class GrandPrixWeekendService {
         List<TrackDefinition.GridSlot> slots = track.gridSlots().stream()
             .sorted(Comparator.comparingInt(TrackDefinition.GridSlot::index)).toList();
         int count = Math.min(slots.size(), session.grid().size());
+        Map<UUID, OpenwheelCarEntity> cars = gridCars(level);
         for (int index = 0; index < count; index++) {
-            ServerPlayer driver = level.getServer().getPlayerList().getPlayer(session.grid().get(index));
-            if (driver == null || driver.level() != level || !(driver.getVehicle() instanceof OpenwheelCarEntity car)
-                || car.getControllingPassenger() != driver) {
-                continue;
-            }
+            OpenwheelCarEntity car = cars.get(session.grid().get(index));
+            if (car == null) continue;
             TrackDefinition.GridSlot slot = slots.get(index);
+            if (!initialPlacement && !atSlot(car, slot)) continue;
             car.setPos(slot.position().x(), slot.position().y() + 0.02, slot.position().z());
             car.setYRot((float) Math.toDegrees(slot.headingRadians()) - 90.0f);
             car.setDeltaMovement(Vec3.ZERO);

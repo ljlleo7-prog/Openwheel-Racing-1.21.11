@@ -108,13 +108,11 @@ public class RaceLightBlockEntity extends BlockEntity implements MenuProvider {
     private RaceSignal resolveSignal(OWRRaceControlState control) {
         return switch (type) {
             case FLAG -> resolveFlagSignal(control);
-            case START -> {
-                int phase = control.getStartPhase();
-                if (phase == 7) {
-                    yield startOrder == 2 || startOrder == 4 ? RaceSignal.GREEN : RaceSignal.OFF;
-                }
-                yield phase >= startOrder && phase <= 5 ? RaceSignal.RED : RaceSignal.OFF;
-            }
+            case START -> switch (com.openwheelracing.content.race.RaceStartLights.signal(control.getStartPhase(), startOrder)) {
+                case OFF -> RaceSignal.OFF;
+                case RED -> RaceSignal.RED;
+                case GREEN -> RaceSignal.GREEN;
+            };
             case PIT -> control.getPitSignal(pitMode);
         };
     }

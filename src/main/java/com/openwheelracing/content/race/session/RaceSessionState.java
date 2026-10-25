@@ -10,10 +10,14 @@ public enum RaceSessionState {
     FINISHING,
     PROVISIONAL,
     OFFICIAL,
-    ABANDONED;
+    ABANDONED,
+    FORMATION_COUNTDOWN,
+    FORMATION_LAP,
+    AWAITING_START;
 
     public boolean isActive() {
-        return this == STAGING || this == COUNTDOWN || this == RUNNING;
+        return this == STAGING || this == COUNTDOWN || this == RUNNING
+            || this == FORMATION_COUNTDOWN || this == FORMATION_LAP || this == AWAITING_START;
     }
 
     public boolean isTerminal() {

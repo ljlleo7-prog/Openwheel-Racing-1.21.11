@@ -318,7 +318,16 @@ Race ties use authoritative finish crossing order. If indistinguishable within t
 8. Release all eligible staged entries on one authoritative server tick and record the start timestamp.
 9. Entries failing to start remain eligible for director handling and may become DNS according to session closure rules.
 
-Formation laps are out of scope for the first milestone.
+Formation procedure (implemented; AI motion details in [Procedural AI Race Control](mechanism-specs/ai-race-procedure.md)):
+
+- After staging, the director selects **Formation lap** (or `/owr gp control <event> countdown`). The session's configured countdown duration controls preparation; no fixed 50-second duration is imposed.
+- The number of illuminated red lights is `ceil(remaining seconds / 10)`, capped at five: 1–10 seconds shows one, 11–20 shows two, and so on. At zero, only start-light positions 2 and 4 show green.
+- The session enters `FORMATION_LAP`; the HUD labels it accordingly. Preparation and formation crossings create no lap records or race laps. The sporting clock remains stopped.
+- Live progress is measured from the authored start/finish line, independently of the survey's starting node. The initial grid-to-line crossing completes zero laps.
+- When the tracked leader reaches the final 100 metres (or final 10% on circuits shorter than 1 km), both green lights go out and the session enters `AWAITING_START`. The system never starts the race on its own from this phase.
+- The director selects **Countdown** or **Start lights** to initiate the race's red-light countdown. AI cars first drive back to their assigned grid slots and stop; player drivers must also return to their boxes. Grid readiness is advisory: it never refuses the director countdown or release. The director may initiate Countdown during formation even before the automatic final-approach detector triggers, and may use Start/Lights out to override the race countdown timer. After formation, the traditional five-red sequence illuminates one additional light per second, then extinguishes all five after the existing randomized final-light delay. This is independent of the formation preparation setting; the sampled lights-out delay persists across suspension/recovery. Automatic expiry releases cars without a grid-readiness veto.
+- At race release, per-car lap timers and live race progress are reset; formation progress cannot carry into race classification. The first grid-to-line crossing still completes zero laps.
+- Formation/countdown/handover states persist across saves. Empty-server suspension and restart recovery require an explicit resume; offline time never advances the countdown.
 
 ---
 
@@ -590,7 +599,7 @@ On server reload, recover into the same safe state. Any session saved in `RUNNIN
 
 - Local/sector flags and richer flag set.
 - Complete VSC delta, safety-car queue/restart, illegal-pass adjudication aids, and pit procedures.
-- Formation lap, mandatory compounds, pit windows, tyre allocations, and parc fermé.
+- Mandatory compounds, pit windows, tyre allocations, and parc fermé.
 - Championship points/standings and reusable weekend templates.
 - AI race participants when runtime race-driving AI is ready.
 
@@ -599,7 +608,7 @@ On server reload, recover into the same safe state. Any session saved in `RUNNIN
 ## Explicitly Out of Scope for the Race-Core Milestone
 
 - Automatic incident guilt or automatic illegal-overtake penalties.
-- Formation laps and full safety-car queue/wave-by/restart regulations.
+- Full safety-car queue/wave-by/restart regulations.
 - Local/sector yellow and full blue/black/mechanical flag behavior.
 - Mandatory tyre compounds, allocations, pit windows, and parc fermé.
 - Championship points and season standings.

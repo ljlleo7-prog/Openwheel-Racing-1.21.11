@@ -33,16 +33,26 @@ public final class LapProfileCollector {
     private Latest latest = Latest.inactive();
     private double prefixStartDistance = Double.NaN;
     private double unwrappedProgress;
+    private boolean hadImpact;
+
+    public double movementAlongRoute() { return unwrappedProgress; }
+
+    public void recordImpact() { hadImpact = true; }
+
     private final List<TracePoint> actualTrace = new ArrayList<>();
 
     public void start(SurveyRoute route, UUID driverId, double lapStartGameTime) {
-        reset();
+        start(route.toModel(), driverId, lapStartGameTime);
         this.route = route;
-        this.model = route.toModel();
+    }
+
+    public void start(SurveyRouteModel model, UUID driverId, double lapStartGameTime) {
+        reset();
+        this.model = model;
         this.driverId = driverId;
         this.lapStartGameTime = lapStartGameTime;
-        spacing = Math.max(DEFAULT_SPACING, route.length() / OWRLapProfiles.MAX_PROFILE_SAMPLES);
-        int count = Math.max(1, Math.min(OWRLapProfiles.MAX_PROFILE_SAMPLES, (int) Math.ceil(route.length() / spacing)));
+        spacing = Math.max(DEFAULT_SPACING, model.length() / OWRLapProfiles.MAX_PROFILE_SAMPLES);
+        int count = Math.max(1, Math.min(OWRLapProfiles.MAX_PROFILE_SAMPLES, (int) Math.ceil(model.length() / spacing)));
         timeMillis = new int[count];
         speedCmps = new int[count];
         lateralOffsetCm = new int[count];
@@ -51,7 +61,7 @@ public final class LapProfileCollector {
     }
 
     public void sample(SurveyRouteModel.Point position, double headingRadians, double gameTime, double speedKmh) {
-        if (route == null) return;
+        if (model == null) return;
         SurveyRouteLocalizer.Result current = SurveyRouteLocalizer.locate(model, position, headingRadians, localizerState);
         int elapsed = elapsedMillis(gameTime);
         appendActualTrace(position);
@@ -77,8 +87,8 @@ public final class LapProfileCollector {
         }
         double start = previous.best().get().distanceAlongRoute();
         double delta = distance - start;
-        boolean wrapped = delta < -route.length() * 0.5;
-        if (wrapped) delta += route.length();
+        boolean wrapped = delta < -model.length() * 0.5;
+        if (wrapped) delta += model.length();
         if (delta <= 0.0 || delta > MAX_FORWARD_STEP) {
             previous = current;
             previousSampleGameTime = gameTime;
@@ -86,7 +96,7 @@ public final class LapProfileCollector {
         }
         if (wrapped && Double.isFinite(previousSampleGameTime)) {
             double maximumRoundTripDistance = Math.min(MAX_FORWARD_STEP, Math.max(3.5, speedKmh / 72.0 * 2.0 + 1.0));
-            SurveyRouteLapRepair.detect(start, previousSampleGameTime, distance, gameTime, route.length(), unwrappedProgress,
+            SurveyRouteLapRepair.detect(start, previousSampleGameTime, distance, gameTime, model.length(), unwrappedProgress,
                 maximumRoundTripDistance).ifPresent(candidate -> pendingLapRepair = candidate);
         }
         unwrappedProgress += delta;
@@ -120,10 +130,10 @@ public final class LapProfileCollector {
 
     public OWRLapProfiles.BestLapProfile finish(String dimensionId, UUID trackId, String driverName, OWRLapProfiles.Origin origin,
                                                 long lapRecordId, long sessionId, int lapMillis, long gameTime) {
-        if (route == null || coverage() < MIN_COVERAGE) return null;
+        if (model == null || hadImpact || coverage() < MIN_COVERAGE) return null;
         fillSmallGaps();
-        return new OWRLapProfiles.BestLapProfile(dimensionId, trackId, route.routeId(), driverId, driverName, origin, lapRecordId, sessionId, lapMillis,
-            route.length(), spacing, timeMillis, speedCmps, lateralOffsetCm, headingResidualMilliRad, gameTime);
+        return new OWRLapProfiles.BestLapProfile(dimensionId, trackId, model.routeId(), driverId, driverName, origin, lapRecordId, sessionId, lapMillis,
+            model.length(), spacing, timeMillis, speedCmps, lateralOffsetCm, headingResidualMilliRad, gameTime);
     }
 
     private void fillSmallGaps() {
@@ -144,7 +154,7 @@ public final class LapProfileCollector {
     }
 
     public PrefixSnapshot safePrefix() {
-        if (route == null || filled.length == 0 || !Double.isFinite(prefixStartDistance)) return PrefixSnapshot.empty();
+        if (model == null || filled.length == 0 || !Double.isFinite(prefixStartDistance)) return PrefixSnapshot.empty();
         int startIndex = Math.floorMod((int) Math.floor(prefixStartDistance / spacing), filled.length);
         int maximumSamples = Math.min(filled.length, Math.max(0, (int) Math.floor(unwrappedProgress / spacing) - 2));
         int end = 0;
@@ -199,6 +209,7 @@ public final class LapProfileCollector {
     }
 
     public void reset() {
+        hadImpact = false;
         route = null;
         model = null;
         driverId = null;

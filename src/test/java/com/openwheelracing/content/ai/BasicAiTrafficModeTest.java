@@ -18,8 +18,11 @@ class BasicAiTrafficModeTest {
     }
 
     @Test
-    void explicitModeOverridesFlag() {
-        assertEquals(BasicAiTrafficMode.RACE, BasicAiTrafficMode.resolve(BasicAiTrafficMode.RACE, RaceFlagMode.RED));
+    void explicitModeCannotOverrideDirectorRestrictions() {
+        assertEquals(BasicAiTrafficMode.HOLD, BasicAiTrafficMode.resolve(BasicAiTrafficMode.RACE, RaceFlagMode.RED));
+        assertEquals(BasicAiTrafficMode.VSC, BasicAiTrafficMode.resolve(BasicAiTrafficMode.RACE, RaceFlagMode.VIRTUAL_SAFETY_CAR));
+        assertEquals(BasicAiTrafficMode.GRID_RETURN, BasicAiTrafficMode.resolve(BasicAiTrafficMode.GRID_RETURN, RaceFlagMode.YELLOW));
+        assertEquals(BasicAiTrafficMode.HOLD, BasicAiTrafficMode.resolve(BasicAiTrafficMode.RACE, null));
         assertFalse(BasicAiTrafficMode.RACE.queueing());
         assertTrue(BasicAiTrafficMode.FORMATION.queueing());
     }

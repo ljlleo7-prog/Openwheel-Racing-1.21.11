@@ -11,6 +11,40 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BasicAiControllerMathTest {
     @Test
+    void followingBrakeEnvelopeAccountsForPredecessorSpeed() {
+        assertEquals(55.0, BasicAiCarController.followingSpeedLimit(55, 55, 52, 55, 20), 1e-6);
+        assertTrue(BasicAiCarController.followingSpeedLimit(55, 55, 52, 0, 20) < 35);
+        assertEquals(0.0, BasicAiCarController.followingSpeedLimit(55, 55, 6, 0, 20), 1e-6);
+    }
+
+    @Test
+    void holdNeverAdvancesLapClockOrTouchesDrivePlanner() {
+        BasicAiCarController controller = new BasicAiCarController();
+        var identity = BasicAiDriverIdentity.create(UUID.randomUUID(), UUID.randomUUID(), 1, 1);
+        var route = straightRoute();
+        var input = new BasicAiCarController.Input(identity, 1, route, new SurveyRouteModel.Point(0, 64, 0),
+            0, 0, 0, 0, null, null, BasicAiTrafficMode.HOLD, null, null, Double.POSITIVE_INFINITY, null);
+        for (int tick = 0; tick < 100; tick++) {
+            var command = controller.tick(input);
+            assertEquals(0.0f, command.throttle());
+            assertEquals(1.0f, command.brake());
+        }
+        assertEquals(0, controller.status().elapsedTicks());
+        assertEquals(0, controller.status().routeLaps());
+    }
+
+    @Test
+    void invalidNumericCommandsFailToFullBrake() {
+        for (var command : new BasicAiDriveCommand[] {
+            new BasicAiDriveCommand(Float.NaN, 0, 0), new BasicAiDriveCommand(1, 0, Float.POSITIVE_INFINITY)
+        }) {
+            assertEquals(0.0f, command.throttle());
+            assertEquals(1.0f, command.brake());
+            assertEquals(0.0f, command.steering());
+        }
+    }
+
+    @Test
     void straightRouteUsesHighSpeedTargetAndProportionalThrottle() {
         BasicAiGripModel.State grip = BasicAiGripModel.build(new BasicAiGripModel.Input(95.0, 88.0, 104.0, 0.0, 0.0,
             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0));

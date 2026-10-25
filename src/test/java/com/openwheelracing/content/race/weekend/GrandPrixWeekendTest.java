@@ -57,11 +57,23 @@ class GrandPrixWeekendTest {
         weekend.stage(4L, DIRECTOR, "Director");
         weekend.countdown(5L, DIRECTOR, "Director");
         assertThrows(IllegalStateException.class, () -> weekend.start(104L, DIRECTOR, "Director"));
-        weekend.start(105L, DIRECTOR, "Director");
+        assertThrows(IllegalStateException.class, () -> weekend.start(105L, DIRECTOR, "Director"));
+        weekend.releaseFormation(105L);
+        assertEquals(RaceSessionState.FORMATION_LAP, weekend.activeSession(1_000L).orElseThrow().state());
+        assertEquals(0L, weekend.activeSession(1_000L).orElseThrow().elapsedTicks());
+        assertTrue(GrandPrixWeekendInfo.from(weekend, 1_000L).can("countdown"));
+        weekend.awaitRaceStart(2_000L);
+        weekend.stage(2_500L, DIRECTOR, "Director");
+        assertEquals(RaceSessionState.AWAITING_START, weekend.activeSession(2_500L).orElseThrow().state());
+        assertEquals(0L, weekend.activeSession(3_000L).orElseThrow().elapsedTicks());
+        assertThrows(IllegalStateException.class, () -> weekend.start(3_000L, DIRECTOR, "Director"));
+        weekend.countdown(3_000L, DIRECTOR, "Director", 0);
+        assertThrows(IllegalStateException.class, () -> weekend.start(3_099L, DIRECTOR, "Director"));
+        weekend.start(3_100L, DIRECTOR, "Director");
 
-        assertEquals(RaceSessionState.RUNNING, weekend.activeSession(115L).orElseThrow().state());
-        assertEquals(10L, weekend.activeSession(115L).orElseThrow().elapsedTicks());
-        assertThrows(IllegalStateException.class, () -> weekend.advance(116L, DIRECTOR, "Director"));
+        assertEquals(RaceSessionState.RUNNING, weekend.activeSession(3_110L).orElseThrow().state());
+        assertEquals(10L, weekend.activeSession(3_110L).orElseThrow().elapsedTicks());
+        assertThrows(IllegalStateException.class, () -> weekend.advance(3_111L, DIRECTOR, "Director"));
     }
 
     @Test
@@ -108,6 +120,77 @@ class GrandPrixWeekendTest {
         assertEquals(75L, restored.activeSession(50_000L).orElseThrow().countdownRemainingTicks());
         restored.resume(50_000L, DIRECTOR, "Director");
         assertEquals(50L, restored.activeSession(50_025L).orElseThrow().countdownRemainingTicks());
+    }
+
+    @Test
+    void formationAndDirectorHandoverSurviveRecoveryWithoutStartingTheRace() {
+        GrandPrixWeekend weekend = weekend();
+        weekend.addSession(race(1L, "Race", 5), 1L, DIRECTOR, "Director");
+        registerDrivers(weekend);
+        weekend.open(2L, DIRECTOR, "Director");
+        weekend.advance(3L, DIRECTOR, "Director");
+        weekend.materializeGrid(weekend.suggestedGridOrder(), 4L, DIRECTOR, "Director");
+        weekend.stage(4L, DIRECTOR, "Director");
+        weekend.countdown(5L, DIRECTOR, "Director");
+        weekend.releaseFormation(105L);
+        GrandPrixWeekend restored = GrandPrixWeekend.restore(weekend.snapshot(200L));
+        assertEquals(RaceSessionState.FORMATION_LAP, restored.activeSession(5_000L).orElseThrow().suspendedFrom());
+        restored.resume(5_000L, DIRECTOR, "Director");
+        restored.awaitRaceStart(6_000L);
+        assertTrue(GrandPrixWeekendInfo.from(restored, 6_000L).can("countdown"));
+        assertFalse(GrandPrixWeekendInfo.from(restored, 6_000L).can("start"));
+        GrandPrixWeekend handover = GrandPrixWeekend.restore(restored.snapshot(7_000L));
+        assertEquals(RaceSessionState.AWAITING_START, handover.activeSession(10_000L).orElseThrow().suspendedFrom());
+        handover.resume(10_000L, DIRECTOR, "Director");
+        assertEquals(RaceSessionState.AWAITING_START, handover.activeSession(11_000L).orElseThrow().state());
+        assertEquals(0L, handover.activeSession(11_000L).orElseThrow().elapsedTicks());
+    }
+
+    @Test
+    void directorCanStartCountdownBeforeAutomaticHandoverAndReleaseBeforeTimerExpires() {
+        GrandPrixWeekend weekend = weekend();
+        weekend.addSession(race(1L, "Race", 5), 1L, DIRECTOR, "Director");
+        registerDrivers(weekend);
+        weekend.open(2L, DIRECTOR, "Director");
+        weekend.advance(3L, DIRECTOR, "Director");
+        weekend.materializeGrid(weekend.suggestedGridOrder(), 4L, DIRECTOR, "Director");
+        weekend.stage(4L, DIRECTOR, "Director");
+        weekend.countdown(5L, DIRECTOR, "Director");
+        weekend.releaseFormation(105L);
+        weekend.countdown(200L, DIRECTOR, "Director");
+        assertEquals(RaceSessionState.COUNTDOWN, weekend.activeSession(200L).orElseThrow().state());
+        assertTrue(GrandPrixWeekendInfo.from(weekend, 200L).can("start"));
+        assertThrows(IllegalStateException.class, () -> weekend.start(201L, DIRECTOR, "Director"));
+        weekend.startImmediately(201L, DIRECTOR, "Director");
+        assertEquals(RaceSessionState.RUNNING, weekend.activeSession(201L).orElseThrow().state());
+    }
+
+    @Test
+    void raceCountdownIgnoresPreparationSettingAndKeepsItsRandomHoldAcrossRecovery() {
+        GrandPrixWeekend weekend = weekend();
+        weekend.addSession(new GrandPrixWeekend.SessionConfig(1L, "Race", GrandPrixWeekend.SessionType.RACE,
+            GrandPrixWeekend.SessionFormat.LAP_COUNT_RACE, 0L, 5, 1_200L, 0L, 12_000L,
+            GrandPrixWeekend.GridSource.CONFIGURED_ENTRY_ORDER), 1L, DIRECTOR, "Director");
+        registerDrivers(weekend);
+        weekend.open(2L, DIRECTOR, "Director");
+        weekend.advance(3L, DIRECTOR, "Director");
+        weekend.materializeGrid(weekend.suggestedGridOrder(), 4L, DIRECTOR, "Director");
+        weekend.stage(4L, DIRECTOR, "Director");
+        weekend.countdown(5L, DIRECTOR, "Director", 40);
+        assertEquals(1_200L, weekend.activeSession(5L).orElseThrow().countdownRemainingTicks());
+        weekend.releaseFormation(1_205L);
+        weekend.awaitRaceStart(2_000L);
+        weekend.countdown(3_000L, DIRECTOR, "Director", 27);
+        assertEquals(127L, weekend.countdownDurationTicks());
+        assertEquals(127L, weekend.activeSession(3_000L).orElseThrow().countdownRemainingTicks());
+        weekend.suspend(RaceSessionSuspensionReason.DIRECTOR, 3_050L, DIRECTOR, "Director");
+        GrandPrixWeekend restored = GrandPrixWeekend.restore(weekend.snapshot(4_000L));
+        assertEquals(127L, restored.countdownDurationTicks());
+        assertEquals(77L, restored.activeSession(10_000L).orElseThrow().countdownRemainingTicks());
+        restored.resume(10_000L, DIRECTOR, "Director");
+        assertThrows(IllegalStateException.class, () -> restored.start(10_076L, DIRECTOR, "Director"));
+        restored.start(10_077L, DIRECTOR, "Director");
+        assertEquals(RaceSessionState.RUNNING, restored.activeSession(10_077L).orElseThrow().state());
     }
 
     @Test

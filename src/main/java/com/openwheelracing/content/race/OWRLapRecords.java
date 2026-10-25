@@ -321,6 +321,32 @@ public class OWRLapRecords extends SavedData {
         return record;
     }
 
+    public List<LapRecord> allLaps() { return List.copyOf(laps); }
+
+    public boolean revalidateLap(long lapId) {
+        for (int index = 0; index < laps.size(); index++) {
+            LapRecord lap = laps.get(index);
+            if (lap.id() == lapId && lap.invalidated()) {
+                laps.set(index, new LapRecord(lap.id(), lap.driverId(), lap.driverName(), lap.lapMillis(),
+                    lap.completedGameTime(), lap.completedWorldTime(), lap.dimensionId(), lap.startFinishPos(),
+                    lap.checkpointCount(), lap.car(), false, "", "", lap.sessionId(), lap.sessionName(), lap.migratedFromLegacyTicks()));
+                recomputeBestLap(lap.driverId());
+                markChanged();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean discardLap(long lapId) {
+        Optional<LapRecord> record = getLap(lapId);
+        if (record.isEmpty()) return false;
+        laps.remove(record.get());
+        recomputeBestLap(record.get().driverId());
+        markChanged();
+        return true;
+    }
+
     public boolean invalidateLap(long lapId, UUID invalidatedBy, String reason) {
         for (int index = 0; index < laps.size(); index++) {
             LapRecord record = laps.get(index);
@@ -470,7 +496,10 @@ public class OWRLapRecords extends SavedData {
         return Codec.STRING.xmap(UUID::fromString, UUID::toString);
     }
 
-    public record CarSnapshot(int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled) {
+    public record CarSnapshot(int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled, String tyre, int bopWeightPercent, int bopPowerPercent, double traveledMeters) {
+        public CarSnapshot(int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled) {
+            this(power, grip, aero, gearing, damagePercent, tyreWearPercent, absEnabled, "", 0, 0, -1.0);
+        }
         public static final Codec<CarSnapshot> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.INT.fieldOf("power").forGetter(CarSnapshot::power),
             Codec.INT.fieldOf("grip").forGetter(CarSnapshot::grip),
@@ -478,7 +507,11 @@ public class OWRLapRecords extends SavedData {
             Codec.INT.fieldOf("gearing").forGetter(CarSnapshot::gearing),
             Codec.INT.fieldOf("damage_percent").forGetter(CarSnapshot::damagePercent),
             Codec.INT.fieldOf("tyre_wear_percent").forGetter(CarSnapshot::tyreWearPercent),
-            Codec.BOOL.fieldOf("abs_enabled").forGetter(CarSnapshot::absEnabled)
+            Codec.BOOL.fieldOf("abs_enabled").forGetter(CarSnapshot::absEnabled),
+            Codec.STRING.optionalFieldOf("tyre", "").forGetter(CarSnapshot::tyre),
+            Codec.INT.optionalFieldOf("bop_weight_percent", 0).forGetter(CarSnapshot::bopWeightPercent),
+            Codec.INT.optionalFieldOf("bop_power_percent", 0).forGetter(CarSnapshot::bopPowerPercent),
+            Codec.DOUBLE.optionalFieldOf("traveled_meters", -1.0).forGetter(CarSnapshot::traveledMeters)
         ).apply(instance, CarSnapshot::new));
     }
 

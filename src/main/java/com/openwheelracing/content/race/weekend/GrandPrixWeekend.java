@@ -242,6 +242,14 @@ public final class GrandPrixWeekend {
         if (session.grid.size() != enteredDriverIds().size()) {
             throw new IllegalStateException("Materialize a complete grid before staging");
         }
+        RaceSessionState current = session.lifecycle.state();
+        if (current == RaceSessionState.AWAITING_START || current == RaceSessionState.SUSPENDED
+            && (session.lifecycle.suspendedFrom() == RaceSessionState.AWAITING_START
+                || session.lifecycle.suspendedFrom() == RaceSessionState.COUNTDOWN
+                || session.lifecycle.suspendedFrom() == RaceSessionState.FORMATION_COUNTDOWN)) {
+            audit(tick, actor, actorName, "RESTAGE_GRID", session.config.name());
+            return;
+        }
         session.lifecycle.transitionTo(RaceSessionState.STAGING, tick);
         audit(tick, actor, actorName, "STAGE_SESSION", session.config.name());
     }
@@ -283,29 +291,72 @@ public final class GrandPrixWeekend {
     }
 
     public void countdown(long tick, UUID actor, String actorName) {
+        countdown(tick, actor, actorName, java.util.concurrent.ThreadLocalRandom.current().nextInt(RaceStartProcedure.MAX_RANDOM_HOLD_TICKS + 1));
+    }
+
+    void countdown(long tick, UUID actor, String actorName, int randomHoldTicks) {
         Session session = requireActiveSession();
-        session.lifecycle.transitionTo(RaceSessionState.COUNTDOWN, tick);
+        RaceSessionState state = session.lifecycle.state();
+        if (state == RaceSessionState.FORMATION_LAP) {
+            awaitRaceStart(tick);
+            state = RaceSessionState.AWAITING_START;
+        }
+        if (state != RaceSessionState.STAGING && state != RaceSessionState.AWAITING_START) {
+            throw new IllegalStateException("Stage the grid before preparation countdown, or request race countdown during formation/return");
+        }
+        session.lifecycle.transitionTo(state == RaceSessionState.STAGING
+            ? RaceSessionState.FORMATION_COUNTDOWN : RaceSessionState.COUNTDOWN, tick);
+        session.raceCountdownTicks = RaceStartProcedure.durationTicks(randomHoldTicks);
+        session.countdownElapsedTicks = 0L;
         session.countdownSinceTick = tick;
-        audit(tick, actor, actorName, "COUNTDOWN_SESSION", session.config.name());
+        audit(tick, actor, actorName, "COUNTDOWN_SESSION", session.lifecycle.state().name());
+    }
+
+    public long countdownDurationTicks() {
+        return requireActiveSession().countdownDurationTicks();
+    }
+
+    public void releaseFormation(long tick) {
+        Session session = requireActiveSession();
+        if (session.lifecycle.state() != RaceSessionState.FORMATION_COUNTDOWN || session.countdownRemainingTicks(tick) > 0L) {
+            throw new IllegalStateException("The formation countdown has not expired");
+        }
+        session.freezeCountdown(tick);
+        session.lifecycle.transitionTo(RaceSessionState.FORMATION_LAP, tick);
+        audit(tick, null, "SERVER", "FORMATION_LAP", session.config.name());
+    }
+
+    public void awaitRaceStart(long tick) {
+        Session session = requireActiveSession();
+        session.lifecycle.transitionTo(RaceSessionState.AWAITING_START, tick);
+        audit(tick, null, "SERVER", "FORMATION_RETURN", "Waiting for the race director");
     }
 
     public void start(long tick, UUID actor, String actorName) {
+        start(tick, actor, actorName, false);
+    }
+
+    public void startImmediately(long tick, UUID actor, String actorName) {
+        start(tick, actor, actorName, true);
+    }
+
+    private void start(long tick, UUID actor, String actorName, boolean directorOverride) {
         Session session = requireActiveSession();
         RaceSessionState required = session.config.type().usesGrid() ? RaceSessionState.COUNTDOWN : RaceSessionState.OPEN;
         if (session.lifecycle.state() != required) {
             throw new IllegalStateException("The session must be " + required.name().toLowerCase(java.util.Locale.ROOT) + " before start");
         }
-        if (required == RaceSessionState.COUNTDOWN && session.countdownRemainingTicks(tick) > 0L) {
+        if (!directorOverride && required == RaceSessionState.COUNTDOWN && session.countdownRemainingTicks(tick) > 0L) {
             throw new IllegalStateException("The configured countdown has not expired");
         }
-        session.lifecycle.transitionTo(RaceSessionState.RUNNING, tick);
         session.freezeCountdown(tick);
+        session.lifecycle.transitionTo(RaceSessionState.RUNNING, tick);
         audit(tick, actor, actorName, "START_SESSION", session.config.name());
     }
 
     public boolean suspend(RaceSessionSuspensionReason reason, long tick, UUID actor, String actorName) {
         Session session = requireActiveSession();
-        if (session.lifecycle.state() == RaceSessionState.COUNTDOWN) {
+        if (isCountdown(session.lifecycle.state())) {
             session.freezeCountdown(tick);
         }
         boolean changed = session.lifecycle.suspend(reason, tick);
@@ -318,7 +369,7 @@ public final class GrandPrixWeekend {
     public void resume(long tick, UUID actor, String actorName) {
         Session session = requireActiveSession();
         boolean resumesCountdown = session.lifecycle.state() == RaceSessionState.SUSPENDED
-            && session.lifecycle.suspendedFrom() == RaceSessionState.COUNTDOWN;
+            && isCountdown(session.lifecycle.suspendedFrom());
         session.lifecycle.resume(tick);
         if (resumesCountdown) {
             session.countdownSinceTick = tick;
@@ -328,6 +379,10 @@ public final class GrandPrixWeekend {
 
     public void finish(long tick, UUID actor, String actorName) {
         Session session = requireActiveSession();
+        if (session.lifecycle.state() != RaceSessionState.RUNNING && !(session.lifecycle.state() == RaceSessionState.SUSPENDED
+            && session.lifecycle.suspendedFrom() == RaceSessionState.RUNNING)) {
+            throw new IllegalStateException("Only a session that has started racing may finish");
+        }
         session.lifecycle.transitionTo(RaceSessionState.FINISHING, tick);
         audit(tick, actor, actorName, "FINISH_SESSION", session.config.name());
     }
@@ -386,7 +441,7 @@ public final class GrandPrixWeekend {
         if (active.isEmpty()) {
             return false;
         }
-        if (connectedPlayers == 0 && active.get().lifecycle.state() == RaceSessionState.COUNTDOWN) {
+        if (connectedPlayers == 0 && isCountdown(active.get().lifecycle.state())) {
             active.get().freezeCountdown(tick);
         }
         boolean changed = active.get().lifecycle.onConnectedPlayerCountChanged(connectedPlayers, tick);
@@ -496,12 +551,17 @@ public final class GrandPrixWeekend {
         return clean;
     }
 
+    private static boolean isCountdown(RaceSessionState state) {
+        return state == RaceSessionState.COUNTDOWN || state == RaceSessionState.FORMATION_COUNTDOWN;
+    }
+
     private static final class Session {
         private final SessionConfig config;
         private final RaceSessionLifecycle lifecycle;
         private SessionResult result;
         private List<UUID> grid;
         private long countdownElapsedTicks;
+        private long raceCountdownTicks = RaceStartProcedure.RED_SEQUENCE_TICKS;
         private long countdownSinceTick = -1L;
 
         private Session(SessionConfig config) {
@@ -518,8 +578,10 @@ public final class GrandPrixWeekend {
         }
 
         private static Session restore(SessionSnapshot snapshot) {
-            return new Session(snapshot.config(), RaceSessionLifecycle.recover(snapshot.lifecycle()), snapshot.result(), snapshot.grid(),
+            Session session = new Session(snapshot.config(), RaceSessionLifecycle.recover(snapshot.lifecycle()), snapshot.result(), snapshot.grid(),
                 snapshot.countdownElapsedTicks());
+            session.raceCountdownTicks = snapshot.raceCountdownTicks();
+            return session;
         }
 
         private SessionView view(long tick) {
@@ -528,11 +590,11 @@ public final class GrandPrixWeekend {
         }
 
         private SessionSnapshot snapshot(long tick) {
-            return new SessionSnapshot(config, lifecycle.checkpoint(tick), result, grid, countdownElapsedAt(tick));
+            return new SessionSnapshot(config, lifecycle.checkpoint(tick), result, grid, countdownElapsedAt(tick), raceCountdownTicks);
         }
 
         private long countdownElapsedAt(long tick) {
-            if (lifecycle.state() == RaceSessionState.COUNTDOWN && countdownSinceTick >= 0L) {
+            if (isCountdown(lifecycle.state()) && countdownSinceTick >= 0L) {
                 if (tick < countdownSinceTick) {
                     throw new IllegalArgumentException("serverTick must not move backwards during countdown");
                 }
@@ -541,8 +603,13 @@ public final class GrandPrixWeekend {
             return countdownElapsedTicks;
         }
 
+        private long countdownDurationTicks() {
+            RaceSessionState phase = lifecycle.state() == RaceSessionState.SUSPENDED ? lifecycle.suspendedFrom() : lifecycle.state();
+            return phase == RaceSessionState.COUNTDOWN ? raceCountdownTicks : config.countdownTicks();
+        }
+
         private long countdownRemainingTicks(long tick) {
-            return Math.max(0L, config.countdownTicks() - countdownElapsedAt(tick));
+            return Math.max(0L, countdownDurationTicks() - countdownElapsedAt(tick));
         }
 
         private void freezeCountdown(long tick) {
@@ -677,10 +744,12 @@ public final class GrandPrixWeekend {
     }
 
     public record SessionSnapshot(SessionConfig config, RaceSessionLifecycle.Checkpoint lifecycle, SessionResult result,
-                                  List<UUID> grid, long countdownElapsedTicks) {
+                                  List<UUID> grid, long countdownElapsedTicks, long raceCountdownTicks) {
         public SessionSnapshot {
             grid = List.copyOf(grid);
             countdownElapsedTicks = Math.max(0L, countdownElapsedTicks);
+            raceCountdownTicks = Math.clamp(raceCountdownTicks, RaceStartProcedure.RED_SEQUENCE_TICKS,
+                RaceStartProcedure.RED_SEQUENCE_TICKS + RaceStartProcedure.MAX_RANDOM_HOLD_TICKS);
         }
     }
 

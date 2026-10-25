@@ -10,6 +10,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BasicAiNearbyAvoidanceTest {
     @Test
+    void highSpeedClosingThreatIsSeenBeyondOldFourteenMetreRange() {
+        var subject = new BasicAiNearbyAvoidance.Car(1, 0, 0, 0, 55, 0);
+        var parked = new BasicAiNearbyAvoidance.Car(2, 70, 0, 0, 0, 0);
+        assertTrue(BasicAiNearbyAvoidance.choose(subject, List.of(parked)).threat());
+        assertFalse(BasicAiNearbyAvoidance.choose(subject, List.of(
+            new BasicAiNearbyAvoidance.Car(2, 70, 0, 0, 55, 0))).threat());
+    }
+
+    @Test
+    void gridSearchRejectsParkedBodyButAllowsSafeAdjacentLane() {
+        var parked = new BasicAiNearbyAvoidance.Car(2, 0, 0, 0, 0, 0);
+        assertFalse(BasicAiNearbyAvoidance.parkingPoseClear(new BasicAiNearbyAvoidance.Car(1, 2, 0, 0, 0, 0), List.of(parked)));
+        assertTrue(BasicAiNearbyAvoidance.parkingPoseClear(new BasicAiNearbyAvoidance.Car(1, 0, 2.5, 0, 0, 0), List.of(parked)));
+        var search = new AiGridPathSearch(new AiGridPathSearch.Pose(-40, 0, 0), new AiGridApproach.Target(20, 64, 0, 0),
+            (x, z, h) -> Math.abs(z) < 20 && BasicAiNearbyAvoidance.parkingPoseClear(
+                new BasicAiNearbyAvoidance.Car(1, x, z, h, 0, 0), List.of(parked)));
+        while (!search.done()) search.advance(64);
+        assertFalse(search.path().isEmpty());
+        assertTrue(search.path().stream().anyMatch(point -> Math.abs(point.z()) > 2.0));
+    }
+
+    @Test
     void predictsNearbyAiAheadAndSteersAway() {
         BasicAiNearbyAvoidance.Car subject = new BasicAiNearbyAvoidance.Car(1, 0, 0, 0, 4, 0);
         BasicAiNearbyAvoidance.Car target = new BasicAiNearbyAvoidance.Car(2, 5, 0, 0, 0, 0);

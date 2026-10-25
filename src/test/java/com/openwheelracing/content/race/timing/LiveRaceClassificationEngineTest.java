@@ -14,6 +14,55 @@ class LiveRaceClassificationEngineTest {
     private static final RaceParticipantKey BRAVO = key("00000000-0000-0000-0000-000000000002", RaceParticipantKind.AI);
 
     @Test
+    void directorAwardImmediatelyChangesRankAndPreservesRoutePosition() {
+        var engine = new LiveRaceClassificationEngine();
+        engine.advance(ROUTE_LENGTH, 1, 50, List.of(
+            observation(ALPHA, "Alpha", 20, 1, 50, RaceProgressConfidence.CONFIRMED),
+            observation(BRAVO, "Bravo", 60, 1, 50, RaceProgressConfidence.CONFIRMED)));
+        assertTrue(engine.adjustCompletedLaps(ALPHA, 1));
+        var row = engine.currentSnapshot(1).rows().getFirst();
+        assertEquals(ALPHA, row.participant());
+        assertEquals(1, row.completedLaps());
+        assertEquals(20, row.routeDistanceMeters());
+        assertEquals(120, row.absoluteProgressMeters());
+        assertEquals(1, engine.manualLapAdjustment(ALPHA));
+    }
+
+    @Test
+    void directorDeductionSurvivesReconciliationAndNextNaturalLap() {
+        var engine = new LiveRaceClassificationEngine();
+        engine.restore(ROUTE_LENGTH, List.of(new LiveRaceClassificationEngine.RestoredProgress(ALPHA, "Alpha", 3, 90, 1)));
+        assertTrue(engine.adjustCompletedLaps(ALPHA, -1));
+        org.junit.jupiter.api.Assertions.assertFalse(engine.reconcileCompletedLaps(ALPHA, 3));
+        assertEquals(2, engine.currentSnapshot(1).rows().getFirst().completedLaps());
+        var next = engine.advance(ROUTE_LENGTH, 2, 100, List.of(observation(ALPHA, "Alpha", 3, 2, 100, RaceProgressConfidence.CONFIRMED)));
+        assertEquals(3, next.rows().getFirst().completedLaps());
+        org.junit.jupiter.api.Assertions.assertFalse(engine.reconcileCompletedLaps(ALPHA, 4));
+        assertEquals(3, engine.currentSnapshot(2).rows().getFirst().completedLaps());
+    }
+
+    @Test
+    void directorAwardSurvivesRestoreAndRecordReconciliation() {
+        var engine = new LiveRaceClassificationEngine();
+        engine.restore(ROUTE_LENGTH, List.of(new LiveRaceClassificationEngine.RestoredProgress(ALPHA, "Alpha", 4, 50, 1, false, 1)));
+        org.junit.jupiter.api.Assertions.assertFalse(engine.reconcileCompletedLaps(ALPHA, 3));
+        assertEquals(4, engine.currentSnapshot(1).rows().getFirst().completedLaps());
+        assertTrue(engine.reconcileCompletedLaps(ALPHA, 4));
+        assertEquals(5, engine.currentSnapshot(1).rows().getFirst().completedLaps());
+    }
+
+    @Test
+    void directorCannotDeductBelowZeroOrApplyArbitraryDelta() {
+        var engine = new LiveRaceClassificationEngine();
+        engine.advance(ROUTE_LENGTH, 1, 50, List.of(observation(ALPHA, "Alpha", 20, 1, 50, RaceProgressConfidence.CONFIRMED)));
+        org.junit.jupiter.api.Assertions.assertFalse(engine.adjustCompletedLaps(ALPHA, -1));
+        org.junit.jupiter.api.Assertions.assertFalse(engine.adjustCompletedLaps(ALPHA, 2));
+        org.junit.jupiter.api.Assertions.assertFalse(engine.adjustCompletedLaps(BRAVO, 1));
+        assertEquals(0, engine.currentSnapshot(1).rows().getFirst().completedLaps());
+        assertEquals(0, engine.manualLapAdjustment(ALPHA));
+    }
+
+    @Test
     void ordersInitialParticipantsByRouteDistance() {
         LiveRaceClassificationEngine engine = new LiveRaceClassificationEngine();
 
@@ -38,6 +87,42 @@ class LiveRaceClassificationEngineTest {
 
         assertEquals(1, snapshot.rows().getFirst().completedLaps());
         assertEquals(103.0, snapshot.rows().getFirst().absoluteProgressMeters(), 1.0E-6);
+    }
+
+    @Test
+    void gridDepartureCrossingCompletesZeroLapsThenFullCircuitCompletesOne() {
+        LiveRaceClassificationEngine engine = new LiveRaceClassificationEngine();
+        engine.setGridStart(true);
+        engine.advance(ROUTE_LENGTH, 1, 50, List.of(observation(ALPHA, "Alpha", 90, 1, 50, RaceProgressConfidence.CONFIRMED)));
+        var departure = engine.advance(ROUTE_LENGTH, 2, 100, List.of(observation(ALPHA, "Alpha", 3, 2, 100, RaceProgressConfidence.CONFIRMED)));
+        assertEquals(0, departure.rows().getFirst().completedLaps());
+        assertEquals(3.0, departure.rows().getFirst().absoluteProgressMeters(), 1.0E-6);
+        engine.advance(ROUTE_LENGTH, 3, 150, List.of(observation(ALPHA, "Alpha", 50, 3, 150, RaceProgressConfidence.CONFIRMED)));
+        engine.advance(ROUTE_LENGTH, 4, 200, List.of(observation(ALPHA, "Alpha", 90, 4, 200, RaceProgressConfidence.CONFIRMED)));
+        var lap = engine.advance(ROUTE_LENGTH, 5, 250, List.of(observation(ALPHA, "Alpha", 3, 5, 250, RaceProgressConfidence.CONFIRMED)));
+        assertEquals(1, lap.rows().getFirst().completedLaps());
+    }
+
+    @Test
+    void gridCarsOnOppositeSidesOfLineKeepCorrectOrder() {
+        LiveRaceClassificationEngine engine = new LiveRaceClassificationEngine();
+        engine.setGridStart(true);
+        var snapshot = engine.advance(ROUTE_LENGTH, 1, 50, List.of(
+            observation(ALPHA, "Alpha", 2, 1, 50, RaceProgressConfidence.CONFIRMED),
+            observation(BRAVO, "Bravo", 98, 1, 50, RaceProgressConfidence.CONFIRMED)));
+        assertEquals(ALPHA, snapshot.rows().getFirst().participant());
+        assertEquals(-2.0, snapshot.rows().getLast().absoluteProgressMeters(), 1.0E-6);
+    }
+
+    @Test
+    void recoveryBeforeFirstGridCrossingDoesNotAwardALap() {
+        LiveRaceClassificationEngine engine = new LiveRaceClassificationEngine();
+        engine.setGridStart(true);
+        engine.restore(ROUTE_LENGTH, List.of(new LiveRaceClassificationEngine.RestoredProgress(ALPHA, "Alpha", 0, 98, 1, true)));
+        var snapshot = engine.advance(ROUTE_LENGTH, 20, 1_000, List.of(
+            observation(ALPHA, "Alpha", 3, 20, 1_000, RaceProgressConfidence.CONFIRMED)));
+        assertEquals(0, snapshot.rows().getFirst().completedLaps());
+        assertEquals(3.0, snapshot.rows().getFirst().absoluteProgressMeters(), 1.0E-6);
     }
 
     @Test

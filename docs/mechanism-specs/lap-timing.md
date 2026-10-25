@@ -32,7 +32,7 @@
 
 - When does a lap start?
 
-  When the car passes the starting counter in the right approx. direction
+  When a driven car enters the surveyed route detection zone (25m horizontally, 5m vertically), or passes the starting counter in the forward direction. Forward finish crossings complete the current attempt and start the next.
 
 - When does a lap finish?
 
@@ -49,6 +49,9 @@
 - Should leaving the car, breaking blocks, teleporting, or dying cancel the lap?
 
   Yes
+
+- Attempts shorter than 0.2 seconds or with less than 10m actual movement during the attempt are silently discarded, including invalid attempts. The distance threshold uses actual movement, independent of racing-line localization confidence. Route proximity starts an attempt even when parallel route segments make telemetry localization ambiguous.
+- Race Director can discard a selected lap entirely; discarding removes it from rankings and removes its learned profile.
 
 ## Results
 
@@ -83,3 +86,43 @@
 - What should wait for multiplayer or track-definition systems?
 
   Delta, fill leaderboard, checkpoint logic, multiplayer time trail, ...
+
+## AI Lap Recording
+
+- Autonomous AI cars use the same start/finish crossings, minimum lap time, checkpoint checks, off-track invalidation, telemetry capture, and session lap records as player cars.
+- Records use the stable AI driver UUID and display name (for example, `AI-07`), so rankings and archives include AI times without requiring a player passenger.
+- Entering the surveyed route detection zone starts timing without a start-line crossing. Forward crossings finish the current attempt and start the next.
+- GP formation and preparation crossings remain excluded. Starting a new session clears in-progress intervals for both player and AI cars.
+- A player taking control owns subsequent laps; timing intervals cannot be shared between drivers.
+- For AI-only GP grids, enter the spawned AI display name in the GP registration field, or use `/owr gp register_ai "Event" AI-07 7`. AI registration requires exactly one matching AI car on the event track. Use `/owr gp unregister_ai "Event" AI-07` to remove that entry.
+
+- Player racing-line learning now excludes newly recorded laps with block/entity impacts, while retaining those laps in timing/telemetry records. Existing historical profiles do not contain a collision flag; invalidate a known bad historical lap to remove its profile.
+
+## Detailed Lap Records
+
+- The primary board shows abbreviated creation time (HH:mm), with the lap duration first so it remains visible in a narrow row.
+- All Lap Records opens a server-paginated browser spanning current and archived sessions in the dimension.
+- Filters combine player name (case-insensitive substring) or exact driver UUID, exact numeric session ID (`#12`), inclusive lap duration bounds in seconds, and inclusive UTC creation dates (`YYYY-MM-DD`) or ISO timestamps.
+- Sessions display their name and unique numeric ID to distinguish repeated names. Sorting supports lap duration, creation timestamp, player, or session ID in either direction, with record ID as a stable tie breaker.
+- Normal mode has two columns. Expanded mode has one column with tyre type/compound, wear, BoP weight/power percentages, traveled distance, validity, and per-row invalidate/revalidate/discard controls. Management actions require Race Director control permission on the server.
+- New records persist tyre, BoP, and distance metadata. Historical records with no metadata show unknown values. Revalidating a record restores ranking eligibility but does not regenerate its learned racing line.
+
+## Continuous Driving Telemetry
+
+- Driving capture starts whenever a living player or autonomous AI controls a car, independently of route detection, lap timing, GP phase, and lap validity.
+- Raw position, speed, elapsed time, and traveled distance are sampled every five server ticks. Route fields are explicitly untracked when recording raw driving traces.
+- Captures rotate every 200 ticks and flush on driver change/dismount, entity removal, and entity save. Lap/session resets do not clear this recorder.
+- CSV segments are stored under the world's `openwheelracing/driving-telemetry/` directory with capture, car, driver, dimension, and UTC start metadata. These raw segments are independent of the lap-record list and its telemetry replay files.
+
+## Precision Verification
+
+- Ordinary finish crossings insert valid records synchronously in the crossing tick; background telemetry writes and driving-capture rotation do not gate the record insertion.
+- Start and finish times use the line intersection fraction within a 50ms simulation tick. Their difference is rounded once to an integer millisecond, retained in records and serialization. This is 1ms resolution based on interpolated motion, rather than a guarantee of 1ms physical accuracy.
+- `./gradlew lapTimingTest` runs the runtime-backed geometry, timestamp, record/ranking, serialization, and independent-capture checks. `./gradlew build` includes these tests. These component integration tests do not simulate a player driving a full circuit in a running server.
+
+## Director Lap Count Corrections
+
+- Race Director selects a car in the telemetry car list and uses `+1 Lap` / `-1 Lap` to correct that driver's live race count. Player occupants take precedence over the car's assigned AI driver.
+- Each action is validated on the server against director permissions, the active session ID, and the currently classified driver/car. Counts cannot be reduced below zero.
+- The live classification and rank update immediately. The correction is stored separately from timed lap records, survives normal record reconciliation and checkpoint recovery, and does not create a fabricated lap time or affect best-lap rankings.
+- The director receives the resulting count, and adjustments are logged with director, session, car, delta, and total.

@@ -17,12 +17,26 @@ public abstract class CameraMixin {
     @Inject(method = "setup", at = @At("TAIL"))
     private void openwheelracing$setupTCamera(Level level, Entity viewEntity, boolean detached, boolean mirrored, float partialTick, CallbackInfo ci) {
         com.openwheelracing.content.weather.RegionalWeather.updateCamera(viewEntity.blockPosition());
-        if (!OWRCameraMode.isTCamera() || !(viewEntity.getVehicle() instanceof OpenwheelCarEntity car)) {
+        if (!(viewEntity.getVehicle() instanceof OpenwheelCarEntity car)) {
             return;
         }
-        Vec3 position = OWRCameraMode.tCameraPosition(car, viewEntity, partialTick);
-        this.setPosition(position);
+        boolean tCamera = OWRCameraMode.isTCamera();
+        if (tCamera) {
+            Vec3 position = OWRCameraMode.tCameraPosition(car, viewEntity, partialTick);
+            this.setPosition(position);
+        }
+        if (!detached || tCamera) {
+            // Reuse the interpolated chassis pitch, preserving the player's free look.
+            float relativeYaw = this.yRot - car.getYRot(partialTick);
+            float bumpPitch = car.getTerrainBumpPitch(partialTick)
+                * (float) Math.cos(Math.toRadians(relativeYaw));
+            this.setRotation(this.yRot, this.xRot + bumpPitch);
+        }
     }
 
+    @Shadow private float yRot;
+    @Shadow private float xRot;
+
     @Shadow protected abstract void setPosition(Vec3 position);
+    @Shadow protected abstract void setRotation(float yaw, float pitch);
 }

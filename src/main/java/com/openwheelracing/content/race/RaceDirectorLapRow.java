@@ -2,10 +2,10 @@ package com.openwheelracing.content.race;
 
 import net.minecraft.network.FriendlyByteBuf;
 
-public record RaceDirectorLapRow(long id, String driverName, int lapMillis, long completedWorldTime, int checkpointCount, boolean invalidated, String invalidationReason, long startFinishPos, int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled, long sessionId, String sessionName) {
+public record RaceDirectorLapRow(long id, String driverName, int lapMillis, long completedWorldTime, int checkpointCount, boolean invalidated, String invalidationReason, long startFinishPos, int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled, long sessionId, String sessionName, String driverId, String tyre, int bopWeightPercent, int bopPowerPercent, double traveledMeters) {
     public static RaceDirectorLapRow fromRecord(OWRLapRecords.LapRecord record) {
         OWRLapRecords.CarSnapshot car = record.car();
-        return new RaceDirectorLapRow(record.id(), record.driverName(), record.lapMillis(), record.completedWorldTime(), record.checkpointCount(), record.invalidated(), record.invalidationReason(), record.startFinishPos(), car.power(), car.grip(), car.aero(), car.gearing(), car.damagePercent(), car.tyreWearPercent(), car.absEnabled(), record.sessionId(), record.sessionName());
+        return new RaceDirectorLapRow(record.id(), record.driverName(), record.lapMillis(), record.completedWorldTime(), record.checkpointCount(), record.invalidated(), record.invalidationReason(), record.startFinishPos(), car.power(), car.grip(), car.aero(), car.gearing(), car.damagePercent(), car.tyreWearPercent(), car.absEnabled(), record.sessionId(), record.sessionName(), record.driverId().toString(), car.tyre(), car.bopWeightPercent(), car.bopPowerPercent(), car.traveledMeters());
     }
 
     public static void encode(RaceDirectorLapRow row, FriendlyByteBuf buffer) {
@@ -26,9 +26,14 @@ public record RaceDirectorLapRow(long id, String driverName, int lapMillis, long
         buffer.writeBoolean(row.absEnabled);
         buffer.writeLong(row.sessionId);
         buffer.writeUtf(row.sessionName);
+        buffer.writeUtf(row.driverId);
+        buffer.writeUtf(row.tyre);
+        buffer.writeInt(row.bopWeightPercent);
+        buffer.writeInt(row.bopPowerPercent);
+        buffer.writeDouble(row.traveledMeters);
     }
 
     public static RaceDirectorLapRow decode(FriendlyByteBuf buffer) {
-        return new RaceDirectorLapRow(buffer.readLong(), buffer.readUtf(), buffer.readInt(), buffer.readLong(), buffer.readInt(), buffer.readBoolean(), buffer.readUtf(), buffer.readLong(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readBoolean(), buffer.readLong(), buffer.readUtf());
+        return new RaceDirectorLapRow(buffer.readLong(), buffer.readUtf(), buffer.readInt(), buffer.readLong(), buffer.readInt(), buffer.readBoolean(), buffer.readUtf(), buffer.readLong(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readBoolean(), buffer.readLong(), buffer.readUtf(), buffer.readUtf(), buffer.readUtf(), buffer.readInt(), buffer.readInt(), buffer.readDouble());
     }
 }

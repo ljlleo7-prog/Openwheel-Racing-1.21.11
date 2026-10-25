@@ -144,7 +144,8 @@ public final class GrandPrixWeekendScreen extends Screen {
         if (!info.present()) return;
         addControl(left + 390, top + 158, "advance", "screen.openwheelracing.gp_weekend.advance");
         addControl(left + 500, top + 158, "stage", "screen.openwheelracing.gp_weekend.stage");
-        addControl(left + 390, top + 182, "countdown", "screen.openwheelracing.gp_weekend.countdown");
+        addControl(left + 390, top + 182, "countdown", info.activeSessionState().equals("STAGING")
+            ? "screen.openwheelracing.gp_weekend.formation" : "screen.openwheelracing.gp_weekend.countdown");
         addControl(left + 500, top + 182, "start", "screen.openwheelracing.gp_weekend.start");
         addControl(left + 390, top + 216, "suspend", "screen.openwheelracing.gp_weekend.suspend");
         addControl(left + 500, top + 216, "resume", "screen.openwheelracing.gp_weekend.resume");
@@ -359,7 +360,7 @@ public final class GrandPrixWeekendScreen extends Screen {
         graphics.drawString(font, fit(Component.translatable("screen.openwheelracing.gp_weekend.next", next).getString(), 210),
             left + 390, y + 42, 0xFFFFD76A, false);
         int clockY = top + 307;
-        if (info.activeSessionState().equals("COUNTDOWN")) {
+        if (info.activeSessionState().equals("COUNTDOWN") || info.activeSessionState().equals("FORMATION_COUNTDOWN")) {
             String countdown = Component.translatable("screen.openwheelracing.gp_weekend.countdown_display",
                 formatClock(info.countdownRemainingTicks())).getString();
             graphics.drawCenteredString(font, countdown, left + 496, clockY, 0xFFFFD76A);
@@ -382,7 +383,10 @@ public final class GrandPrixWeekendScreen extends Screen {
         return switch (info.activeSessionState()) {
             case "OPEN" -> Component.translatable(info.activeSessionType().equals("SPRINT") || info.activeSessionType().equals("RACE")
                 ? "screen.openwheelracing.gp_weekend.next_stage" : "screen.openwheelracing.gp_weekend.next_start");
-            case "STAGING" -> Component.translatable("screen.openwheelracing.gp_weekend.next_countdown");
+            case "STAGING" -> Component.translatable("screen.openwheelracing.gp_weekend.next_formation");
+            case "FORMATION_COUNTDOWN" -> Component.translatable("screen.openwheelracing.gp_weekend.next_formation_countdown");
+            case "FORMATION_LAP" -> Component.translatable("screen.openwheelracing.gp_weekend.next_formation_return");
+            case "AWAITING_START" -> Component.translatable("screen.openwheelracing.gp_weekend.next_countdown");
             case "COUNTDOWN" -> Component.translatable("screen.openwheelracing.gp_weekend.next_counting");
             case "RUNNING" -> Component.translatable("screen.openwheelracing.gp_weekend.next_finish");
             case "SUSPENDED" -> Component.translatable("screen.openwheelracing.gp_weekend.next_resume");

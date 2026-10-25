@@ -43,6 +43,19 @@ public final class LapTelemetryStore {
         }
     }
 
+    public static void saveDriving(MinecraftServer server, java.util.UUID carId, DrivingTelemetryRecorder.Segment segment) {
+        Path directory = server.getWorldPath(LevelResource.ROOT).resolve("openwheelracing").resolve("driving-telemetry");
+        String fileName = segment.startedWorldTime() + "-" + carId + "-" + segment.captureId() + ".csv";
+        try {
+            IO.execute(() -> write(directory, segment.snapshot(), fileName,
+                "#capture_id=" + segment.captureId() + ",car_id=" + carId + ",driver_id=" + segment.snapshot().driverId()
+                    + ",driver_name=" + segment.snapshot().driverName().replace(',', '_').replace('\n', '_').replace('\r', '_')
+                    + ",started_utc_ms=" + segment.startedWorldTime() + ",dimension=" + segment.snapshot().dimensionId()));
+        } catch (RuntimeException exception) {
+            LOGGER.error("Could not queue driving telemetry for car {}", carId, exception);
+        }
+    }
+
     public static void load(MinecraftServer server, OWRLapRecords.LapRecord lap, Consumer<Optional<LapTelemetryData>> callback) {
         Path telemetryDirectory = directory(server);
         String fileName = fileName(lap.id(), lap.driverId(), lap.dimensionId());
@@ -111,11 +124,19 @@ public final class LapTelemetryStore {
     }
 
     private static void write(Path directory, LapTelemetryRecorder.Snapshot data) {
-        Path file = directory.resolve(fileName(data.lapId(), data.driverId(), data.dimensionId()));
+        write(directory, data, fileName(data.lapId(), data.driverId(), data.dimensionId()), null);
+    }
+
+    private static void write(Path directory, LapTelemetryRecorder.Snapshot data, String fileName, String captureHeader) {
+        Path file = directory.resolve(fileName);
         try {
             Files.createDirectories(directory);
             try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+                if (captureHeader != null) {
+                    writer.write(captureHeader);
+                    writer.newLine();
+                }
                 writer.write("#track_id=" + data.trackId() + ",route_id=" + data.routeId() + ",route_length_m=" + data.routeLength());
                 writer.newLine();
                 writer.write("elapsed_ms,route_distance_cm,covered_distance_cm,speed_cmps,x_cm,y_cm,z_cm,tracking_status");

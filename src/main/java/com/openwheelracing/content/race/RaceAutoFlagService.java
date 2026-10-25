@@ -1,6 +1,7 @@
 package com.openwheelracing.content.race;
 
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
+import com.openwheelracing.content.race.weekend.RaceStartProcedure;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRoute;
@@ -213,17 +214,22 @@ public final class RaceAutoFlagService {
     }
 
     private static void tickStartSequence(ServerLevel level, OWRRaceControlState state) {
+        if (com.openwheelracing.content.race.weekend.GrandPrixWeekendService.ownsStartLights(level)) {
+            START_DUE.remove(level);
+            return;
+        }
         int phase = state.getStartPhase();
         if (phase < 1 || phase > 5) { START_DUE.remove(level); return; }
         long now = level.getGameTime();
-        long due = START_DUE.computeIfAbsent(level, ignored -> now + (phase < 5 ? 20L : 20L + level.random.nextInt(41)));
+        long due = START_DUE.computeIfAbsent(level, ignored -> now + RaceStartProcedure.nextPhaseDelayTicks(phase,
+            phase == 5 ? level.random.nextInt(RaceStartProcedure.MAX_RANDOM_HOLD_TICKS + 1) : 0));
         if (now < due) return;
         state.setStartPhase(phase < 5 ? phase + 1 : 6);
         START_DUE.remove(level);
     }
 
     public static void requestStart(ServerLevel level) {
-        START_DUE.put(level, level.getGameTime() + 20L);
+        START_DUE.put(level, level.getGameTime() + RaceStartProcedure.nextPhaseDelayTicks(1, 0));
     }
 
     public static void clearAll() {

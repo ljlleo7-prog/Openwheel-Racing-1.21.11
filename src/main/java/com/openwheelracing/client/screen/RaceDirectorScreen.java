@@ -63,6 +63,8 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             bopScreen.applySnapshot(snapshot);
         } else if (Minecraft.getInstance().screen instanceof GrandPrixWeekendScreen weekendScreen) {
             weekendScreen.applySnapshot(snapshot);
+        } else if (Minecraft.getInstance().screen instanceof LapRecordsScreen recordsScreen) {
+            recordsScreen.applyParentSnapshot(snapshot);
         } else if (Minecraft.getInstance().screen instanceof RaceDirectorScreen screen) {
             screen.menu.applySnapshot(snapshot);
             if (screen.selectedLapId != -1L && screen.selectedRow() == null) {
@@ -147,7 +149,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
     protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
         RaceDirectorSnapshot snapshot = menu.getSnapshot();
         graphics.drawString(font, title, 8, 6, 0xFFE8EDF2, false);
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.active_session", snapshot.activeSessionName()), 12, 22, 0xFFC9D1D9, false);
+        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.active_session", snapshot.activeSessionName() + " #" + snapshot.activeSessionId()), 12, 22, 0xFFC9D1D9, false);
         graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.global_flag", flagName(snapshot.globalFlag())), 244, 22, flagColor(snapshot.globalFlag()), false);
         if (menu.showsTeamTerminal()) {
             drawTeamTerminal(graphics, snapshot);
@@ -196,6 +198,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
                 selectedTeamCarId = menu.getSnapshot().teamCars().get(index).entityId();
                 MonitorTelemetryClient.clear();
                 OWRNetwork.sendToServer(new OWRNetwork.MonitorTelemetrySubscribeMessage(menu.containerId, selectedTeamCarId));
+                rebuildWidgets();
                 return true;
             }
         }
@@ -217,7 +220,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     private void addBoardWidgets() {
         addSessionNameBox();
-        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.new_session_short"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorStartSessionMessage(sessionName())))
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.new_session_short"), button -> Minecraft.getInstance().setScreen(new NewRaceSessionScreen(this, sessionName())))
             .bounds(leftPos + 12, topPos + 68, 64, 16)
             .build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.refresh"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorRefreshSessionMessage()))
@@ -260,11 +263,20 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         addConditionButtons(OWRNetwork.RaceDirectorCycleConditionModifierMessage.CAR_DAMAGE, leftPos + RIGHT_X, topPos + 282);
         addConditionButtons(OWRNetwork.RaceDirectorCycleConditionModifierMessage.TYRE_WEAR, leftPos + RIGHT_X, topPos + 300);
         addMapWidgets();
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.all_laps"), button ->
+            Minecraft.getInstance().setScreen(new LapRecordsScreen(this)))
+            .bounds(leftPos + 230, topPos + 40, 130, 16).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.invalidate"), button -> {
             if (selectedLapId != -1L) {
                 OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorInvalidateLapMessage(selectedLapId));
             }
-        }).bounds(leftPos + LEFT_X, topPos + 314, 170, 16).build());
+        }).bounds(leftPos + LEFT_X, topPos + 314, 83, 16).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.discard"), button -> {
+            if (selectedLapId != -1L) {
+                OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorInvalidateLapMessage(selectedLapId, true));
+                selectedLapId = -1L;
+            }
+        }).bounds(leftPos + LEFT_X + 87, topPos + 314, 83, 16).build());
         addRenderableWidget(Button.builder(Component.literal("LOAD TELEMETRY REPLAY"), button -> {
             if (selectedRow() != null) {
                 telemetryMessage = "Loading telemetry…";
@@ -278,6 +290,11 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             .bounds(leftPos + 308, topPos + 318, 64, 14).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.auto_flags"), button -> OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSignalControlMessage(OWRNetwork.RaceDirectorSignalControlMessage.AUTO_FLAGGING, -1, 0)))
             .bounds(leftPos + 376, topPos + 318, 100, 14).build());
+        Button awardLap = addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.award_lap"), button -> adjustSelectedDriverLap(1))
+            .bounds(leftPos + 380, topPos + 334, 70, 14).build());
+        Button reduceLap = addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.reduce_lap"), button -> adjustSelectedDriverLap(-1))
+            .bounds(leftPos + 454, topPos + 334, 70, 14).build());
+        awardLap.active = reduceLap.active = selectedTeamCar() != null;
         if (selectedTeamCarId >= 0) {
             addRenderableWidget(Button.builder(Component.literal("BLUE"), button -> setSelectedDriverFlag(com.openwheelracing.content.race.RaceSignal.BLUE)).bounds(leftPos + 230, topPos + 334, 46, 14).build());
             addRenderableWidget(Button.builder(Component.literal("MECH"), button -> setSelectedDriverFlag(com.openwheelracing.content.race.RaceSignal.ORANGE)).bounds(leftPos + 280, topPos + 334, 46, 14).build());
@@ -301,6 +318,11 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
 
     private void setRaceLapLimit(int laps) {
         OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorSetRaceLapLimitMessage(laps));
+    }
+
+    private void adjustSelectedDriverLap(int delta) {
+        if (selectedTeamCar() != null) OWRNetwork.sendToServer(new OWRNetwork.RaceDirectorAdjustLapMessage(
+            selectedTeamCarId, menu.getSnapshot().activeSessionId(), delta));
     }
 
     private void setSelectedDriverFlag(com.openwheelracing.content.race.RaceSignal signal) {
@@ -331,6 +353,9 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
         push.active = selected != null && selected.aiOwned();
         addRenderableWidget(push);
         addMapWidgets();
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.all_laps"), button ->
+            Minecraft.getInstance().setScreen(new LapRecordsScreen(this)))
+            .bounds(leftPos + 230, topPos + 40, 130, 16).build());
     }
 
     private void addMapWidgets() {
@@ -526,10 +551,12 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
                 graphics.fill(ROW_X - 2, y - 1, ROW_X + ROW_WIDTH, y + ROW_HEIGHT - 1, 0xFF3F5F7F);
             }
             int color = row.invalidated() ? 0xFFFF7777 : 0xFFE8EDF2;
-            String worldTime = formatWorldTime(row.completedWorldTime());
+            String worldTime = row.completedWorldTime() >= 1_000_000_000_000L
+                ? java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.ofEpochMilli(row.completedWorldTime()))
+                : formatWorldTime(row.completedWorldTime());
             String rowText = snapshot.archiveMode()
-                ? worldTime + " " + row.sessionName() + " / " + row.driverName() + "  " + formatLapTime(row.lapMillis())
-                : worldTime + " " + row.driverName() + "  " + formatLapTime(row.lapMillis());
+                ? formatLapTime(row.lapMillis()) + " " + row.driverName() + " #" + row.sessionId() + " " + worldTime
+                : formatLapTime(row.lapMillis()) + " " + row.driverName() + " " + worldTime;
             graphics.drawString(font, fit(rowText, ROW_WIDTH), ROW_X, y, color, false);
         }
     }

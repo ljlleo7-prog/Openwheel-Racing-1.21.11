@@ -11,7 +11,9 @@ public enum BasicAiTrafficMode {
     FORMATION(0.62, 35.0, true),
     VSC(0.68, 55.0, true),
     SAFETY_CAR(0.58, 35.0, true),
-    HOLD(0.0, 0.0, true);
+    HOLD(0.0, 0.0, true),
+    GRID_RETURN(0.55, 12.0, true),
+    FORMATION_HEATING(0.70, 200.0 / 3.6, true);
 
     private final double gripUtilization;
     private final double speedCapMetersPerSecond;
@@ -36,16 +38,15 @@ public enum BasicAiTrafficMode {
     }
 
     public static BasicAiTrafficMode resolve(BasicAiTrafficMode override, RaceFlagMode flag) {
-        if (override != null && override != AUTO) {
-            return override;
-        }
-        return switch (flag == null ? RaceFlagMode.DEFAULT : flag) {
+        BasicAiTrafficMode requested = override == null || override == AUTO ? RACE : override;
+        BasicAiTrafficMode restriction = switch (flag == null ? RaceFlagMode.RED : flag) {
             case GREEN -> RACE;
             case YELLOW -> FORMATION;
             case VIRTUAL_SAFETY_CAR -> VSC;
             case SAFETY_CAR -> SAFETY_CAR;
             case RED -> HOLD;
         };
+        return restriction.speedCapMetersPerSecond() <= requested.speedCapMetersPerSecond() ? restriction : requested;
     }
 
     public static Optional<BasicAiTrafficMode> parse(String value) {

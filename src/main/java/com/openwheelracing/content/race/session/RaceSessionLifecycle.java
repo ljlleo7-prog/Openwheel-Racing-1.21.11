@@ -153,7 +153,10 @@ public final class RaceSessionLifecycle {
         return switch (from) {
             case CONFIGURED -> to == RaceSessionState.OPEN || to == RaceSessionState.ABANDONED;
             case OPEN -> to == RaceSessionState.STAGING || to == RaceSessionState.RUNNING || to == RaceSessionState.ABANDONED;
-            case STAGING -> to == RaceSessionState.COUNTDOWN || to == RaceSessionState.OPEN || to == RaceSessionState.ABANDONED;
+            case STAGING -> to == RaceSessionState.FORMATION_COUNTDOWN || to == RaceSessionState.COUNTDOWN || to == RaceSessionState.OPEN || to == RaceSessionState.ABANDONED;
+            case FORMATION_COUNTDOWN -> to == RaceSessionState.FORMATION_LAP || to == RaceSessionState.ABANDONED;
+            case FORMATION_LAP -> to == RaceSessionState.AWAITING_START || to == RaceSessionState.ABANDONED;
+            case AWAITING_START -> to == RaceSessionState.COUNTDOWN || to == RaceSessionState.ABANDONED;
             case COUNTDOWN -> to == RaceSessionState.RUNNING || to == RaceSessionState.STAGING || to == RaceSessionState.ABANDONED;
             case RUNNING -> to == RaceSessionState.FINISHING || to == RaceSessionState.ABANDONED;
             case SUSPENDED -> to == RaceSessionState.FINISHING || to == RaceSessionState.ABANDONED;

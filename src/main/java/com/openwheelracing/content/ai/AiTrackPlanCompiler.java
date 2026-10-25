@@ -12,10 +12,10 @@ import java.util.Optional;
 public final class AiTrackPlanCompiler {
     public static final double SPACING_METERS = 2.0;
     private static final double MAX_OFFSET = 2.0;
-    private static final double HUMAN_OFFSET_SHARE = 0.80;
+    private static final double HUMAN_OFFSET_SHARE = 0.95;
     private static final double MAX_OFFSET_CHANGE_PER_SAMPLE = 0.30;
     private static final double GRIP_UTILIZATION = 0.94;
-    private static final double HUMAN_SPEED_DIVISOR = 1.10;
+    private static final double HUMAN_SPEED_DIVISOR = 1.03;
     // The capability model is an instantaneous peak. Reserve margin for combined slip,
     // brake build-up, surface sampling differences, and controller latency.
     private static final double BRAKING_UTILIZATION = 0.58;

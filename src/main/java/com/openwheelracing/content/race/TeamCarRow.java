@@ -15,16 +15,16 @@ public record TeamCarRow(int entityId, UUID riderId, String liveryName, String r
                          boolean aiOwned, int lastLapMillis, int bestLapMillis, float aiPaceScale,
                          double x, double z, float headingDegrees, boolean onMap, boolean inPitLane, int liveRank) {
     public static TeamCarRow fromCar(OpenwheelCarEntity car, TrackMapSnapshot map, int liveRank) {
-        Entity passenger = car.getFirstPassenger();
+        Entity passenger = car.getControllingPassenger();
         var aiIdentity = car.getBasicAiIdentity().orElse(null);
-        String rider = aiIdentity != null ? aiIdentity.displayName() : passenger instanceof LivingEntity living ? living.getDisplayName().getString() : "--";
+        String rider = passenger instanceof LivingEntity living ? living.getDisplayName().getString() : aiIdentity != null ? aiIdentity.displayName() : "--";
         int blockX = (int) Math.floor(car.getX());
         int blockZ = (int) Math.floor(car.getZ());
         boolean inPitLane = contains(map.pitRuns(), blockX, blockZ);
         boolean onMap = inPitLane || contains(map.asphaltRuns(), blockX, blockZ);
         return new TeamCarRow(
             car.getId(),
-            aiIdentity != null ? aiIdentity.driverId() : passenger instanceof ServerPlayer serverPlayer ? serverPlayer.getUUID() : new UUID(0L, 0L),
+            passenger instanceof ServerPlayer serverPlayer ? serverPlayer.getUUID() : aiIdentity != null ? aiIdentity.driverId() : new UUID(0L, 0L),
             CarLivery.fromIndex(car.getLivery()).displayName(),
             rider,
             car.getLiveryColors().bodySide(),

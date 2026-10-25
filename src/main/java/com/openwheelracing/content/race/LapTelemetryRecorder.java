@@ -21,6 +21,9 @@ public final class LapTelemetryRecorder {
     private long lastSampleTick = Long.MIN_VALUE;
     private double lastRouteDistance = Double.NaN;
     private double coveredDistance;
+    private double previousRawX = Double.NaN;
+    private double previousRawY;
+    private double previousRawZ;
     private int count;
     private int[] elapsed = new int[0];
     private int[] routeDistance = new int[0];
@@ -41,6 +44,32 @@ public final class LapTelemetryRecorder {
         this.routeLength = route.length();
         this.lapStartGameTime = lapStartGameTime;
         allocate(INITIAL_CAPACITY);
+    }
+
+    public void startUntracked(UUID driverId, String driverName, String dimensionId, double gameTime) {
+        reset();
+        this.driverId = driverId;
+        this.driverName = driverName == null ? "" : driverName;
+        this.dimensionId = dimensionId;
+        this.trackId = new UUID(0, 0);
+        this.routeId = new UUID(0, 0);
+        this.lapStartGameTime = gameTime;
+        allocate(INITIAL_CAPACITY);
+    }
+
+    /** Raw driving samples do not require a lap or a localized route position. */
+    public void sampleUntracked(long tick, double x, double y, double z, double speedKmh) {
+        if (!active() || lastSampleTick != Long.MIN_VALUE && tick - lastSampleTick < SAMPLE_INTERVAL_TICKS) return;
+        lastSampleTick = tick;
+        if (Double.isFinite(previousRawX)) {
+            coveredDistance += Math.sqrt((x - previousRawX) * (x - previousRawX)
+                + (y - previousRawY) * (y - previousRawY) + (z - previousRawZ) * (z - previousRawZ));
+        }
+        previousRawX = x;
+        previousRawY = y;
+        previousRawZ = z;
+        appendRawSample(tick, 0, com.openwheelracing.content.track.survey.SurveyRouteLocalizer.Status.UNTRACKED.ordinal(),
+            x, y, z, speedKmh, false);
     }
 
     public void sample(long serverTick, double gameTime, LapProfileCollector.Latest localized,
@@ -67,6 +96,12 @@ public final class LapTelemetryRecorder {
             if (delta > 0.0 && delta <= 80.0) coveredDistance += delta;
         }
         lastRouteDistance = distance;
+        appendRawSample(gameTime, distance, localized.status().ordinal(), position.x, position.y, position.z,
+            speedKmh, replaceIfTimeMovesBackward);
+    }
+
+    private void appendRawSample(double gameTime, double distance, int trackingStatus, double x, double y, double z,
+                                 double speedKmh, boolean replaceIfTimeMovesBackward) {
         int elapsedMillis = Math.max(0, (int) Math.round((gameTime - lapStartGameTime) * 50.0));
         int index = count;
         if (replaceIfTimeMovesBackward && count > 0 && elapsedMillis < elapsed[count - 1]) index = count - 1;
@@ -80,10 +115,10 @@ public final class LapTelemetryRecorder {
         routeDistance[index] = toCentimeters(distance);
         covered[index] = toCentimeters(coveredDistance);
         speed[index] = Math.max(0, Math.min(65_535, (int) Math.round(speedKmh / 0.036)));
-        worldX[index] = toCentimeters(position.x);
-        worldY[index] = toCentimeters(position.y);
-        worldZ[index] = toCentimeters(position.z);
-        status[index] = (byte) localized.status().ordinal();
+        worldX[index] = toCentimeters(x);
+        worldY[index] = toCentimeters(y);
+        worldZ[index] = toCentimeters(z);
+        status[index] = (byte) trackingStatus;
     }
 
     public Optional<Snapshot> finish(long lapId, int lapMillis) {
@@ -126,6 +161,8 @@ public final class LapTelemetryRecorder {
         lastSampleTick = Long.MIN_VALUE;
         lastRouteDistance = Double.NaN;
         coveredDistance = 0.0;
+        previousRawX = Double.NaN;
+        previousRawY = previousRawZ = 0.0;
         count = 0;
         elapsed = routeDistance = covered = speed = worldX = worldY = worldZ = new int[0];
         status = new byte[0];

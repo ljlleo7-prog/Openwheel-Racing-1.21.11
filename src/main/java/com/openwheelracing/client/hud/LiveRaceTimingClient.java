@@ -43,7 +43,8 @@ public final class LiveRaceTimingClient {
         }
         return hasWeekendSession()
             && (snapshot.sessionType().equals("RACE") || snapshot.sessionType().equals("SPRINT")
-                || snapshot.sessionType().equals("FORMATION_LAP"));
+                || snapshot.sessionType().equals("FORMATION_LAP") || snapshot.sessionType().equals("AWAITING_START")
+                || snapshot.sessionType().equals("RACE_COUNTDOWN"));
     }
 
     public static List<RaceTimingRow> rows() {

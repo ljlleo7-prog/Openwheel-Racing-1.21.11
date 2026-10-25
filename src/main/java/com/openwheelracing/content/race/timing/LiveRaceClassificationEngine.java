@@ -33,6 +33,7 @@ public final class LiveRaceClassificationEngine {
     private List<RaceParticipantKey> pendingOrder = List.of();
     private int pendingOrderTicks;
     private long revision;
+    private boolean gridStart;
     private double routeLengthMeters;
     private java.util.UUID trackId = new java.util.UUID(0L, 0L);
     private java.util.UUID routeId = new java.util.UUID(0L, 0L);
@@ -73,7 +74,7 @@ public final class LiveRaceClassificationEngine {
             && serverTick - entry.getValue().missingSinceTick > MISSING_RETIREMENT_TICKS);
         for (RaceTimingObservation observation : current.values()) {
             ParticipantState state = participants.computeIfAbsent(observation.participant(), key -> new ParticipantState(key));
-            state.observe(observation, routeLengthMeters, preciseMillis, referenceSpacingMeters);
+            state.observe(observation, routeLengthMeters, preciseMillis, referenceSpacingMeters, gridStart);
         }
 
         List<RaceParticipantKey> rawOrder = participants.values().stream()
@@ -98,6 +99,11 @@ public final class LiveRaceClassificationEngine {
         return snapshot(serverTick, current);
     }
 
+    /** Grid cars behind the line begin at negative progress; their first crossing completes zero laps. */
+    public void setGridStart(boolean gridStart) {
+        this.gridStart = gridStart;
+    }
+
     public void reset(double routeLengthMeters) {
         this.routeLengthMeters = routeLengthMeters;
         participants.clear();
@@ -115,10 +121,13 @@ public final class LiveRaceClassificationEngine {
     /** Raises a participant's lap count from independently validated lap records without changing route distance. */
     public boolean reconcileCompletedLaps(RaceParticipantKey participant, int completedLaps) {
         ParticipantState state = participants.get(participant);
-        if (state == null || !state.initialized || completedLaps <= state.completedLaps) {
+        if (state == null || !state.initialized) return false;
+        completedLaps = (int) Math.clamp((long) completedLaps + state.manualLapAdjustment, 0, Integer.MAX_VALUE);
+        if (completedLaps <= state.completedLaps) {
             return false;
         }
         state.completedLaps = completedLaps;
+        state.beforeRaceLine = false;
         state.absoluteProgressMeters = completedLaps * routeLengthMeters + state.routeDistanceMeters;
         state.previousAbsoluteProgressMeters = state.absoluteProgressMeters;
         state.latestReferenceIndex = (long) Math.floor(state.absoluteProgressMeters / referenceSpacingMeters);
@@ -126,6 +135,36 @@ public final class LiveRaceClassificationEngine {
         state.previousMillis = Long.MIN_VALUE;
         revision++;
         return true;
+    }
+
+    /** Applies an explicit director correction immediately, retaining it during record reconciliation. */
+    public boolean adjustCompletedLaps(RaceParticipantKey participant, int delta) {
+        ParticipantState state = participants.get(participant);
+        if (state == null || !state.initialized || (delta != -1 && delta != 1)) return false;
+        long target = (long) state.completedLaps + delta;
+        if (target < 0 || target > Integer.MAX_VALUE) return false;
+        state.completedLaps = (int) target;
+        state.manualLapAdjustment += delta;
+        state.absoluteProgressMeters = (state.completedLaps - (state.beforeRaceLine ? 1 : 0)) * routeLengthMeters + state.routeDistanceMeters;
+        state.previousAbsoluteProgressMeters = state.absoluteProgressMeters;
+        state.latestReferenceIndex = (long) Math.floor(state.absoluteProgressMeters / referenceSpacingMeters);
+        state.referenceTimes.clear();
+        state.previousMillis = Long.MIN_VALUE;
+        stableOrder = participants.values().stream().sorted(rawComparator()).map(value -> value.key).toList();
+        pendingOrder = List.of();
+        pendingOrderTicks = 0;
+        revision++;
+        return true;
+    }
+
+    public boolean beforeRaceLine(RaceParticipantKey participant) {
+        ParticipantState state = participants.get(participant);
+        return state != null && state.beforeRaceLine;
+    }
+
+    public int manualLapAdjustment(RaceParticipantKey participant) {
+        ParticipantState state = participants.get(participant);
+        return state == null ? 0 : state.manualLapAdjustment;
     }
 
     public void restore(double routeLengthMeters, List<RestoredProgress> restored) {
@@ -138,8 +177,10 @@ public final class LiveRaceClassificationEngine {
             ParticipantState state = new ParticipantState(progress.participant());
             state.displayName = progress.displayName();
             state.completedLaps = Math.max(0, progress.completedLaps());
+            state.manualLapAdjustment = progress.manualLapAdjustment();
             state.routeDistanceMeters = ParticipantState.wrap(progress.routeDistanceMeters(), routeLengthMeters);
-            state.absoluteProgressMeters = state.completedLaps * routeLengthMeters + state.routeDistanceMeters;
+            state.beforeRaceLine = progress.beforeRaceLine();
+            state.absoluteProgressMeters = (state.completedLaps - (state.beforeRaceLine ? 1 : 0)) * routeLengthMeters + state.routeDistanceMeters;
             state.previousAbsoluteProgressMeters = state.absoluteProgressMeters;
             state.latestReferenceIndex = (long) Math.floor(state.absoluteProgressMeters / referenceSpacingMeters);
             state.confidence = RaceProgressConfidence.STALE;
@@ -152,7 +193,15 @@ public final class LiveRaceClassificationEngine {
     }
 
     public record RestoredProgress(RaceParticipantKey participant, String displayName, int completedLaps,
-                                   double routeDistanceMeters, int stablePosition) {
+                                   double routeDistanceMeters, int stablePosition, boolean beforeRaceLine, int manualLapAdjustment) {
+        public RestoredProgress(RaceParticipantKey participant, String displayName, int completedLaps,
+                                double routeDistanceMeters, int stablePosition, boolean beforeRaceLine) {
+            this(participant, displayName, completedLaps, routeDistanceMeters, stablePosition, beforeRaceLine, 0);
+        }
+        public RestoredProgress(RaceParticipantKey participant, String displayName, int completedLaps,
+                                double routeDistanceMeters, int stablePosition) {
+            this(participant, displayName, completedLaps, routeDistanceMeters, stablePosition, false);
+        }
     }
 
     public void ensureRevisionAfter(long previousRevision) {
@@ -319,6 +368,8 @@ public final class LiveRaceClassificationEngine {
         private int entityId;
         private int initialOrderHint = Integer.MAX_VALUE;
         private int completedLaps;
+        private int manualLapAdjustment;
+        private boolean beforeRaceLine;
         private double routeDistanceMeters;
         private double absoluteProgressMeters;
         private double previousAbsoluteProgressMeters;
@@ -337,7 +388,7 @@ public final class LiveRaceClassificationEngine {
             this.key = key;
         }
 
-        private void observe(RaceTimingObservation observation, double routeLength, long fallbackMillis, double referenceSpacing) {
+        private void observe(RaceTimingObservation observation, double routeLength, long fallbackMillis, double referenceSpacing, boolean gridStart) {
             missingSinceTick = -1L;
             displayName = observation.displayName();
             entityId = observation.entityId();
@@ -347,7 +398,7 @@ public final class LiveRaceClassificationEngine {
             double distance = wrap(observation.routeDistanceMeters(), routeLength);
             boolean plausible = true;
             if (initialized && nextConfidence.canInitiatePositionChange()) {
-                double candidateAbsolute = completedLaps * routeLength + distance;
+                double candidateAbsolute = (completedLaps - (beforeRaceLine ? 1 : 0)) * routeLength + distance;
                 double forward = candidateAbsolute - absoluteProgressMeters;
                 if (forward < -routeLength * 0.5) {
                     candidateAbsolute += routeLength;
@@ -366,20 +417,25 @@ public final class LiveRaceClassificationEngine {
                     nextConfidence = RaceProgressConfidence.DEGRADED;
                 } else if (candidateAbsolute >= absoluteProgressMeters && routeDistanceMeters > routeLength * (1.0 - SEAM_ZONE)
                     && distance <= routeLength * SEAM_ZONE && forward > 0.0) {
-                    completedLaps++;
+                    if (beforeRaceLine) {
+                        beforeRaceLine = false;
+                    } else {
+                        completedLaps++;
+                    }
                 }
             }
             if (nextConfidence.canInitiatePositionChange() && plausible) {
                 if (!initialized) {
                     initialized = true;
                     routeDistanceMeters = distance;
-                    absoluteProgressMeters = distance;
-                    previousAbsoluteProgressMeters = distance;
+                    beforeRaceLine = gridStart && distance > routeLength * 0.5;
+                    absoluteProgressMeters = distance - (beforeRaceLine ? routeLength : 0.0);
+                    previousAbsoluteProgressMeters = absoluteProgressMeters;
                     previousMillis = now;
                     lastAcceptedMillis = now;
                     latestReferenceIndex = (long) Math.floor(absoluteProgressMeters / referenceSpacing);
                 } else {
-                    double candidateAbsolute = completedLaps * routeLength + distance;
+                    double candidateAbsolute = (completedLaps - (beforeRaceLine ? 1 : 0)) * routeLength + distance;
                     if (candidateAbsolute >= absoluteProgressMeters) {
                         previousAbsoluteProgressMeters = absoluteProgressMeters;
                         absoluteProgressMeters = candidateAbsolute;

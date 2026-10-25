@@ -3,6 +3,8 @@ package com.openwheelracing.content.race.timing;
 import com.openwheelracing.content.ai.BasicAiDriverIdentity;
 import com.openwheelracing.content.entity.OpenwheelCarEntity;
 import com.openwheelracing.content.race.OWRLapRecords;
+import com.openwheelracing.content.race.weekend.GrandPrixWeekendService;
+import com.openwheelracing.content.track.survey.SurveyRouteGeometry;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRoute;
@@ -57,11 +59,29 @@ public final class LiveRaceTimingService {
             surveys.revision(), route.get().toModel(), lapLimit, eligibleParticipants, remainingRaceTicks);
         OWRLapRecords.get(level).getValidSessionLaps(OWRLapRecords.get(level).getActiveSessionId())
             .forEach(lap -> runtime.recordedLapBaseline.merge(lap.driverId(), 1, Integer::sum));
+        configureGridTiming(level, runtime);
+        RuntimeState previous = RUNTIMES.get(level);
+        if (previous != null) runtime.engine.ensureRevisionAfter(previous.engine.revision());
         RUNTIMES.put(level, runtime);
         RECOVERY_CHECKED.add(level);
         runtime.tick(level);
         runtime.forceBroadcast = true;
         return new StartResult(true, "Live timing started for " + activeTrack.get().name());
+    }
+
+    private static void configureGridTiming(ServerLevel level, RuntimeState runtime) {
+        if (!GrandPrixWeekendService.isGridSession(level, runtime.sessionId)) return;
+        runtime.engine.setGridStart(true);
+        TrackDefinitionsData.get(level).get(runtime.trackId).flatMap(TrackDefinition::startFinish).ifPresent(line -> {
+            SurveyRouteModel.Point midpoint = new SurveyRouteModel.Point(
+                (line.left().x() + line.right().x()) * 0.5,
+                (line.left().y() + line.right().y()) * 0.5,
+                (line.left().z() + line.right().z()) * 0.5);
+            SurveyRouteGeometry.candidates(runtime.route, midpoint, line.headingRadians(), -1, runtime.route.nodes().size())
+                .stream().min(java.util.Comparator.comparingDouble(candidate -> candidate.horizontalDistance() * candidate.horizontalDistance()
+                    + candidate.verticalDelta() * candidate.verticalDelta()))
+                .ifPresent(candidate -> runtime.startFinishDistance = candidate.distanceAlongRoute());
+        });
     }
 
     public static boolean stop(ServerLevel level, String reason) {
@@ -96,6 +116,8 @@ public final class LiveRaceTimingService {
         if (runtime == null || runtime.sessionId != sessionId) {
             return;
         }
+        if (!runtime.weekendName.equals(weekendName == null ? "" : weekendName)
+            || !runtime.sessionType.equals(sessionType == null ? "" : sessionType)) runtime.forceBroadcast = true;
         runtime.eligibleParticipants = Set.copyOf(eligibleParticipants);
         runtime.remainingRaceTicks = Math.max(-1L, remainingRaceTicks);
         runtime.weekendName = weekendName == null ? "" : weekendName;
@@ -124,6 +146,13 @@ public final class LiveRaceTimingService {
         runtime.lockParticipantCars(level);
     }
 
+    public static boolean isParticipantCarEligible(ServerLevel level, long sessionId, UUID driverId, UUID carId) {
+        RuntimeState runtime = RUNTIMES.get(level);
+        return runtime != null && runtime.sessionId == sessionId && runtime.active
+            && !runtime.retiredParticipants.contains(driverId)
+            && (!runtime.participantCarsLocked || carId.equals(runtime.lockedParticipantCars.get(driverId)));
+    }
+
     public static Set<UUID> retiredParticipants(ServerLevel level, long sessionId) {
         RuntimeState runtime = RUNTIMES.get(level);
         return runtime == null || runtime.sessionId != sessionId ? Set.of() : Set.copyOf(runtime.retiredParticipants);
@@ -139,6 +168,24 @@ public final class LiveRaceTimingService {
             runtime.engineSnapshot = runtime.engine.currentSnapshot(level.getGameTime());
             runtime.forceBroadcast = true;
         }
+    }
+
+    public static int adjustCompletedLaps(ServerLevel level, OpenwheelCarEntity car, int delta) {
+        RuntimeState runtime = RUNTIMES.get(level);
+        if (runtime == null || runtime.sessionId != OWRLapRecords.get(level).getActiveSessionId()
+            || !car.participatesInRaceTiming() || (delta != -1 && delta != 1)) return -1;
+        Entity passenger = car.getControllingPassenger();
+        RaceParticipantKey participant = passenger instanceof ServerPlayer player
+            ? new RaceParticipantKey(player.getUUID(), RaceParticipantKind.PLAYER)
+            : car.getBasicAiIdentity().map(ai -> new RaceParticipantKey(ai.driverId(), RaceParticipantKind.AI)).orElse(null);
+        if (participant == null || !runtime.eligibleParticipants.isEmpty() && !runtime.eligibleParticipants.contains(participant.id())) return -1;
+        RaceTimingRow current = runtime.engine.currentSnapshot(level.getGameTime()).rows().stream()
+            .filter(row -> row.participant().equals(participant) && row.entityId() == car.getId()).findFirst().orElse(null);
+        if (current == null || !runtime.engine.adjustCompletedLaps(participant, delta)) return -1;
+        runtime.engineSnapshot = runtime.engine.currentSnapshot(level.getGameTime());
+        runtime.broadcast(level);
+        return runtime.engineSnapshot.rows().stream().filter(row -> row.participant().equals(participant))
+            .mapToInt(RaceTimingRow::completedLaps).findFirst().orElse(-1);
     }
 
     public static void sendCurrent(ServerPlayer player) {
@@ -188,18 +235,19 @@ public final class LiveRaceTimingService {
         }
         RuntimeState runtime = new RuntimeState(checkpoint.sessionId(), checkpoint.sessionName(), checkpoint.trackId(), checkpoint.routeId(),
             surveys.revision(), route.get().toModel(), checkpoint.lapLimit(), Set.copyOf(checkpoint.eligibleParticipants()), -1L);
+        configureGridTiming(level, runtime);
         runtime.active = false;
         runtime.suspensionReason = "SERVER_RECOVERY";
         List<LiveRaceClassificationEngine.RestoredProgress> restored = checkpoint.participants().stream().map(saved ->
             new LiveRaceClassificationEngine.RestoredProgress(
                 new RaceParticipantKey(saved.participantId(), enumKind(saved.participantKind())), saved.displayName(), saved.completedLaps(),
-                saved.routeDistanceMeters(), saved.stablePosition())).toList();
+                saved.routeDistanceMeters(), saved.stablePosition(), saved.beforeRaceLine(), saved.manualLapAdjustment())).toList();
         runtime.engine.restore(route.get().length(), restored);
         Map<UUID, Integer> recordedSessionLaps = new HashMap<>();
         OWRLapRecords.get(level).getValidSessionLaps(OWRLapRecords.get(level).getActiveSessionId())
             .forEach(lap -> recordedSessionLaps.merge(lap.driverId(), 1, Integer::sum));
         restored.forEach(progress -> runtime.recordedLapBaseline.put(progress.participant().id(),
-            Math.max(0, recordedSessionLaps.getOrDefault(progress.participant().id(), 0) - progress.completedLaps())));
+            Math.max(0, recordedSessionLaps.getOrDefault(progress.participant().id(), 0) - (progress.completedLaps() - progress.manualLapAdjustment()))));
         runtime.engine.ensureRevisionAfter(checkpoint.snapshotRevision());
         runtime.engineSnapshot = runtime.engine.currentSnapshot(level.getGameTime());
         runtime.forceBroadcast = true;
@@ -248,6 +296,7 @@ public final class LiveRaceTimingService {
         private final Set<UUID> retiredParticipants = new java.util.HashSet<>();
         private final Map<UUID, Integer> recordedLapBaseline = new HashMap<>();
         private boolean participantCarsLocked;
+        private double startFinishDistance;
 
         private RuntimeState(long sessionId, String sessionName, UUID trackId, UUID routeId, int surveyRevision, SurveyRouteModel route) {
             this(sessionId, sessionName, trackId, routeId, surveyRevision, route, 0);
@@ -337,7 +386,7 @@ public final class LiveRaceTimingService {
                 if (result.best().isPresent() && (result.status() == SurveyRouteLocalizer.Status.TRACKED || result.status() == SurveyRouteLocalizer.Status.LOW_CONFIDENCE)) {
                     state.lastRouteDistance = distance;
                 }
-                observations.add(new RaceTimingObservation(participant.key(), participant.name(), car.getId(), distance, car.getSpeedKmh() / 3.6,
+                observations.add(new RaceTimingObservation(participant.key(), participant.name(), car.getId(), distance - startFinishDistance, car.getSpeedKmh() / 3.6,
                     confidence(result.status()), level.getGameTime(), level.getGameTime() * 50L, participant.initialOrderHint()));
             }
             return observations;
@@ -389,7 +438,7 @@ public final class LiveRaceTimingService {
         private void saveCheckpoint(ServerLevel level, LiveRaceTimingSnapshot snapshot) {
             List<LiveRaceTimingData.SavedParticipant> saved = snapshot.rows().stream().map(row ->
                 new LiveRaceTimingData.SavedParticipant(row.participant().id(), row.participant().kind().ordinal(), row.displayName(),
-                    row.completedLaps(), row.routeDistanceMeters(), row.position())).toList();
+                    row.completedLaps(), row.routeDistanceMeters(), row.position(), engine.beforeRaceLine(row.participant()), engine.manualLapAdjustment(row.participant()))).toList();
             LiveRaceTimingData.get(level).update(new LiveRaceTimingData.Checkpoint(true, snapshot.active(), snapshot.suspensionReason(),
                 sessionId, sessionName, trackId, routeId, surveyRevision, lapLimit, List.copyOf(eligibleParticipants), snapshot.revision(), saved));
         }

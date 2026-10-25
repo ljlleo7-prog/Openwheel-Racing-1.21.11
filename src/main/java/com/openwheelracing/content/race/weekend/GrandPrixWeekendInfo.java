@@ -8,7 +8,7 @@ import java.util.List;
 /** Bounded read model shared by the Race Director weekend sub-screen. */
 public record GrandPrixWeekendInfo(boolean present, String eventName, String eventState, int entryCount,
                                    int activeSessionIndex, String activeSessionName, String activeSessionType,
-                                   String activeSessionFormat, String activeSessionState, String suspensionReason,
+                                   String activeSessionFormat, String activeSessionState, String suspensionReason, String suspendedFrom,
                                    long elapsedTicks, long remainingTicks, long countdownRemainingTicks,
                                    List<SessionInfo> sessions, List<EntryInfo> entries) {
     private static final int MAX_SESSIONS = 32;
@@ -22,6 +22,7 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
         activeSessionFormat = clean(activeSessionFormat);
         activeSessionState = clean(activeSessionState);
         suspensionReason = clean(suspensionReason);
+        suspendedFrom = clean(suspendedFrom);
         entryCount = Math.max(0, entryCount);
         activeSessionIndex = Math.max(-1, activeSessionIndex);
         elapsedTicks = Math.max(0L, elapsedTicks);
@@ -32,7 +33,7 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
     }
 
     public static GrandPrixWeekendInfo empty() {
-        return new GrandPrixWeekendInfo(false, "", "", 0, -1, "", "", "", "", "", 0L, 0L, 0L, List.of(), List.of());
+        return new GrandPrixWeekendInfo(false, "", "", 0, -1, "", "", "", "", "", "", 0L, 0L, 0L, List.of(), List.of());
     }
 
     public static GrandPrixWeekendInfo from(GrandPrixWeekend weekend, long serverTick) {
@@ -48,6 +49,7 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
             weekend.activeSessionIndex(), active == null ? "" : active.config().name(),
             active == null ? "" : active.config().type().name(), active == null ? "" : active.config().format().name(),
             active == null ? "" : active.state().name(), active == null ? "" : active.suspensionReason().name(),
+            active == null ? "" : active.suspendedFrom().name(),
             active == null ? 0L : active.elapsedTicks(), active == null ? 0L : active.remainingTicks(),
             active == null ? 0L : active.countdownRemainingTicks(), sessions, entries);
     }
@@ -63,6 +65,7 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
         buffer.writeUtf(activeSessionFormat, 32);
         buffer.writeUtf(activeSessionState, 24);
         buffer.writeUtf(suspensionReason, 24);
+        buffer.writeUtf(suspendedFrom, 24);
         buffer.writeLong(elapsedTicks);
         buffer.writeLong(remainingTicks);
         buffer.writeLong(countdownRemainingTicks);
@@ -83,6 +86,7 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
         String activeFormat = buffer.readUtf(32);
         String activeState = buffer.readUtf(24);
         String reason = buffer.readUtf(24);
+        String suspendedFrom = buffer.readUtf(24);
         long elapsed = buffer.readLong();
         long remaining = buffer.readLong();
         long countdown = buffer.readLong();
@@ -103,7 +107,7 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
             entries.add(EntryInfo.decode(buffer));
         }
         return new GrandPrixWeekendInfo(present, eventName, eventState, entryCount, activeIndex, activeName,
-            activeType, activeFormat, activeState, reason, elapsed, remaining, countdown, sessions, entries);
+            activeType, activeFormat, activeState, reason, suspendedFrom, elapsed, remaining, countdown, sessions, entries);
     }
 
     public boolean can(String action) {
@@ -117,12 +121,15 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
         return switch (action) {
             case "advance" -> eventState.equals("OPEN") && activeSessionIndex < sessions.size() - 1
                 && (activeSessionIndex < 0 || state != null && state.isTerminal());
-            case "stage" -> state == RaceSessionState.OPEN && (activeSessionType.equals("SPRINT") || activeSessionType.equals("RACE"));
-            case "countdown" -> state == RaceSessionState.STAGING;
-            case "start" -> state == RaceSessionState.OPEN && (activeSessionType.equals("PRACTICE") || activeSessionType.equals("QUALIFYING"));
+            case "stage" -> (state == RaceSessionState.OPEN || state == RaceSessionState.AWAITING_START
+                || state == RaceSessionState.SUSPENDED && (suspendedFrom.equals("AWAITING_START")
+                    || suspendedFrom.equals("COUNTDOWN") || suspendedFrom.equals("FORMATION_COUNTDOWN"))) && (activeSessionType.equals("SPRINT") || activeSessionType.equals("RACE"));
+            case "countdown" -> state == RaceSessionState.STAGING || state == RaceSessionState.AWAITING_START || state == RaceSessionState.FORMATION_LAP;
+            case "start" -> state == RaceSessionState.COUNTDOWN || state == RaceSessionState.OPEN
+                && (activeSessionType.equals("PRACTICE") || activeSessionType.equals("QUALIFYING"));
             case "suspend" -> state != null && state.isActive();
             case "resume" -> state == RaceSessionState.SUSPENDED;
-            case "finish" -> state == RaceSessionState.RUNNING || state == RaceSessionState.SUSPENDED;
+            case "finish" -> state == RaceSessionState.RUNNING || state == RaceSessionState.SUSPENDED && suspendedFrom.equals("RUNNING");
             case "provisional" -> state == RaceSessionState.FINISHING;
             case "official" -> state == RaceSessionState.PROVISIONAL;
             case "complete" -> eventState.equals("OPEN") && activeSessionIndex == sessions.size() - 1 && state == RaceSessionState.OFFICIAL;

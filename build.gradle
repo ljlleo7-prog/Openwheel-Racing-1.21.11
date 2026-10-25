@@ -7,7 +7,7 @@ plugins {
     id 'net.neoforged.moddev' version '2.0.142'
 }
 
-version = '1.20.0'
+version = '1.20.1'
 group = 'com.openwheelracing'
 
 // Mojang ships Java 21 to end users in 1.20.5+, so every Gradle Java task should use Java 21.
@@ -23,6 +23,11 @@ java {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 sourceSets {
+    lapTimingTest {
+        java.srcDir 'src/lapTimingTest/java'
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath
+    }
     liveryPrototype {
         java.srcDir 'src/liveryPrototype/java'
     }
@@ -34,6 +39,8 @@ sourceSets {
 }
 
 configurations {
+    lapTimingTestImplementation.extendsFrom testImplementation
+    lapTimingTestRuntimeOnly.extendsFrom testRuntimeOnly
     liveryPrototypeTestImplementation.extendsFrom testImplementation
     liveryPrototypeTestRuntimeOnly.extendsFrom testRuntimeOnly
 }
@@ -97,7 +104,15 @@ tasks.register('liveryPrototypeTest', Test) {
     useJUnitPlatform()
 }
 
-check.dependsOn liveryPrototypeTest
+tasks.register('lapTimingTest', Test) {
+    group = 'verification'
+    description = 'Tests lap crossing geometry, millisecond timing, and records with Minecraft runtime dependencies.'
+    testClassesDirs = sourceSets.lapTimingTest.output.classesDirs
+    classpath = sourceSets.lapTimingTest.runtimeClasspath
+    useJUnitPlatform()
+}
+
+check.dependsOn liveryPrototypeTest, lapTimingTest
 
 tasks.register('exportPrototypeCarLiveryMask', JavaExec) {
     group = 'openwheelracing'

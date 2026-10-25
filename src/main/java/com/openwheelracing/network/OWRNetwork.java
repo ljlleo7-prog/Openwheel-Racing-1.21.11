@@ -122,6 +122,9 @@ public final class OWRNetwork {
         registrar.playToServer(TeamTerminalAiPushMessage.TYPE, codec(TeamTerminalAiPushMessage::encode, TeamTerminalAiPushMessage::decode), TeamTerminalAiPushMessage::handle);
         registrar.playToServer(MonitorTelemetrySubscribeMessage.TYPE, codec(MonitorTelemetrySubscribeMessage::encode, MonitorTelemetrySubscribeMessage::decode), MonitorTelemetrySubscribeMessage::handle);
         registrar.playToServer(RaceMonitorAutoDetectMapMessage.TYPE, codec(RaceMonitorAutoDetectMapMessage::encode, RaceMonitorAutoDetectMapMessage::decode), RaceMonitorAutoDetectMapMessage::handle);
+        registrar.playToServer(LapRecordsRequest.TYPE, codec(LapRecordsRequest::encode, LapRecordsRequest::decode), LapRecordsRequest::handle);
+        registrar.playToClient(LapRecordsResponse.TYPE, codec(LapRecordsResponse::encode, LapRecordsResponse::decode), LapRecordsResponse::handle);
+        registrar.playToServer(RaceDirectorAdjustLapMessage.TYPE, codec(RaceDirectorAdjustLapMessage::encode, RaceDirectorAdjustLapMessage::decode), RaceDirectorAdjustLapMessage::handle);
         registrar.playToServer(RaceDirectorInvalidateLapMessage.TYPE, codec(RaceDirectorInvalidateLapMessage::encode, RaceDirectorInvalidateLapMessage::decode), RaceDirectorInvalidateLapMessage::handle);
         registrar.playToServer(RaceDirectorSetBoPMessage.TYPE, codec(RaceDirectorSetBoPMessage::encode, RaceDirectorSetBoPMessage::decode), RaceDirectorSetBoPMessage::handle);
         registrar.playToServer(RaceDirectorSetBoPLapsMessage.TYPE, codec(RaceDirectorSetBoPLapsMessage::encode, RaceDirectorSetBoPLapsMessage::decode), RaceDirectorSetBoPLapsMessage::handle);
@@ -1686,6 +1689,19 @@ public final class OWRNetwork {
                 OWRRaceControlState state = OWRRaceControlState.get(player.level());
                 switch (message.action) {
                     case START_PHASE -> {
+                        if (player.level() instanceof ServerLevel gpLevel) {
+                            var gp = com.openwheelracing.content.race.weekend.GrandPrixWeekendService.gridWeekend(gpLevel);
+                            if (gp.isPresent()) {
+                                String action = message.first == 1 ? "countdown" : message.first == 6 ? "start" : "";
+                                if (!action.isEmpty()) {
+                                    gpLevel.getServer().getCommands().performPrefixedCommand(
+                                        player.createCommandSourceStack().withPermission(LevelBasedPermissionSet.MODERATOR),
+                                        "owr gp control " + StringArgumentType.escapeIfRequired(gp.get().name()) + " " + action);
+                                }
+                                sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
+                                return;
+                            }
+                        }
                         state.setStartPhase(message.first);
                         if (message.first == 1 && player.level() instanceof ServerLevel level) {
                             com.openwheelracing.content.race.RaceAutoFlagService.requestStart(level);
@@ -1746,7 +1762,7 @@ public final class OWRNetwork {
         }
     }
 
-    public record RaceDirectorStartSessionMessage(String sessionName) implements CustomPacketPayload {
+    public record RaceDirectorStartSessionMessage(String sessionName, int lapLimit) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<RaceDirectorStartSessionMessage> TYPE = payloadType("race_director_start_session_message");
 
         @Override
@@ -1755,11 +1771,12 @@ public final class OWRNetwork {
         }
 
         private static void encode(RaceDirectorStartSessionMessage message, FriendlyByteBuf buffer) {
-            buffer.writeUtf(message.sessionName);
+            buffer.writeUtf(message.sessionName, 80);
+            buffer.writeVarInt(message.lapLimit);
         }
 
         private static RaceDirectorStartSessionMessage decode(FriendlyByteBuf buffer) {
-            return new RaceDirectorStartSessionMessage(buffer.readUtf(80));
+            return new RaceDirectorStartSessionMessage(buffer.readUtf(80), buffer.readVarInt());
         }
 
         private static void handle(RaceDirectorStartSessionMessage message, IPayloadContext context) {
@@ -1773,7 +1790,9 @@ public final class OWRNetwork {
                 OWRLapRecords records = OWRLapRecords.get(player.level());
                 records.startNewSession(message.sessionName);
                 if (player.level() instanceof ServerLevel serverLevel) {
-                    int lapLimit = OWRRaceControlState.get(serverLevel).getRaceLapLimit();
+                    com.openwheelracing.content.race.weekend.GrandPrixWeekendService.resetCarTiming(serverLevel);
+                    int lapLimit = Math.clamp(message.lapLimit, 0, OWRRaceControlState.MAX_RACE_LAP_LIMIT);
+                    OWRRaceControlState.get(serverLevel).setRaceLapLimit(lapLimit);
                     LiveRaceTimingService.start(serverLevel, records.getActiveSessionId(), records.getActiveSessionName(), lapLimit);
                 }
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));
@@ -1860,7 +1879,12 @@ public final class OWRNetwork {
                 if (player == null || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()) {
                     return;
                 }
-                String command = setupCommand(message.operation.toLowerCase(java.util.Locale.ROOT), message.arguments);
+                String operation = message.operation.toLowerCase(java.util.Locale.ROOT);
+                if ((operation.equals("register") || operation.equals("unregister")) && message.arguments.size() >= 2
+                    && player.level().getServer().getPlayerList().getPlayerByName(message.arguments.get(1)) == null) {
+                    operation += "_ai";
+                }
+                String command = setupCommand(operation, message.arguments);
                 if (command == null) {
                     return;
                 }
@@ -1874,8 +1898,8 @@ public final class OWRNetwork {
             try {
                 int expectedArguments = switch (operation) {
                     case "create", "delete", "open" -> 1;
-                    case "remove", "unregister" -> 2;
-                    case "move", "register" -> 3;
+                    case "remove", "unregister", "unregister_ai" -> 2;
+                    case "move", "register", "register_ai" -> 3;
                     case "add" -> 10;
                     default -> -1;
                 };
@@ -1887,9 +1911,9 @@ public final class OWRNetwork {
                     case "remove" -> "owr gp remove " + quote(args.get(0)) + " " + integer(args.get(1));
                     case "move" -> "owr gp move " + quote(args.get(0)) + " "
                         + integer(args.get(1)) + " " + integer(args.get(2));
-                    case "register" -> "owr gp register " + quote(args.get(0)) + " "
+                    case "register", "register_ai" -> "owr gp " + operation + " " + quote(args.get(0)) + " "
                         + quote(args.get(1)) + " " + quote(args.get(2));
-                    case "unregister" -> "owr gp unregister " + quote(args.get(0)) + " " + quote(args.get(1));
+                    case "unregister", "unregister_ai" -> "owr gp " + operation + " " + quote(args.get(0)) + " " + quote(args.get(1));
                     case "add" -> "owr gp add " + quote(args.get(0)) + " " + word(args.get(1))
                         + " " + word(args.get(2)) + " " + quote(args.get(3)) + " " + integer(args.get(4))
                         + " " + integer(args.get(5)) + " " + integer(args.get(6)) + " " + integer(args.get(7))
@@ -2181,7 +2205,106 @@ public final class OWRNetwork {
         }
     }
 
-    public record RaceDirectorInvalidateLapMessage(long lapId) implements CustomPacketPayload {
+    public record LapRecordsRequest(int requestId, String player, String session, String min, String max,
+                                    String after, String before, int sort, boolean descending, int page, int pageSize,
+                                    long actionLapId, int action) implements CustomPacketPayload {
+        public static final Type<LapRecordsRequest> TYPE = payloadType("lap_records_request");
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(LapRecordsRequest m, FriendlyByteBuf b) {
+            b.writeInt(m.requestId); b.writeUtf(m.player, 128); b.writeUtf(m.session, 32);
+            b.writeUtf(m.min, 32); b.writeUtf(m.max, 32); b.writeUtf(m.after, 64); b.writeUtf(m.before, 64);
+            b.writeInt(m.sort); b.writeBoolean(m.descending); b.writeInt(m.page); b.writeInt(m.pageSize);
+            b.writeLong(m.actionLapId); b.writeInt(m.action);
+        }
+        private static LapRecordsRequest decode(FriendlyByteBuf b) {
+            return new LapRecordsRequest(b.readInt(), b.readUtf(128), b.readUtf(32), b.readUtf(32), b.readUtf(32),
+                b.readUtf(64), b.readUtf(64), b.readInt(), b.readBoolean(), b.readInt(), b.readInt(), b.readLong(), b.readInt());
+        }
+        private static void handle(LapRecordsRequest m, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                if (!(context.player() instanceof ServerPlayer player) || !(player.containerMenu instanceof RaceDirectorMenu menu)) return;
+                OWRLapRecords records = OWRLapRecords.get(player.level());
+                try {
+                    var query = new com.openwheelracing.content.race.LapRecordQuery(m.player, m.session, m.min, m.max,
+                        m.after, m.before, m.sort, m.descending, m.page, m.pageSize);
+                    query.apply(records.allLaps().stream().map(RaceDirectorLapRow::fromRecord).toList()); // Validate filters before applying a row action.
+                    if (m.action != 0 && menu.allowsRaceControl() && player.level() instanceof ServerLevel level) {
+                        boolean changed = switch (m.action) {
+                            case 1 -> records.invalidateLap(m.actionLapId, player.getUUID(), "race director");
+                            case 2 -> records.revalidateLap(m.actionLapId);
+                            case 3 -> records.discardLap(m.actionLapId);
+                            default -> false;
+                        };
+                        if (changed) {
+                            OWRLapProfiles.get(level).removeByLapRecord(m.actionLapId);
+                            broadcastRankingBoard(level.getServer(), level);
+                            sendRaceDirectorSnapshot(player, menu.createSnapshot(level));
+                        }
+                    }
+                    var result = query.apply(records.allLaps().stream().map(RaceDirectorLapRow::fromRecord).toList());
+                    PacketDistributor.sendToPlayer(player, new LapRecordsResponse(m.requestId, result.rows(), result.total(), result.page(), "", menu.allowsRaceControl()));
+                } catch (IllegalArgumentException | java.time.DateTimeException error) {
+                    PacketDistributor.sendToPlayer(player, new LapRecordsResponse(m.requestId, List.of(), 0, 0,
+                        "Check filters: seconds, numeric session ID, UTC date YYYY-MM-DD or ISO timestamp", menu.allowsRaceControl()));
+                }
+            });
+        }
+    }
+
+    public record LapRecordsResponse(int requestId, List<RaceDirectorLapRow> rows, int total, int page, String error,
+                                     boolean canManage) implements CustomPacketPayload {
+        public static final Type<LapRecordsResponse> TYPE = payloadType("lap_records_response");
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(LapRecordsResponse m, FriendlyByteBuf b) {
+            b.writeInt(m.requestId); b.writeInt(m.rows.size());
+            for (var row : m.rows) RaceDirectorLapRow.encode(row, b);
+            b.writeInt(m.total); b.writeInt(m.page); b.writeUtf(m.error); b.writeBoolean(m.canManage);
+        }
+        private static LapRecordsResponse decode(FriendlyByteBuf b) {
+            int request = b.readInt();
+            int size = b.readInt();
+            if (size < 0 || size > 24) throw new IllegalArgumentException("Invalid lap page size");
+            List<RaceDirectorLapRow> rows = new java.util.ArrayList<>();
+            for (int i = 0; i < size; i++) rows.add(RaceDirectorLapRow.decode(b));
+            return new LapRecordsResponse(request, rows, b.readInt(), b.readInt(), b.readUtf(), b.readBoolean());
+        }
+        private static void handle(LapRecordsResponse m, IPayloadContext context) {
+            context.enqueueWork(() -> com.openwheelracing.client.screen.LapRecordsScreen.receive(m));
+        }
+    }
+
+    public record RaceDirectorAdjustLapMessage(int entityId, long sessionId, int delta) implements CustomPacketPayload {
+        public static final Type<RaceDirectorAdjustLapMessage> TYPE = payloadType("race_director_adjust_lap");
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+        private static void encode(RaceDirectorAdjustLapMessage message, FriendlyByteBuf buffer) {
+            buffer.writeInt(message.entityId); buffer.writeLong(message.sessionId); buffer.writeInt(message.delta);
+        }
+        private static RaceDirectorAdjustLapMessage decode(FriendlyByteBuf buffer) {
+            return new RaceDirectorAdjustLapMessage(buffer.readInt(), buffer.readLong(), buffer.readInt());
+        }
+        private static void handle(RaceDirectorAdjustLapMessage message, IPayloadContext context) {
+            context.enqueueWork(() -> {
+                if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel level)
+                    || !(player.containerMenu instanceof RaceDirectorMenu menu) || !menu.allowsRaceControl()
+                    || (message.delta != -1 && message.delta != 1)) return;
+                int laps = -1;
+                String name = "";
+                if (message.sessionId == OWRLapRecords.get(level).getActiveSessionId()
+                    && level.getEntity(message.entityId) instanceof OpenwheelCarEntity car) {
+                    laps = com.openwheelracing.content.race.timing.LiveRaceTimingService.adjustCompletedLaps(level, car, message.delta);
+                    name = TeamCarRow.fromCar(car).riderName();
+                }
+                player.sendSystemMessage(laps < 0
+                    ? Component.translatable("message.openwheelracing.race_director.lap_adjust_failed")
+                    : Component.translatable("message.openwheelracing.race_director.lap_adjusted", name, message.delta > 0 ? "+1" : "-1", laps));
+                if (laps >= 0) com.mojang.logging.LogUtils.getLogger().info("Race Director {} adjusted session {} car {} by {} lap; total {}",
+                    player.getUUID(), message.sessionId, message.entityId, message.delta, laps);
+                sendRaceDirectorSnapshot(player, menu.createSnapshot(level));
+            });
+        }
+    }
+
+    public record RaceDirectorInvalidateLapMessage(long lapId, boolean discard) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<RaceDirectorInvalidateLapMessage> TYPE = payloadType("race_director_invalidate_lap_message");
 
         @Override
@@ -2189,12 +2312,15 @@ public final class OWRNetwork {
             return TYPE;
         }
 
+        public RaceDirectorInvalidateLapMessage(long lapId) { this(lapId, false); }
+
         private static void encode(RaceDirectorInvalidateLapMessage message, FriendlyByteBuf buffer) {
             buffer.writeLong(message.lapId);
+            buffer.writeBoolean(message.discard);
         }
 
         private static RaceDirectorInvalidateLapMessage decode(FriendlyByteBuf buffer) {
-            return new RaceDirectorInvalidateLapMessage(buffer.readLong());
+            return new RaceDirectorInvalidateLapMessage(buffer.readLong(), buffer.readBoolean());
         }
 
         private static void handle(RaceDirectorInvalidateLapMessage message, IPayloadContext context) {
@@ -2205,12 +2331,12 @@ public final class OWRNetwork {
                 }
                 OWRLapRecords records = OWRLapRecords.get(player.level());
                 records.getLap(message.lapId).ifPresent(record -> {
-                    if (records.invalidateLap(message.lapId, player.getUUID(), "race director")) {
+                    if (message.discard ? records.discardLap(message.lapId) : records.invalidateLap(message.lapId, player.getUUID(), "race director")) {
                         Component announcement = Component.translatable("message.openwheelracing.race_director.lap_invalidated", record.driverName(), formatLapTime(record.lapMillis()), player.getGameProfile().name());
                         if (player.level() instanceof ServerLevel serverLevel) {
                             for (ServerPlayer recipient : serverLevel.getServer().getPlayerList().getPlayers()) {
                                 if (recipient.level().dimension().equals(serverLevel.dimension())) {
-                                    recipient.sendSystemMessage(announcement);
+                                    if (!message.discard) recipient.sendSystemMessage(announcement);
                                 }
                             }
                             OWRLapProfiles.get(serverLevel).removeByLapRecord(message.lapId);

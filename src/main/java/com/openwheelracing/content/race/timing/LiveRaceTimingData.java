@@ -18,7 +18,9 @@ public final class LiveRaceTimingData extends SavedData {
         Codec.STRING.optionalFieldOf("display_name", "").forGetter(SavedParticipant::displayName),
         Codec.INT.optionalFieldOf("completed_laps", 0).forGetter(SavedParticipant::completedLaps),
         Codec.DOUBLE.optionalFieldOf("route_distance", 0.0).forGetter(SavedParticipant::routeDistanceMeters),
-        Codec.INT.optionalFieldOf("stable_position", 0).forGetter(SavedParticipant::stablePosition)
+        Codec.INT.optionalFieldOf("stable_position", 0).forGetter(SavedParticipant::stablePosition),
+        Codec.BOOL.optionalFieldOf("before_race_line", false).forGetter(SavedParticipant::beforeRaceLine),
+        Codec.INT.optionalFieldOf("manual_lap_adjustment", 0).forGetter(SavedParticipant::manualLapAdjustment)
     ).apply(instance, SavedParticipant::new));
     private static final Codec<LiveRaceTimingData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
         Codec.BOOL.optionalFieldOf("configured", false).forGetter(data -> data.configured),
@@ -113,6 +115,10 @@ public final class LiveRaceTimingData extends SavedData {
     }
 
     public record SavedParticipant(UUID participantId, int participantKind, String displayName, int completedLaps,
-                                   double routeDistanceMeters, int stablePosition) {
+                                   double routeDistanceMeters, int stablePosition, boolean beforeRaceLine, int manualLapAdjustment) {
+        public SavedParticipant(UUID participantId, int participantKind, String displayName, int completedLaps,
+                                double routeDistanceMeters, int stablePosition, boolean beforeRaceLine) {
+            this(participantId, participantKind, displayName, completedLaps, routeDistanceMeters, stablePosition, beforeRaceLine, 0);
+        }
     }
 }

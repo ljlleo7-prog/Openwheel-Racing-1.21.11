@@ -5,6 +5,9 @@ import com.openwheelracing.content.car.CarComponentDamage;
 import com.openwheelracing.content.car.PrototypeCarSetup;
 import com.openwheelracing.content.race.OWRRaceControlState;
 import com.openwheelracing.content.race.OWRLapProfiles;
+import com.openwheelracing.content.race.OWRGrandPrixRegistry;
+import com.openwheelracing.content.race.weekend.GrandPrixWeekend;
+import com.openwheelracing.content.race.session.RaceSessionState;
 import com.openwheelracing.content.track.TrackDefinition;
 import com.openwheelracing.content.track.TrackDefinitionsData;
 import com.openwheelracing.content.track.survey.SurveyRoute;
@@ -28,7 +31,12 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class BasicAiFleetManager {
+    private static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getLogger();
+    private static final Map<UUID, Long> LAST_DIAGNOSTIC_TICK = new HashMap<>();
     private static final Map<UUID, BasicAiCarController> CONTROLLERS = new HashMap<>();
+    private static final Map<UUID, AiRaceProcedure> PROCEDURES = new HashMap<>();
+    private static final Map<UUID, AiRaceProcedure.State> PROCEDURE_STATES = new HashMap<>();
+    private static final Map<UUID, AiGridNavigator> GRID_NAVIGATORS = new HashMap<>();
     private static final Set<UUID> STOPPING = new HashSet<>();
     private static final Map<UUID, BasicAiDriveCommand> PREPARED_COMMANDS = new HashMap<>();
     private static final Map<UUID, GripCache> GRIP_CACHE = new HashMap<>();
@@ -93,9 +101,9 @@ public final class BasicAiFleetManager {
             }
             BasicAiCarController controller = CONTROLLERS.get(car.getUUID());
             BasicAiStatus status = controller == null ? null : controller.status();
-            if (status != null) {
+            if (status != null && status.running()) {
                 BasicAiFleetChunkTickets.acquire(level, car, route.get().toModel(), status.routeDistance());
-            } else if (!BasicAiFleetChunkTickets.hasTickets(car.getUUID())) {
+            } else {
                 SurveyRouteModel model = route.get().toModel();
                 SurveyRouteLocalizer.Result location = SurveyRouteLocalizer.locate(model, point(car), heading(car), new SurveyRouteLocalizer.State());
                 double distance = location.best().map(SurveyRouteGeometry.Candidate::distanceAlongRoute).orElse(0.0);
@@ -105,6 +113,10 @@ public final class BasicAiFleetManager {
     }
     public static void clearAll() {
         CONTROLLERS.clear();
+        LAST_DIAGNOSTIC_TICK.clear();
+        PROCEDURES.clear();
+        PROCEDURE_STATES.clear();
+        GRID_NAVIGATORS.clear();
         STOPPING.clear();
         PREPARED_COMMANDS.clear();
         LINE_CACHE.clear();
@@ -149,6 +161,7 @@ public final class BasicAiFleetManager {
         }
         SurveyRouteModel route = storedRoute.get().toModel();
         int started = 0;
+        LOGGER.info("OWR AI controller=terrain-feedback-v2 arming track={}", trackId);
         for (OpenwheelCarEntity car : ownedCars(level, trackId)) {
             if (car.getControllingPassenger() != null) {
                 continue;
@@ -159,6 +172,10 @@ public final class BasicAiFleetManager {
                 continue;
             }
             STOPPING.remove(car.getUUID());
+            PROCEDURES.put(car.getUUID(), new AiRaceProcedure());
+            PROCEDURE_STATES.remove(car.getUUID());
+            GRID_NAVIGATORS.remove(car.getUUID());
+            car.resetSessionLapTiming();
             CONTROLLERS.computeIfAbsent(car.getUUID(), ignored -> new BasicAiCarController()).resetLocalization();
             prepareAiCarDefaults(car);
             car.resetAiDrivetrain();
@@ -186,6 +203,10 @@ public final class BasicAiFleetManager {
         List<OpenwheelCarEntity> cars = ownedCars(level, trackId);
         for (OpenwheelCarEntity car : cars) {
             CONTROLLERS.remove(car.getUUID());
+            LAST_DIAGNOSTIC_TICK.remove(car.getUUID());
+            PROCEDURES.remove(car.getUUID());
+            PROCEDURE_STATES.remove(car.getUUID());
+            GRID_NAVIGATORS.remove(car.getUUID());
             STOPPING.remove(car.getUUID());
             PREPARED_COMMANDS.remove(car.getUUID());
             BasicAiFleetChunkTickets.release(car);
@@ -423,12 +444,32 @@ public final class BasicAiFleetManager {
 
         List<BasicAiNearbyAvoidance.Car> traffic = new ArrayList<>();
         for (Entity entity : level.getAllEntities()) {
-            if (entity instanceof OpenwheelCarEntity car && car.isBasicAiOwned() && car.getControllingPassenger() == null) {
-                traffic.add(new BasicAiNearbyAvoidance.Car(car.getId(), car.getX(), car.getZ(), heading(car), car.getDeltaMovement().x, car.getDeltaMovement().z));
+            if (entity instanceof OpenwheelCarEntity car && car.participatesInRaceTiming()) {
+                traffic.add(new BasicAiNearbyAvoidance.Car(car.getId(), car.getX(), car.getZ(), heading(car), car.getDeltaMovement().x * 20.0, car.getDeltaMovement().z * 20.0));
             }
         }
 
-        BasicAiTrafficMode trafficMode = mode(level);
+        var control = OWRRaceControlState.get(level);
+        List<GrandPrixWeekend> weekends = OWRGrandPrixRegistry.get(level.getServer()).weekends().stream()
+            .filter(value -> value.trackId().equals(activeTrack.get().trackId()) && value.dimensionId().equals(dimensionId)
+                && (value.state() == GrandPrixWeekend.EventState.OPEN || value.state() == GrandPrixWeekend.EventState.DRAFT))
+            .sorted(Comparator.comparing(value -> value.state() != GrandPrixWeekend.EventState.OPEN)).toList();
+        List<TrackDefinition.GridSlot> slots = activeTrack.get().gridSlots().stream()
+            .sorted(Comparator.comparingInt(TrackDefinition.GridSlot::index)).toList();
+        Map<UUID, Double> formationDistances = new HashMap<>();
+        Map<UUID, Double> formationSpeeds = new HashMap<>();
+        for (CarSnapshot value : snapshots) formationSpeeds.put(value.identity().driverId(), value.car().getSpeedKmh() / 3.6);
+        for (CarSnapshot value : snapshots) value.localization().best()
+            .filter(ignored -> value.localization().status() == SurveyRouteLocalizer.Status.TRACKED)
+            .ifPresent(location -> formationDistances.put(value.identity().driverId(), location.distanceAlongRoute()));
+        for (var player : level.getServer().getPlayerList().getPlayers()) {
+            if (player.level() != level || !(player.getVehicle() instanceof OpenwheelCarEntity car)) continue;
+            SurveyRouteLocalizer.Result location = SurveyRouteLocalizer.locate(route, point(car), heading(car), new SurveyRouteLocalizer.State());
+            formationSpeeds.put(player.getUUID(), car.getSpeedKmh() / 3.6);
+            if (location.status() == SurveyRouteLocalizer.Status.TRACKED) location.best()
+                .ifPresent(value -> formationDistances.put(player.getUUID(), value.distanceAlongRoute()));
+        }
+        int gridSearchBudget = 384;
         for (CarSnapshot snapshot : snapshots) {
             OpenwheelCarEntity car = snapshot.car();
             if (STOPPING.contains(car.getUUID())) {
@@ -438,28 +479,143 @@ public final class BasicAiFleetManager {
             if (!car.isAutonomousControlEnabled()) {
                 continue;
             }
+            GrandPrixWeekend weekend = weekends.stream().filter(value -> value.state() == GrandPrixWeekend.EventState.OPEN
+                || value.entries().stream().anyMatch(entry -> entry.driverId().equals(snapshot.identity().driverId())))
+                .findFirst().orElse(null);
+            GrandPrixWeekend.SessionView session = weekend == null ? null : weekend.activeSession(tick).orElse(null);
+            TrackDefinition.GridSlot slot = null;
+            if (session != null) {
+                int index = session.grid().indexOf(snapshot.identity().driverId());
+                if (index >= 0 && index < slots.size()) slot = slots.get(index);
+            } else if (weekend == null) {
+                slot = slots.stream().filter(value -> value.index() == snapshot.identity().gridIndex()).findFirst().orElse(null);
+            }
+            AiGridApproach.Result approach = slot == null ? null : AiGridApproach.evaluate(
+                new AiGridApproach.Target(slot.position().x(), slot.position().y(), slot.position().z(), slot.headingRadians()),
+                car.getX(), car.getY(), car.getZ(), heading(car), car.getSpeedKmh() / 3.6);
+            boolean admitted = weekend == null || weekend.entries().stream().anyMatch(entry ->
+                entry.driverId().equals(snapshot.identity().driverId()) && entry.status() == GrandPrixWeekend.EntryStatus.ENTERED);
+            if (session != null && session.state() == RaceSessionState.RUNNING
+                && !com.openwheelracing.content.race.timing.LiveRaceTimingService.isParticipantCarEligible(
+                    level, session.config().sessionId(), snapshot.identity().driverId(), car.getUUID())) admitted = false;
+            AiRaceProcedure.Input procedureInput = new AiRaceProcedure.Input(session == null ? route.routeId().getMostSignificantBits() ^ route.routeId().getLeastSignificantBits() : session.config().sessionId(),
+                weekend == null ? null : session == null ? RaceSessionState.CONFIGURED : session.state(), admitted,
+                control.getStartPhase(), control.getGlobalFlag(), modeOverride,
+                snapshot.localization().status() == SurveyRouteLocalizer.Status.TRACKED,
+                slot != null, approach != null && approach.ready());
+            AiRaceProcedure sporting = PROCEDURES.computeIfAbsent(car.getUUID(), ignored -> new AiRaceProcedure());
+            AiRaceProcedure.Decision procedure = sporting.advance(procedureInput);
+            AiRaceProcedure.State previousState = PROCEDURE_STATES.put(car.getUUID(), procedure.state());
+            if (sporting.epochChanged() || procedure.state() != AiRaceProcedure.State.RETURNING_GRID) GRID_NAVIGATORS.remove(car.getUUID());
+            BasicAiTrafficMode trafficMode = procedure.mode();
+            if (!procedure.trains()) {
+                LAP_TRIALS.remove(snapshot.identity().driverId());
+                AI_LAP_COLLECTORS.remove(snapshot.identity().driverId());
+                AI_LAP_STARTED_AT.remove(snapshot.identity().driverId());
+            }
+            if (procedure.holds()) {
+                snapshot.controller().resetAccelerationGovernor();
+                snapshot.controller().stop(snapshot.identity(), car.getId(), car.getSpeedKmh(), "waiting for director/lights");
+                String detail = procedure.state() == AiRaceProcedure.State.FAULT
+                    ? slot == null ? "grid assignment missing" : snapshot.localization().reason() : "";
+                snapshot.controller().annotateProcedure(procedure.state(), detail);
+                PREPARED_COMMANDS.put(car.getUUID(), BasicAiDriveCommand.stopped(0.0f));
+                logMotion(car, procedure, BasicAiDriveCommand.stopped(0), 0, detail, tick);
+                LOW_SPEED_SINCE.remove(car.getUUID());
+                continue;
+            }
+            if ((procedure.state() == AiRaceProcedure.State.FORMATION || procedure.state() == AiRaceProcedure.State.RACING)
+                && (sporting.epochChanged() || previousState != procedure.state() && previousState != AiRaceProcedure.State.CAUTION
+                    && previousState != AiRaceProcedure.State.SUSPENDED && previousState != AiRaceProcedure.State.FAULT)) {
+                snapshot.controller().beginProcedureLeg(route);
+                LAP_TRIALS.remove(snapshot.identity().driverId());
+                LOW_SPEED_SINCE.remove(car.getUUID());
+            }
             BasicAiNearbyAvoidance.Car subject = new BasicAiNearbyAvoidance.Car(car.getId(), car.getX(), car.getZ(), heading(car),
-                car.getDeltaMovement().x, car.getDeltaMovement().z);
+                car.getDeltaMovement().x * 20.0, car.getDeltaMovement().z * 20.0);
             BasicAiNearbyAvoidance.Decision avoidance = BasicAiNearbyAvoidance.choose(subject, traffic);
             BasicAiGripModel.State grip = gripState(car, tick);
+            if (procedure.state() == AiRaceProcedure.State.RETURNING_GRID && slot != null
+                && (Math.hypot(slot.position().x() - car.getX(), slot.position().z() - car.getZ()) <= 180.0 || !procedureInput.localized())) {
+                AiGridNavigator navigator = GRID_NAVIGATORS.computeIfAbsent(car.getUUID(), ignored -> new AiGridNavigator());
+                var target = new AiGridApproach.Target(slot.position().x(), slot.position().y(), slot.position().z(), slot.headingRadians());
+                var guidance = navigator.update(target, car.getX(), car.getY(), car.getZ(), heading(car), car.getSpeedKmh() / 3.6,
+                    tick, Math.min(64, gridSearchBudget), (px, pz, ph) -> car.isAiPavedPose(px, pz, ph)
+                        && BasicAiNearbyAvoidance.parkingPoseClear(new BasicAiNearbyAvoidance.Car(car.getId(), px, pz, ph, 0, 0), traffic));
+                gridSearchBudget -= guidance.consumedBudget();
+                avoidance = BasicAiNearbyAvoidance.chooseParking(subject, traffic);
+                BasicAiDriveCommand parking = BasicAiCarController.speedCommand(car.getSpeedKmh() / 3.6, guidance.speed(), 0.0,
+                    guidance.steering(), avoidance, grip);
+                parking = snapshot.controller().governAcceleration(parking, car.getSpeedKmh() / 3.6, guidance.speed(), BasicAiTrafficMode.GRID_RETURN, tick);
+                PREPARED_COMMANDS.put(car.getUUID(), parking);
+                snapshot.controller().stop(snapshot.identity(), car.getId(), car.getSpeedKmh(), "grid navigation");
+                snapshot.controller().annotateProcedure(procedure.state(), guidance.searching() ? "searching paved grid path"
+                    : guidance.blocked() ? "path blocked; retrying" : "following grid path target=" + Math.round(guidance.speed() * 3.6) + "km/h");
+                logMotion(car, procedure, parking, guidance.speed(), guidance.searching() ? "grid-search"
+                    : guidance.blocked() ? "grid-blocked" : "grid-path", tick);
+                LOW_SPEED_SINCE.remove(car.getUUID());
+                continue;
+            }
             BasicAiGripModel.State planningGrip = GRIP_CACHE.get(car.getUUID()).planningState();
             AiTrackPlan plan = trackPlan(level, route, car, planningGrip);
-            captureActualPath(level, storedRoute.get(), car, tick);
+            if (procedure.trains()) captureActualPath(level, storedRoute.get(), car, tick);
+            double predecessorSpeed = Double.NaN;
             double queueGap = trafficMode.queueing() ? nearestOrderedGap(snapshot, snapshots, route.length()) : Double.POSITIVE_INFINITY;
+            if (procedure.state() == AiRaceProcedure.State.FORMATION || procedure.state() == AiRaceProcedure.State.RETURNING_GRID) {
+                List<UUID> order = session != null && !session.grid().isEmpty() ? session.grid()
+                    : snapshots.stream().filter(value -> value.identity().fleetId().equals(snapshot.identity().fleetId()))
+                        .sorted(Comparator.comparingInt(value -> value.identity().gridIndex()))
+                        .map(value -> value.identity().driverId()).toList();
+                queueGap = AiFormationOrder.gap(snapshot.identity().driverId(), order, formationDistances, route.length());
+                int orderIndex = order.indexOf(snapshot.identity().driverId());
+                if (orderIndex > 0) predecessorSpeed = formationSpeeds.getOrDefault(order.get(orderIndex - 1), 0.0);
+            }
             BasicAiCarController controller = snapshot.controller();
             AiGripCalibration calibration = CALIBRATIONS.computeIfAbsent(snapshot.identity().driverId(), driverId ->
                 new AiGripCalibration(calibrationStepPercent, calibrationRandomSteps,
                     driverId.getMostSignificantBits() ^ driverId.getLeastSignificantBits()));
+            boolean clearWeave = false;
+            boolean clearLane = false;
+            if (trafficMode == BasicAiTrafficMode.FORMATION_HEATING) {
+                double h = heading(car);
+                double c = Math.cos(h), n = Math.sin(h);
+                clearLane = car.isAiPavedPose(car.getX(), car.getZ(), h)
+                    && car.isAiPavedPose(car.getX() + c * 12.0, car.getZ() + n * 12.0, h);
+                clearWeave = car.isAiPavedPose(car.getX() - n * 1.0, car.getZ() + c * 1.0, h)
+                    && car.isAiPavedPose(car.getX() + n * 1.0, car.getZ() - c * 1.0, h)
+                    && car.isAiPavedPose(car.getX() + c * 12.0 - n, car.getZ() + n * 12.0 + c, h)
+                    && car.isAiPavedPose(car.getX() + c * 12.0 + n, car.getZ() + n * 12.0 - c, h);
+            }
+            controller.setFormationRoadClear(clearWeave);
+            controller.setFormationRoadSafe(clearLane);
             BasicAiDriveCommand command = controller.tick(new BasicAiCarController.Input(snapshot.identity(), car.getId(), route, point(car), heading(car),
                 car.getSpeedKmh() / 3.6, car.getSpeedKmh() / 3.6, car.getYawRateRadiansPerSecond(), snapshot.localization(),
-                avoidance, trafficMode, grip, plan, queueGap, calibration.settings()));
+                avoidance, trafficMode, grip, plan, queueGap, calibration.settings(), predecessorSpeed));
+            command = controller.governAcceleration(command, car.getSpeedKmh() / 3.6, controller.lastTargetSpeed(), trafficMode, tick);
+            controller.annotateProcedure(procedure.state(), "");
             PREPARED_COMMANDS.put(car.getUUID(), command);
-            updateCalibrationTrial(car, snapshot.identity(), controller, calibration);
-            updateLowSpeedTimer(car, tick);
-            if (shouldRecover(car, tick)) {
+            logMotion(car, procedure, command, controller.lastTargetSpeed(), "gap=" + queueGap + " avoidance=" + avoidance.threat(), tick);
+            if (procedure.trains()) updateCalibrationTrial(car, snapshot.identity(), controller, calibration);
+            if (!procedure.mayRecover() || queueGap < 8.0) {
+                LOW_SPEED_SINCE.remove(car.getUUID());
+            } else {
+                updateLowSpeedTimer(car, tick);
+            }
+            if (procedure.mayRecover() && queueGap >= 8.0 && shouldRecover(car, tick)) {
                 recover(level, car, activeTrack.get(), tick);
             }
         }
+    }
+
+    private static void logMotion(OpenwheelCarEntity car, AiRaceProcedure.Decision procedure, BasicAiDriveCommand command,
+                                  double target, String detail, long tick) {
+        long previous = LAST_DIAGNOSTIC_TICK.getOrDefault(car.getUUID(), Long.MIN_VALUE);
+        if (previous != Long.MIN_VALUE && tick - previous < 100L) return;
+        LAST_DIAGNOSTIC_TICK.put(car.getUUID(), tick);
+        LOGGER.info("OWR AI motion driver={} state={} mode={} speedKmh={} targetKmh={} throttle={} brake={} gear={} rpm={} pos={},{},{} {}",
+            car.getBasicAiIdentity().map(BasicAiDriverIdentity::displayName).orElse("unknown"), procedure.state(), procedure.mode(),
+            car.getSpeedKmh(), target * 3.6, command.throttle(), command.brake(), car.getGear(), car.getRpm(),
+            car.getX(), car.getY(), car.getZ(), detail);
     }
 
     private static void prepareStop(OpenwheelCarEntity car, BasicAiDriverIdentity identity) {
@@ -518,7 +674,9 @@ public final class BasicAiFleetManager {
     private static AiTrackPlan trackPlan(ServerLevel level, SurveyRouteModel route, OpenwheelCarEntity car, BasicAiGripModel.State grip) {
         OWRLapProfiles profiles = OWRLapProfiles.get(level);
         PlanCache cached = PLAN_CACHE.get(car.getUUID());
-        if (cached != null && cached.routeId().equals(route.routeId()) && cached.profileRevision() == profiles.revision()) {
+        if (cached != null && cached.routeId().equals(route.routeId()) && cached.profileRevision() == profiles.revision()
+            && Math.abs(cached.capability().lateralAcceleration(40.0) - grip.lateralAcceleration(40.0)) <= grip.lateralAcceleration(40.0) * 0.08
+            && Math.abs(cached.capability().brakeAcceleration(40.0) - grip.brakeAcceleration(40.0)) <= grip.brakeAcceleration(40.0) * 0.08) {
             return cached.plan();
         }
         AiTrackPlan plan = AiTrackPlanCompiler.compile(route, profiles.matching(route.trackId(), route.routeId()), grip);
@@ -581,7 +739,6 @@ public final class BasicAiFleetManager {
             // Calibration cleanliness intentionally means only "completed without a recovery".
             // Recovery records the failed trial immediately and resets this lap state.
             calibration.recordLap(true);
-            car.setAiLapTelemetry(controller.lastLapMillis());
             LAP_TRIALS.put(identity.driverId(), new LapTrialState(laps));
         }
     }
@@ -626,6 +783,10 @@ public final class BasicAiFleetManager {
             return false;
         }
         CONTROLLERS.remove(oldCar.getUUID());
+        LAST_DIAGNOSTIC_TICK.remove(oldCar.getUUID());
+        PROCEDURES.remove(oldCar.getUUID());
+        PROCEDURE_STATES.remove(oldCar.getUUID());
+        GRID_NAVIGATORS.remove(oldCar.getUUID());
         PREPARED_COMMANDS.remove(oldCar.getUUID());
         GRIP_CACHE.remove(oldCar.getUUID());
         PLAN_CACHE.remove(oldCar.getUUID());

@@ -1,5 +1,7 @@
 # AI Driving Modes and Core Pace Algorithm
 
+The implemented sporting state machine and movement bounds are specified in [Procedural AI Race Control](mechanism-specs/ai-race-procedure.md). Its start/flag rules take precedence over the original mode-selection proposal below.
+
 ## Purpose
 
 This document proposes the next AI driving architecture before implementation. It addresses two separate needs:
@@ -122,7 +124,7 @@ A dedicated AI mode override should remain available for testing, because a glob
 /owr ai fleet mode auto
 ```
 
-`auto` follows `OWRRaceControlState`; explicit modes override it until reset. Persist only the fleet mode/override if persistence is needed. Do not create race classifications or fake participants for this feature.
+`auto` follows `OWRRaceControlState`; explicit modes request a pace until reset, subject to sporting permission and stricter flag limits. Persist only the fleet mode/override if persistence is needed. Do not create race classifications or fake participants for this feature.
 
 ## Proposed core racing algorithm
 

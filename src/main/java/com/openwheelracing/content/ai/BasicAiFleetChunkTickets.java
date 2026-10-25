@@ -32,7 +32,13 @@ public final class BasicAiFleetChunkTickets {
     }
 
     public static boolean acquire(ServerLevel level, OpenwheelCarEntity car, SurveyRouteModel route, double distance) {
-        Set<AiRouteChunkWindow.ChunkCoordinate> desired = AiRouteChunkWindow.around(route, distance);
+        Set<AiRouteChunkWindow.ChunkCoordinate> desired = new java.util.LinkedHashSet<>();
+        int carChunkX = (int) Math.floor(car.getX() / 16.0);
+        int carChunkZ = (int) Math.floor(car.getZ() / 16.0);
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) desired.add(new AiRouteChunkWindow.ChunkCoordinate(carChunkX + dx, carChunkZ + dz));
+        }
+        desired.addAll(AiRouteChunkWindow.around(route, distance));
         OwnedTickets existing = OWNED.get(car.getUUID());
         if (existing == null) {
             existing = new OwnedTickets(level, new HashSet<>());

@@ -2,6 +2,11 @@ package com.openwheelracing.content.ai;
 
 public record BasicAiDriveCommand(float throttle, float brake, float steering) {
     public BasicAiDriveCommand {
+        if (!Float.isFinite(throttle) || !Float.isFinite(brake) || !Float.isFinite(steering)) {
+            throttle = 0.0f;
+            brake = 1.0f;
+            steering = 0.0f;
+        }
         throttle = clamp(throttle, 0.0f, 1.0f);
         brake = clamp(brake, 0.0f, 1.0f);
         steering = clamp(steering, -1.0f, 1.0f);
