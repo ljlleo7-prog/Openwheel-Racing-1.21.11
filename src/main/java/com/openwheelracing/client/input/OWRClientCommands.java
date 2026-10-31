@@ -13,6 +13,15 @@ public final class OWRClientCommands {
 
     public static void register(RegisterClientCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
+        dispatcher.register(Commands.literal("owrmap")
+            .executes(context -> setMap(context.getSource(), !com.openwheelracing.client.map.LiveMapClient.enabled()))
+            .then(Commands.literal("on").executes(context -> setMap(context.getSource(), true)))
+            .then(Commands.literal("off").executes(context -> setMap(context.getSource(), false)))
+            .then(Commands.literal("screen").executes(context -> {
+                setMap(context.getSource(), true);
+                com.openwheelracing.client.map.LiveMapClient.requestScreen();
+                return 1;
+            })));
         dispatcher.register(Commands.literal("owrinput")
             .executes(context -> setMode(context.getSource(), WheelInputSettings.get().drivingMode.toggled()))
             .then(Commands.literal("toggle")
@@ -23,6 +32,12 @@ public final class OWRClientCommands {
                 .executes(context -> setMode(context.getSource(), KeyboardDrivingMode.DIRECT_JOYSTICK)))
             .then(Commands.literal("status")
                 .executes(context -> showMode(context.getSource()))));
+    }
+
+    private static int setMap(CommandSourceStack source, boolean enabled) {
+        com.openwheelracing.client.map.LiveMapClient.setEnabled(enabled);
+        source.sendSuccess(() -> Component.translatable(enabled ? "map.openwheelracing.enabled" : "map.openwheelracing.disabled"), false);
+        return 1;
     }
 
     private static int setMode(CommandSourceStack source, KeyboardDrivingMode mode) {

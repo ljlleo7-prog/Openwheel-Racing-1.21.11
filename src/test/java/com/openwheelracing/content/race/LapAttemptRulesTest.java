@@ -1,34 +1,23 @@
 package com.openwheelracing.content.race;
 
-import com.openwheelracing.content.track.survey.SurveyRouteModel;
-import com.openwheelracing.content.track.survey.SurveyRouteLocalizer;
-import java.util.List;
-import java.util.UUID;
-
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LapAttemptRulesTest {
-    @Test void ambiguousParallelRouteStillStartsTiming() {
-        var nodes = List.of(
-            new SurveyRouteModel.Node(0, new SurveyRouteModel.Point(0, 64, 0), 0, 0),
-            new SurveyRouteModel.Node(1, new SurveyRouteModel.Point(40, 64, 0), 0, 40),
-            new SurveyRouteModel.Node(2, new SurveyRouteModel.Point(40, 64, 4), 0, 44),
-            new SurveyRouteModel.Node(3, new SurveyRouteModel.Point(0, 64, 4), 0, 84));
-        var route = new SurveyRouteModel(UUID.randomUUID(), UUID.randomUUID(), List.of(), nodes, 88, 4);
-        var position = new SurveyRouteModel.Point(20, 64, 2);
-        assertEquals(SurveyRouteLocalizer.Status.AMBIGUOUS,
-            SurveyRouteLocalizer.locate(route, position, Math.PI / 2,
-                new SurveyRouteLocalizer.State()).status());
-        assertTrue(LapAttemptRules.withinRouteZone(route, position));
+    @Test void actualForwardLineTriggerOverridesTelemetryStartingFarAway() {
+        assertTrue(LapAttemptRules.validStart(true, 100, 0, true));
+        assertTrue(LapAttemptRules.validStart(true, Double.NaN, Double.NaN, false));
+        assertFalse(LapAttemptRules.validStart(false, 100, 0, true));
+        assertFalse(LapAttemptRules.validStart(false, 0, 0, false));
     }
 
-    @Test void startsAcrossFullDetectionEnvelopeRatherThanOnlyHighConfidenceBand() {
-        assertTrue(LapAttemptRules.withinRouteZone(15, 0));
-        assertTrue(LapAttemptRules.withinRouteZone(25, 5));
-        assertTrue(LapAttemptRules.withinRouteZone(0, -5));
-        assertFalse(LapAttemptRules.withinRouteZone(25.01, 0));
-        assertFalse(LapAttemptRules.withinRouteZone(0, 5.01));
+    @Test void startLineGraceRequiresForwardMovementWithinThreeMeters() {
+        assertTrue(LapAttemptRules.validStart(0, 0, true));
+        assertTrue(LapAttemptRules.validStart(3, 0, true));
+        assertFalse(LapAttemptRules.validStart(3.01, 0, true));
+        assertFalse(LapAttemptRules.validStart(1, 3.01, true));
+        assertFalse(LapAttemptRules.validStart(1, 0, false));
+        assertFalse(LapAttemptRules.validStart(Double.NaN, 0, true));
     }
 
     @Test void meaningfulMovementCanBeRecordedWithoutAConfidentRacingLineProfile() {

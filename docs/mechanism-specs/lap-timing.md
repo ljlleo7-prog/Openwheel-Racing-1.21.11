@@ -32,7 +32,7 @@
 
 - When does a lap start?
 
-  When a driven car enters the surveyed route detection zone (25m horizontally, 5m vertically), or passes the starting counter in the forward direction. Forward finish crossings complete the current attempt and start the next.
+  Driving movement starts a background timed attempt for Race Director records. The displayed live lap timer starts only on a forward start-line crossing; placing a car does not start it. Forward finish crossings complete the current attempt and start the next. Attempts that began away from the start line are recorded as invalid, with a 3m horizontal/vertical grace around the configured line and forward movement required for start eligibility.
 
 - When does a lap finish?
 
@@ -50,7 +50,7 @@
 
   Yes
 
-- Attempts shorter than 0.2 seconds or with less than 10m actual movement during the attempt are silently discarded, including invalid attempts. The distance threshold uses actual movement, independent of racing-line localization confidence. Route proximity starts an attempt even when parallel route segments make telemetry localization ambiguous.
+- Attempts shorter than 0.2 seconds or with less than 10m actual movement during the attempt are silently discarded, including invalid attempts. The distance threshold uses actual movement, independent of racing-line localization confidence. Telemetry and background timed attempts are independent of the displayed live lap timer, which starts only on a forward start-line crossing. Meaningful attempts beginning away from the line remain visible as invalid records when finished or interrupted.
 - Race Director can discard a selected lap entirely; discarding removes it from rankings and removes its learned profile.
 
 ## Results
@@ -91,7 +91,7 @@
 
 - Autonomous AI cars use the same start/finish crossings, minimum lap time, checkpoint checks, off-track invalidation, telemetry capture, and session lap records as player cars.
 - Records use the stable AI driver UUID and display name (for example, `AI-07`), so rankings and archives include AI times without requiring a player passenger.
-- Entering the surveyed route detection zone starts timing without a start-line crossing. Forward crossings finish the current attempt and start the next.
+- Driving movement starts a background timed attempt; a first forward start-line crossing starts the displayed live timer. Subsequent forward crossings finish the current attempt and start the next. Background attempts starting away from the line are retained as invalid records, subject to the discard thresholds.
 - GP formation and preparation crossings remain excluded. Starting a new session clears in-progress intervals for both player and AI cars.
 - A player taking control owns subsequent laps; timing intervals cannot be shared between drivers.
 - For AI-only GP grids, enter the spawned AI display name in the GP registration field, or use `/owr gp register_ai "Event" AI-07 7`. AI registration requires exactly one matching AI car on the event track. Use `/owr gp unregister_ai "Event" AI-07` to remove that entry.
@@ -126,3 +126,5 @@
 - Each action is validated on the server against director permissions, the active session ID, and the currently classified driver/car. Counts cannot be reduced below zero.
 - The live classification and rank update immediately. The correction is stored separately from timed lap records, survives normal record reconciliation and checkpoint recovery, and does not create a fabricated lap time or affect best-lap rankings.
 - The director receives the resulting count, and adjustments are logged with director, session, car, delta, and total.
+
+- An actual forward start-line trigger is authoritative for start validity, regardless of where or when the first telemetry sample is captured. The 3m grace applies only to attempts lacking an actual trigger. Line-triggered timing retains its interpolated crossing timestamp; later telemetry samples cannot shift or invalidate that origin. Other validity checks (off-track, checkpoints, driver changes, and minimum duration/distance) still apply.

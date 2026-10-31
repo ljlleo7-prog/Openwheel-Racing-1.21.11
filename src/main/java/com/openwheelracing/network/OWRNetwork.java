@@ -70,7 +70,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "21";
+    private static final String PROTOCOL = "22";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -82,6 +82,7 @@ public final class OWRNetwork {
 
     public static void register(RegisterPayloadHandlersEvent event) {
         PayloadRegistrar registrar = event.registrar(PROTOCOL);
+        LiveMapNetwork.register(registrar);
         registrar.playToServer(TuneCarMessage.TYPE, codec(TuneCarMessage::encode, TuneCarMessage::decode), TuneCarMessage::handle);
         registrar.playToServer(ApplyCarSetupMessage.TYPE, codec(ApplyCarSetupMessage::encode, ApplyCarSetupMessage::decode), ApplyCarSetupMessage::handle);
         registrar.playToServer(RepairCarMessage.TYPE, codec(RepairCarMessage::encode, RepairCarMessage::decode), RepairCarMessage::handle);

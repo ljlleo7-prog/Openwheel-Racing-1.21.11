@@ -42,6 +42,8 @@ public final class OpenwheelRacingClientEvents {
     public static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
         event.registerAboveAll(CAR_HUD, CarHudOverlay::render);
         event.registerAboveAll(SURVEY_ROUTE_HUD, SurveyRouteHud::render);
+        event.registerAboveAll(Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "live_map"),
+            com.openwheelracing.client.map.LiveMapRenderer::renderHud);
     }
 
     public static void onScreenInit(ScreenEvent.Init.Post event) {
@@ -61,6 +63,7 @@ public final class OpenwheelRacingClientEvents {
         boolean ridingCar = Minecraft.getInstance().player != null && Minecraft.getInstance().player.getVehicle() instanceof com.openwheelracing.content.entity.OpenwheelCarEntity;
         LapDeltaClient.tick(ridingCar);
         LiveLapDeltaClient.tick();
+        com.openwheelracing.client.map.LiveMapClient.tick();
         SurveyRouteOverlay.tick();
         if (Minecraft.getInstance().level == null) {
             StewardLineOverlay.clear();
