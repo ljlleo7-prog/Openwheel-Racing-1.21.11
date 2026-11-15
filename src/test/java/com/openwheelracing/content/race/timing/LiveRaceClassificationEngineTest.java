@@ -132,7 +132,7 @@ class LiveRaceClassificationEngineTest {
 
         assertTrue(engine.reconcileCompletedLaps(ALPHA, 2));
         assertEquals(2, engine.currentSnapshot(2).rows().getFirst().completedLaps());
-        assertEquals(240.0, engine.currentSnapshot(2).rows().getFirst().absoluteProgressMeters(), 1.0E-6);
+        assertEquals(200.0, engine.currentSnapshot(2).rows().getFirst().absoluteProgressMeters(), 1.0E-6);
         assertTrue(!engine.reconcileCompletedLaps(ALPHA, 1));
         assertEquals(2, engine.currentSnapshot(2).rows().getFirst().completedLaps());
     }

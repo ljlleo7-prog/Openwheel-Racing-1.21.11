@@ -314,6 +314,7 @@ public class OWRLapRecords extends SavedData {
     }
 
     public LapRecord recordLap(UUID driverId, String driverName, int lapMillis, long completedGameTime, long completedWorldTime, String dimensionId, long startFinishPos, int checkpointCount, CarSnapshot car) {
+        if (car.estimatedTiming()) return recordCompensatedLap(driverId, driverName, lapMillis, completedGameTime, dimensionId, startFinishPos, car);
         LapRecord record = new LapRecord(nextLapId++, driverId, driverName, lapMillis, completedGameTime, completedWorldTime, dimensionId, startFinishPos, checkpointCount, car, false, "", "", activeSessionId, activeSessionName, false);
         laps.add(record);
         setBestLapIfBetter(driverId, lapMillis);
@@ -321,12 +322,27 @@ public class OWRLapRecords extends SavedData {
         return record;
     }
 
+    /** Race credit with estimated timing, intentionally excluded from qualifying/best laps. */
+    public LapRecord recordCompensatedLap(UUID driverId, String driverName, int lapMillis, long tick,
+                                          String dimensionId, long finishPos, CarSnapshot car) {
+        LapRecord record = new LapRecord(nextLapId++, driverId, driverName, lapMillis, tick, System.currentTimeMillis(),
+            dimensionId, finishPos, 0, car.withEstimatedTiming(), true,
+            "Survey-compensated lap (estimated timing)", "", activeSessionId, activeSessionName, false);
+        laps.add(record);
+        markChanged();
+        return record;
+    }
+
+    public List<LapRecord> getRaceSessionLaps(long sessionId) {
+        return laps.stream().filter(lap -> lap.sessionId() == sessionId && (!lap.invalidated() || lap.car().estimatedTiming())).toList();
+    }
+
     public List<LapRecord> allLaps() { return List.copyOf(laps); }
 
     public boolean revalidateLap(long lapId) {
         for (int index = 0; index < laps.size(); index++) {
             LapRecord lap = laps.get(index);
-            if (lap.id() == lapId && lap.invalidated()) {
+            if (lap.id() == lapId && lap.invalidated() && !lap.car().estimatedTiming()) {
                 laps.set(index, new LapRecord(lap.id(), lap.driverId(), lap.driverName(), lap.lapMillis(),
                     lap.completedGameTime(), lap.completedWorldTime(), lap.dimensionId(), lap.startFinishPos(),
                     lap.checkpointCount(), lap.car(), false, "", "", lap.sessionId(), lap.sessionName(), lap.migratedFromLegacyTicks()));
@@ -496,9 +512,27 @@ public class OWRLapRecords extends SavedData {
         return Codec.STRING.xmap(UUID::fromString, UUID::toString);
     }
 
-    public record CarSnapshot(int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled, String tyre, int bopWeightPercent, int bopPowerPercent, double traveledMeters) {
+    public record CarSnapshot(int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled, String tyre, int bopWeightPercent, int bopPowerPercent, double traveledMeters, boolean estimatedTiming, boolean recoveredTiming) {
         public CarSnapshot(int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled) {
             this(power, grip, aero, gearing, damagePercent, tyreWearPercent, absEnabled, "", 0, 0, -1.0);
+        }
+        public CarSnapshot(int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent,
+                           boolean absEnabled, String tyre, int bopWeightPercent, int bopPowerPercent, double traveledMeters) {
+            this(power, grip, aero, gearing, damagePercent, tyreWearPercent, absEnabled, tyre,
+                bopWeightPercent, bopPowerPercent, traveledMeters, false);
+        }
+        public CarSnapshot(int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent,
+                           boolean absEnabled, String tyre, int bopWeightPercent, int bopPowerPercent, double traveledMeters, boolean estimatedTiming) {
+            this(power, grip, aero, gearing, damagePercent, tyreWearPercent, absEnabled, tyre,
+                bopWeightPercent, bopPowerPercent, traveledMeters, estimatedTiming, estimatedTiming);
+        }
+        public CarSnapshot withRecoveredTiming() {
+            return new CarSnapshot(power, grip, aero, gearing, damagePercent, tyreWearPercent, absEnabled,
+                tyre, bopWeightPercent, bopPowerPercent, traveledMeters, estimatedTiming, true);
+        }
+        public CarSnapshot withEstimatedTiming() {
+            return new CarSnapshot(power, grip, aero, gearing, damagePercent, tyreWearPercent, absEnabled,
+                tyre, bopWeightPercent, bopPowerPercent, traveledMeters, true, true);
         }
         public static final Codec<CarSnapshot> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.INT.fieldOf("power").forGetter(CarSnapshot::power),
@@ -511,7 +545,9 @@ public class OWRLapRecords extends SavedData {
             Codec.STRING.optionalFieldOf("tyre", "").forGetter(CarSnapshot::tyre),
             Codec.INT.optionalFieldOf("bop_weight_percent", 0).forGetter(CarSnapshot::bopWeightPercent),
             Codec.INT.optionalFieldOf("bop_power_percent", 0).forGetter(CarSnapshot::bopPowerPercent),
-            Codec.DOUBLE.optionalFieldOf("traveled_meters", -1.0).forGetter(CarSnapshot::traveledMeters)
+            Codec.DOUBLE.optionalFieldOf("traveled_meters", -1.0).forGetter(CarSnapshot::traveledMeters),
+            Codec.BOOL.optionalFieldOf("estimated_timing", false).forGetter(CarSnapshot::estimatedTiming),
+            Codec.BOOL.optionalFieldOf("recovered_timing", false).forGetter(CarSnapshot::recoveredTiming)
         ).apply(instance, CarSnapshot::new));
     }
 

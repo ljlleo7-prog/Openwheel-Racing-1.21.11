@@ -8,7 +8,7 @@ final class LooseSurfacePhysics {
     static double resistanceCoefficient(boolean sand, boolean gravel, boolean grass, double speedMetersPerSecond) {
         double speed = Math.max(0.0, speedMetersPerSecond);
         double impact = Math.min(1.0, speed * speed / 900.0);
-        if (sand) return 0.035 + 0.10 * impact;
+        if (sand) return 0.035 + 0.65 * Math.min(4.0, speed * speed / 900.0);
         if (gravel) return 0.025 + 0.08 * impact;
         if (grass) return 0.015 + 0.025 * impact;
         return 0.0;

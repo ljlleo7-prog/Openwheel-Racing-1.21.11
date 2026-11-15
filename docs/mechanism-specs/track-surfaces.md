@@ -65,10 +65,16 @@ For each surface, define visual role, driving effect, crafting cost, and future 
 Sand and gravel retain low grip, but allow engine drive at all speeds. Sinking
 resistance is small (sand 0.035, gravel 0.025, grass 0.02). Additional rolling
 resistance and speed-dependent grain collision losses slow cars progressively,
-with grain losses capped at 30 m/s. Grass also has reduced resistance so drivers
+with sand grain losses growing quadratically up to 60 m/s (coefficient 0.65 at 30 m/s), while gravel and grass losses cap at 30 m/s. Sand retains its low-speed base resistance for recovery. Barriers use contact-point effective mass and yaw inertia, with friction impulse limited to 2% of normal impulse. Normal contact restitution is 15%, capped at 2.0 m/s; remaining tick time permits sliding along the wall. Grass also has reduced resistance so drivers
 can recover from runoff. These losses oppose travel and cannot reverse the car.
 Sand and gravel produce grounded hops below 0.1 blocks, spaced 9–15 ticks apart
 and disabled below 2 m/s. Pitch rocks by up to 2.5 degrees with varied pulse
 duration and strength. Per-car seeded variation keeps hops and pitch coordinated
 without frame-to-frame randomness. Sand, grass, and gravel play vanilla footstep samples
 at the left and right contacts while moving, including mixed-surface runoff.
+
+General solid-block impacts use collision-clipped movement. Tangential speed
+loss is 15% of the inferred blocked normal speed, capped at the remaining slide
+speed to prevent reversal. Near-parallel scrapes lose little speed, while
+head-on components produce stronger friction; repeated contacts accumulate loss.
+Vertical movement is preserved. Fully blocked head-on motion remains stopped.

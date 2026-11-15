@@ -100,14 +100,14 @@ public final class LapProfileCollector {
                 maximumRoundTripDistance).ifPresent(candidate -> pendingLapRepair = candidate);
         }
         unwrappedProgress += delta;
-        int startElapsed = timeMillisAtPrevious(gameTime, elapsed);
+        int startElapsed = elapsedMillis(previousSampleGameTime);
         int firstIndex = (int) Math.floor(start / spacing) + 1;
         int lastIndex = (int) Math.floor((start + delta) / spacing);
         for (int unwrappedIndex = firstIndex; unwrappedIndex <= lastIndex; unwrappedIndex++) {
             int index = Math.floorMod(unwrappedIndex, timeMillis.length);
             double sampleDistance = unwrappedIndex * spacing;
             double fraction = (sampleDistance - start) / delta;
-            if (fraction < 0.0 || fraction > 1.0) continue;
+            if (fraction < 0.0 || fraction > 1.0 || filled[index]) continue;
             timeMillis[index] = (int) Math.round(startElapsed + (elapsed - startElapsed) * fraction);
             speedCmps[index] = Math.max(0, Math.min(65535, (int) Math.round(speedKmh / 0.036)));
             lateralOffsetCm[index] = clampSigned((int) Math.round(current.best().orElseThrow().signedLateralDistance() * 100.0), 250);
@@ -130,25 +130,43 @@ public final class LapProfileCollector {
 
     public OWRLapProfiles.BestLapProfile finish(String dimensionId, UUID trackId, String driverName, OWRLapProfiles.Origin origin,
                                                 long lapRecordId, long sessionId, int lapMillis, long gameTime) {
-        if (model == null || hadImpact || coverage() < MIN_COVERAGE) return null;
-        fillSmallGaps();
-        return new OWRLapProfiles.BestLapProfile(dimensionId, trackId, model.routeId(), driverId, driverName, origin, lapRecordId, sessionId, lapMillis,
-            model.length(), spacing, timeMillis, speedCmps, lateralOffsetCm, headingResidualMilliRad, gameTime);
+        if (hadImpact) return null;
+        return finishTiming(dimensionId, trackId, driverName, origin, lapRecordId, sessionId, lapMillis, gameTime);
     }
 
-    private void fillSmallGaps() {
+    public OWRLapProfiles.BestLapProfile finishTiming(String dimensionId, UUID trackId, String driverName,
+                                                      long lapRecordId, int lapMillis, long gameTime) {
+        return finishTiming(dimensionId, trackId, driverName, OWRLapProfiles.Origin.PLAYER, lapRecordId, 0L, lapMillis, gameTime);
+    }
+
+    /** Timing remains usable after an impact; impacted trajectories must not teach AI. */
+    public OWRLapProfiles.BestLapProfile finishTiming(String dimensionId, UUID trackId, String driverName, OWRLapProfiles.Origin origin,
+                                                      long lapRecordId, long sessionId, int lapMillis, long gameTime) {
+        if (model == null || coverage() < MIN_COVERAGE || lapMillis <= 0) return null;
+        fillSmallGaps(lapMillis);
+        return new OWRLapProfiles.BestLapProfile(dimensionId, trackId, model.routeId(), driverId, driverName, origin, lapRecordId, sessionId, lapMillis,
+            model.length(), spacing, timeMillis, speedCmps, hadImpact ? new int[0] : lateralOffsetCm,
+            hadImpact ? new int[0] : headingResidualMilliRad, gameTime);
+    }
+
+    private void fillSmallGaps(int lapMillis) {
         if (filled.length == 0) return;
+        // Search the original mask: an interpolated point is never new evidence.
+        boolean[] observed = filled.clone();
         for (int index = 0; index < filled.length; index++) {
-            if (filled[index]) continue;
+            if (observed[index]) continue;
             int before = index;
             int after = index;
-            do before = Math.floorMod(before - 1, filled.length); while (!filled[before] && before != index);
-            do after = (after + 1) % filled.length; while (!filled[after] && after != index);
-            int source = filled[before] ? before : after;
-            timeMillis[index] = timeMillis[source];
-            speedCmps[index] = speedCmps[source];
-            lateralOffsetCm[index] = lateralOffsetCm[source];
-            headingResidualMilliRad[index] = headingResidualMilliRad[source];
+            do before = Math.floorMod(before - 1, filled.length); while (!observed[before] && before != index);
+            do after = (after + 1) % filled.length; while (!observed[after] && after != index);
+            int span = Math.floorMod(after - before, filled.length);
+            double fraction = span == 0 ? 0 : Math.floorMod(index - before, filled.length) / (double) span;
+            int endTime = timeMillis[after];
+            if (endTime < timeMillis[before]) endTime += lapMillis;
+            timeMillis[index] = Math.floorMod((int) Math.round(timeMillis[before] + (endTime - timeMillis[before]) * fraction), lapMillis);
+            speedCmps[index] = (int) Math.round(speedCmps[before] + (speedCmps[after] - speedCmps[before]) * fraction);
+            lateralOffsetCm[index] = (int) Math.round(lateralOffsetCm[before] + (lateralOffsetCm[after] - lateralOffsetCm[before]) * fraction);
+            headingResidualMilliRad[index] = (int) Math.round(headingResidualMilliRad[before] + (headingResidualMilliRad[after] - headingResidualMilliRad[before]) * fraction);
             filled[index] = true;
         }
     }
@@ -251,7 +269,6 @@ public final class LapProfileCollector {
     }
 
     private int elapsedMillis(double gameTime) { return Math.max(0, (int) Math.round((gameTime - lapStartGameTime) * 50.0)); }
-    private int timeMillisAtPrevious(double gameTime, int elapsed) { return Math.max(0, elapsed - 50); }
 
     public record PrefixSnapshot(double startDistance, double distance, double spacing, int[] lateralOffsetCm, int[] headingResidualMilliRad,
                                  int[] observed, double averageSpeedKmh) {

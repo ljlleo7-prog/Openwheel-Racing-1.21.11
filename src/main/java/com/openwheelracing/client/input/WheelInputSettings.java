@@ -26,6 +26,7 @@ public class WheelInputSettings {
     public Boolean showDrivingHud;
     public Boolean showSetupHud;
     public Boolean showRankingHud;
+    public boolean raceGapToLeader;
     public Boolean showPhysicsDebugHud;
     public Boolean allTimeLapTiming;
     public Integer ersBalancedClipStartKmh;

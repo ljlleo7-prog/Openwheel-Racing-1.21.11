@@ -550,7 +550,7 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             if (row.id() == selectedLapId) {
                 graphics.fill(ROW_X - 2, y - 1, ROW_X + ROW_WIDTH, y + ROW_HEIGHT - 1, 0xFF3F5F7F);
             }
-            int color = row.invalidated() ? 0xFFFF7777 : 0xFFE8EDF2;
+            int color = row.estimatedTiming() ? 0xFFFFD166 : row.invalidated() ? 0xFFFF7777 : 0xFFE8EDF2;
             String worldTime = row.completedWorldTime() >= 1_000_000_000_000L
                 ? java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.ofEpochMilli(row.completedWorldTime()))
                 : formatWorldTime(row.completedWorldTime());
@@ -568,9 +568,12 @@ public class RaceDirectorScreen extends AbstractContainerScreen<RaceDirectorMenu
             graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.select_lap"), LEFT_X, y, 0xFFC9D1D9, false);
             return;
         }
-        graphics.drawString(font, Component.translatable("screen.openwheelracing.race_director.details"), LEFT_X, y, 0xFFE8EDF2, false);
+        String details = Component.translatable("screen.openwheelracing.race_director.details").getString();
+        if (row.recoveredTiming()) details += " / " + Component.translatable(row.estimatedTiming()
+            ? "screen.openwheelracing.lap_records.recovered_estimated" : "screen.openwheelracing.lap_records.recovered_precise").getString();
+        graphics.drawString(font, fit(details, COLUMN_WIDTH - 8), LEFT_X, y, row.estimatedTiming() ? 0xFFFFD166 : 0xFFE8EDF2, false);
         graphics.drawString(font, fit(row.driverName(), COLUMN_WIDTH - 8), LEFT_X, y + 14, 0xFFE8EDF2, false);
-        graphics.drawString(font, formatLapTime(row.lapMillis()) + " / CP " + row.checkpointCount(), LEFT_X, y + 26, row.invalidated() ? 0xFFFF7777 : 0xFF7EE787, false);
+        graphics.drawString(font, formatLapTime(row.lapMillis()) + " / CP " + row.checkpointCount(), LEFT_X, y + 26, row.estimatedTiming() ? 0xFFFFD166 : row.invalidated() ? 0xFFFF7777 : 0xFF7EE787, false);
         graphics.drawString(font, "Real time " + formatWorldTime(row.completedWorldTime()), LEFT_X, y + 38, 0xFFC9D1D9, false);
         if (menu.getSnapshot().archiveMode()) {
             graphics.drawString(font, fit(row.sessionName(), COLUMN_WIDTH - 8), LEFT_X, y + 50, 0xFFC9D1D9, false);

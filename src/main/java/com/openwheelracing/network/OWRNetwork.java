@@ -70,7 +70,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "22";
+    private static final String PROTOCOL = "27";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -83,6 +83,8 @@ public final class OWRNetwork {
     public static void register(RegisterPayloadHandlersEvent event) {
         PayloadRegistrar registrar = event.registrar(PROTOCOL);
         LiveMapNetwork.register(registrar);
+        VehicleRollbackNetwork.register(registrar);
+        TechnicalRulesNetwork.register(registrar);
         registrar.playToServer(TuneCarMessage.TYPE, codec(TuneCarMessage::encode, TuneCarMessage::decode), TuneCarMessage::handle);
         registrar.playToServer(ApplyCarSetupMessage.TYPE, codec(ApplyCarSetupMessage::encode, ApplyCarSetupMessage::decode), ApplyCarSetupMessage::handle);
         registrar.playToServer(RepairCarMessage.TYPE, codec(RepairCarMessage::encode, RepairCarMessage::decode), RepairCarMessage::handle);
@@ -167,7 +169,8 @@ public final class OWRNetwork {
             car.getWheelAngularSpeedFl(),
             car.getWheelAngularSpeedFr(),
             car.getWheelAngularSpeedRl(),
-            car.getWheelAngularSpeedRr()
+            car.getWheelAngularSpeedRr(),
+            car.getRollbackEpoch()
         ));
     }
 
@@ -553,7 +556,7 @@ public final class OWRNetwork {
             float lowSpeedSteeringGain, float highSpeedSteeringGain, float speedResponseCurve,
             float tractionControlStrength, float tractionControlEnvelope, float absEnvelope,
             float brakingYawAdjustment, float neutralYawAdjustment, float throttleYawAdjustment,
-            float stabilityAssistStrength, boolean keyboardSteeringSource) implements CustomPacketPayload {
+            float stabilityAssistStrength, boolean keyboardSteeringSource, int motionEpoch) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<DriveInputMessage> TYPE = payloadType("drive_input_message");
 
         @Override
@@ -583,6 +586,7 @@ public final class OWRNetwork {
             buffer.writeFloat(message.throttleYawAdjustment);
             buffer.writeFloat(message.stabilityAssistStrength);
             buffer.writeBoolean(message.keyboardSteeringSource);
+            buffer.writeInt(message.motionEpoch);
         }
 
         private static DriveInputMessage decode(FriendlyByteBuf buffer) {
@@ -595,7 +599,7 @@ public final class OWRNetwork {
                 buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
                 buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
                 buffer.readFloat(), buffer.readFloat(), buffer.readFloat(), buffer.readFloat(),
-                buffer.readBoolean());
+                buffer.readBoolean(), buffer.readInt());
         }
 
         private static void handle(DriveInputMessage message, IPayloadContext context) {
@@ -604,6 +608,7 @@ public final class OWRNetwork {
                 if (player == null || !(player.getVehicle() instanceof OpenwheelCarEntity car)) {
                     return;
                 }
+                if (!car.acceptsRollbackEpoch(message.motionEpoch)) return;
                 float keyboardThrottle = sanitizePedal(message.keyboardThrottle);
                 float keyboardBrake = sanitizePedal(message.keyboardBrake);
                 float throttle = keyboardThrottle;
@@ -1008,6 +1013,7 @@ public final class OWRNetwork {
             VehiclePhysicsPresetState.get(server).preset().ordinal());
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             PacketDistributor.sendToPlayer(player, message);
+            TechnicalRulesNetwork.begin(player);
         }
     }
 
@@ -1436,7 +1442,8 @@ public final class OWRNetwork {
     public record DriveInputAckMessage(int entityId, int ackedInputSequence, double x, double y, double z,
             double deltaX, double deltaY, double deltaZ, float yaw, double yawRate, double steeringAngle,
             double relaxedFlLatForce, double relaxedFrLatForce, double relaxedRlLatForce, double relaxedRrLatForce,
-            double wheelAngularSpeedFl, double wheelAngularSpeedFr, double wheelAngularSpeedRl, double wheelAngularSpeedRr) implements CustomPacketPayload {
+            double wheelAngularSpeedFl, double wheelAngularSpeedFr, double wheelAngularSpeedRl, double wheelAngularSpeedRr,
+            int motionEpoch) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<DriveInputAckMessage> TYPE = payloadType("drive_input_ack_message");
 
         @Override
@@ -1464,10 +1471,11 @@ public final class OWRNetwork {
             buffer.writeDouble(message.wheelAngularSpeedFr);
             buffer.writeDouble(message.wheelAngularSpeedRl);
             buffer.writeDouble(message.wheelAngularSpeedRr);
+            buffer.writeInt(message.motionEpoch);
         }
 
         private static DriveInputAckMessage decode(FriendlyByteBuf buffer) {
-            return new DriveInputAckMessage(buffer.readVarInt(), buffer.readVarInt(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readFloat(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
+            return new DriveInputAckMessage(buffer.readVarInt(), buffer.readVarInt(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readFloat(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readDouble(), buffer.readInt());
         }
 
         private static void handle(DriveInputAckMessage message, IPayloadContext context) {
@@ -2762,6 +2770,7 @@ public final class OWRNetwork {
             Object player = minecraftClass.getField("player").get(minecraft);
             Entity entity = (Entity) level.getClass().getMethod("getEntity", int.class).invoke(level, message.entityId);
             if (entity instanceof OpenwheelCarEntity car && player instanceof Entity playerEntity && playerEntity.getVehicle() == car) {
+                if (!car.acceptsRollbackEpoch(message.motionEpoch)) return;
                 car.applyClientAuthoritativeSnapshot(
                     message.ackedInputSequence,
                     new Vec3(message.x, message.y, message.z),

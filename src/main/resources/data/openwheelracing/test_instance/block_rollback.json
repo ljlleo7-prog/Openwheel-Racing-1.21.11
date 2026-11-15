@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:function",
+  "function": "openwheelracing:block_rollback",
+  "environment": "openwheelracing:lap_network",
+  "structure": "openwheelracing:car_recovery",
+  "max_ticks": 160,
+  "sky_access": true
+}

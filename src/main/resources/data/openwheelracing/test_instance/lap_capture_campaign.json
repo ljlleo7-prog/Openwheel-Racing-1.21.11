@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:function",
+  "function": "openwheelracing:lap_capture_campaign",
+  "environment": "openwheelracing:lap_capture",
+  "structure": "openwheelracing:car_recovery",
+  "max_ticks": 10000,
+  "sky_access": true
+}

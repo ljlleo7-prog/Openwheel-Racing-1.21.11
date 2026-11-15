@@ -51,7 +51,15 @@ public final class OWRClientInputHandler {
 
     public static void onClientTick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.screen != null) {
+        com.openwheelracing.client.debug.LocalVehicleNetworkTest.tick();
+        OWRClientCommands.tickHandlingCapture();
+        if (mc.player == null || mc.isPaused()
+                || !com.openwheelracing.client.debug.TechnicalClientState.ready()) return;
+        if (mc.screen != null) {
+            // Keep the simulation-frame clock running while chat/inventory is open on an active server.
+            if (mc.player.getVehicle() instanceof OpenwheelCarEntity car) {
+                car.tickLocalClientMovement(driveInputSequence + 1, 0, 0, 0, keyboardSteeringSource);
+            }
             return;
         }
 
@@ -199,7 +207,7 @@ public final class OWRClientInputHandler {
     }
 
     private static void handleAutoShift(WheelInputSettings settings, OpenwheelCarEntity car, float throttle, float brake) {
-        if (!settings.autoShiftEnabled) {
+        if (!settings.autoShiftEnabled || !car.isAutomaticShiftingAllowed()) {
             autoShiftCooldownTicks = 0;
             return;
         }
@@ -207,6 +215,7 @@ public final class OWRClientInputHandler {
             car.getRedlineRpm(), car.getProjectedRpmForGear(car.getGear() - 1), throttle, brake, autoShiftCooldownTicks);
         autoShiftCooldownTicks = decision.cooldownTicks();
         if (decision.direction() != 0) {
+            car.shiftLocal(decision.direction());
             OWRNetwork.sendToServer(new OWRNetwork.ShiftMessage(decision.direction(), true));
         }
     }
@@ -349,7 +358,8 @@ public final class OWRClientInputHandler {
             keyboard.lowSpeedSteeringGain, keyboard.highSpeedSteeringGain, keyboard.speedResponseCurve,
             tractionControlStrength, tractionControlEnvelope, absEnvelope,
             brakingYawAdjustment, neutralYawAdjustment, throttleYawAdjustment,
-            stabilityAssistStrength, keyboardSteeringSource));
+            stabilityAssistStrength, keyboardSteeringSource,
+            Minecraft.getInstance().player.getVehicle() instanceof OpenwheelCarEntity car ? car.getRollbackEpoch() : 0));
     }
 
     /** Poll the raw GLFW key state regardless of Minecraft conflict context. */

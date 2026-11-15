@@ -70,10 +70,54 @@
     {
       "type": "java",
       "request": "launch",
-      "name": "Server",
+      "name": "LapCaptureTestServer",
       "presentation": {
         "group": "Mod Development - openwheel-racing",
         "order": 3
+      },
+      "projectName": "openwheel-racing",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@/Users/leolong/Openwheel-Racing-1.21.11/build/moddev/lapCaptureTestServerRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@/Users/leolong/Openwheel-Racing-1.21.11/build/moddev/lapCaptureTestServerRunVmArgs.txt",
+        "-Dfml.modFolders\u003dopenwheelracing%%/Users/leolong/Openwheel-Racing-1.21.11/bin/main"
+      ],
+      "cwd": "${workspaceFolder}/build/lap-capture-gametest",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "LapNetworkTestServer",
+      "presentation": {
+        "group": "Mod Development - openwheel-racing",
+        "order": 4
+      },
+      "projectName": "openwheel-racing",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@/Users/leolong/Openwheel-Racing-1.21.11/build/moddev/lapNetworkTestServerRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@/Users/leolong/Openwheel-Racing-1.21.11/build/moddev/lapNetworkTestServerRunVmArgs.txt",
+        "-Dfml.modFolders\u003dopenwheelracing%%/Users/leolong/Openwheel-Racing-1.21.11/bin/main"
+      ],
+      "cwd": "${workspaceFolder}/build/lap-network-gametest",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Server",
+      "presentation": {
+        "group": "Mod Development - openwheel-racing",
+        "order": 5
       },
       "projectName": "openwheel-racing",
       "mainClass": "net.neoforged.devlaunch.Main",
@@ -85,6 +129,28 @@
         "-Dfml.modFolders\u003dopenwheelracing%%/Users/leolong/Openwheel-Racing-1.21.11/bin/main"
       ],
       "cwd": "${workspaceFolder}/run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "SurveyCompensationTestServer",
+      "presentation": {
+        "group": "Mod Development - openwheel-racing",
+        "order": 6
+      },
+      "projectName": "openwheel-racing",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@/Users/leolong/Openwheel-Racing-1.21.11/build/moddev/surveyCompensationTestServerRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@/Users/leolong/Openwheel-Racing-1.21.11/build/moddev/surveyCompensationTestServerRunVmArgs.txt",
+        "-Dfml.modFolders\u003dopenwheelracing%%/Users/leolong/Openwheel-Racing-1.21.11/bin/main"
+      ],
+      "cwd": "${workspaceFolder}/build/survey-compensation-gametest",
       "env": {},
       "console": "internalConsole",
       "shortenCommandLine": "none"

@@ -2,10 +2,7 @@ package com.openwheelracing.client.hud;
 
 import com.openwheelracing.network.OWRNetwork;
 import java.util.List;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
-@OnlyIn(Dist.CLIENT)
 public final class LapDeltaClient {
     public static final int STATUS_UNREACHED = OWRNetwork.TIMING_STATUS_UNREACHED;
     public static final int STATUS_SLOWER = OWRNetwork.TIMING_STATUS_SLOWER;

@@ -18,6 +18,10 @@ public final class LiveLapDeltaClient {
     private LiveLapDeltaClient() {}
 
     public static void apply(OWRNetwork.LiveLapDeltaHudMessage message) {
+        boolean continuous = active && hasReference && message.lapActive() && message.hasReference()
+            && message.elapsedMillis() >= anchorElapsedMillis && message.bestLapMillis() == bestLapMillis
+            && status == SurveyRouteLocalizer.Status.TRACKED
+            && message.localizationStatus() == SurveyRouteLocalizer.Status.TRACKED.ordinal();
         active = message.lapActive();
         hasReference = message.hasReference();
         status = SurveyRouteLocalizer.Status.values()[Math.min(message.localizationStatus(), SurveyRouteLocalizer.Status.values().length - 1)];
@@ -25,7 +29,7 @@ public final class LiveLapDeltaClient {
         bestLapMillis = message.bestLapMillis();
         anchorReferenceMillis = message.referenceMillis();
         long now = System.nanoTime();
-        if (receivedAtNanos != 0L) {
+        if (receivedAtNanos != 0L && continuous) {
             double elapsedMs = Math.max(1.0, (now - receivedAtNanos) / 1_000_000.0);
             deltaMillisPerMillisecond = Math.max(-0.25, Math.min(0.25, (message.deltaMillis() - anchorDeltaMillis) / elapsedMs));
         } else {

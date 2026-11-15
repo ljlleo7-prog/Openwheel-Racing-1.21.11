@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:function",
+  "function": "openwheelracing:survey_compensation",
+  "environment": "openwheelracing:survey_compensation",
+  "structure": "openwheelracing:car_recovery",
+  "max_ticks": 1300,
+  "sky_access": true
+}

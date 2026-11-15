@@ -7,7 +7,7 @@ plugins {
     id 'net.neoforged.moddev' version '2.0.142'
 }
 
-version = '1.20.2'
+version = '1.21.1'
 group = 'com.openwheelracing'
 
 // Mojang ships Java 21 to end users in 1.20.5+, so every Gradle Java task should use Java 21.
@@ -67,6 +67,38 @@ neoForge {
 
         gameTestServer {
             type = 'gameTestServer'
+        }
+
+        lapCaptureTestServer {
+            type = 'gameTestServer'
+            gameDirectory = layout.buildDirectory.dir('lap-capture-gametest')
+            programArguments.addAll '--tests', 'openwheelracing:lap_capture_campaign'
+            systemProperty 'openwheelracing.lapCaptureStrict', providers.gradleProperty('lapCaptureStrict').getOrElse('true')
+        }
+
+        clientAuthorityTestServer {
+            type = 'gameTestServer'
+            gameDirectory = layout.buildDirectory.dir('client-authority-gametest')
+            programArguments.addAll '--tests', 'openwheelracing:client_authority'
+        }
+
+        blockRollbackTestServer {
+            type = 'gameTestServer'
+            gameDirectory = layout.buildDirectory.dir('block-rollback-gametest')
+            programArguments.addAll '--tests', 'openwheelracing:block_rollback'
+        }
+
+        lapNetworkTestServer {
+            type = 'gameTestServer'
+            gameDirectory = layout.buildDirectory.dir('lap-network-gametest')
+            programArguments.addAll '--tests', 'openwheelracing:lap_network_capture'
+            systemProperty 'openwheelracing.lapCaptureStrict', providers.gradleProperty('lapCaptureStrict').getOrElse('true')
+        }
+
+        surveyCompensationTestServer {
+            type = 'gameTestServer'
+            gameDirectory = layout.buildDirectory.dir('survey-compensation-gametest')
+            programArguments.addAll '--tests', 'openwheelracing:survey_compensation'
         }
 
         data {
@@ -145,3 +177,30 @@ tasks.withType(Test).configureEach {
         languageVersion = java21
     }
 }
+
+// Include nested physics/setup classes in the technical-rules build fingerprint.
+def performanceIndexRoot = layout.buildDirectory.dir('generated/performanceRules')
+sourceSets.main.resources.srcDir(performanceIndexRoot)
+tasks.register('generatePerformanceIndex') {
+    dependsOn tasks.named('compileJava')
+    inputs.files(sourceSets.main.output.classesDirs)
+    outputs.file(performanceIndexRoot.map { it.file('openwheelracing-performance-index.txt') })
+    doLast {
+        def names = new TreeSet<String>()
+        inputs.files.files.each { root ->
+            if (root.exists()) {
+                try (def entries = java.nio.file.Files.walk(root.toPath())) {
+                    entries.filter { java.nio.file.Files.isRegularFile(it) }.forEach { entry ->
+                        def name = root.toPath().relativize(entry).toString().replace('\\', '/')
+                        if (name.endsWith('.class') && (name.startsWith('com/openwheelracing/content/entity/')
+                                || name.startsWith('com/openwheelracing/content/car/'))) names.add(name)
+                    }
+                }
+            }
+        }
+        def output = outputs.files.singleFile
+        output.parentFile.mkdirs()
+        output.text = names.join('\n') + '\n'
+    }
+}
+tasks.named('processResources') { dependsOn tasks.named('generatePerformanceIndex') }

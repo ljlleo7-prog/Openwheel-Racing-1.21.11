@@ -36,6 +36,7 @@ public final class CarHudOverlay {
             return;
         }
 
+        RewindNotification.render(graphics);
         Font font = minecraft.font;
         WheelInputSettings settings = WheelInputSettings.get();
         OpenwheelCarEntity car = minecraft.player.getVehicle() instanceof OpenwheelCarEntity vehicle ? vehicle : null;
@@ -73,9 +74,11 @@ public final class CarHudOverlay {
         int displayedLapTicks = LiveLapDeltaClient.active() ? LiveLapDeltaClient.elapsedMillis() : car.getCompletedLapLingerTicks() > 0 ? car.getCompletedLapTicks() : car.getCurrentLapTicks();
         int lapColor = car.getCompletedLapLingerTicks() > 0 ? completedLapColor(car.getCompletedLapResult()) : 0xFFFFFFFF;
         String lap = formatLapTime(displayedLapTicks);
-        int bestMillis = LiveLapDeltaClient.bestLapMillis() > 0 ? LiveLapDeltaClient.bestLapMillis() : car.getBestLapTicks();
+        int bestMillis = car.getBestLapTicks();
         String best = formatLapTime(bestMillis);
-        String delta = "Delta  " + liveDeltaText();
+        int referenceBest = LiveLapDeltaClient.bestLapMillis();
+        String delta = "Delta" + (referenceBest > 0 && referenceBest != bestMillis
+            ? " [" + formatLapTime(referenceBest) + "]" : "") + "  " + liveDeltaText();
         String checkpointProgress = LapDeltaClient.segmentCount() > 0 ? LapDeltaClient.hitCount() + "/" + LapDeltaClient.segmentCount() : (car.hasCheckpoint() ? "1/1" : "0/1");
 
         graphics.fill(x, y, x + panelWidth, y + panelHeight, 0xB8142638);
@@ -527,7 +530,7 @@ public final class CarHudOverlay {
         int start = localIndex < 0 ? 0 : Math.max(0, Math.min(localIndex - 3, allRows.size() - 8));
         List<RaceTimingRow> rows = allRows.stream().skip(start).limit(8).toList();
         int panelWidth = 166;
-        int headerHeight = LiveRaceTimingClient.snapshot().weekendName().isBlank() ? 19 : 40;
+        int headerHeight = LiveRaceTimingClient.snapshot().weekendName().isBlank() ? 29 : 50;
         int rowHeight = 10;
         int panelHeight = headerHeight + Math.max(1, rows.size()) * rowHeight + 4;
         int px = 8;
@@ -552,6 +555,8 @@ public final class CarHudOverlay {
             graphics.drawString(font, type, px + 6, py + 30, 0xFF8394A7, false);
             graphics.drawString(font, raceProgress, px + panelWidth - 6 - font.width(raceProgress), py + 30, 0xFF7EE787, false);
         }
+        graphics.drawString(font, Component.translatable(com.openwheelracing.client.input.WheelInputSettings.get().raceGapToLeader
+            ? "hud.openwheelracing.race.gap_leader" : "hud.openwheelracing.race.gap_interval"), px + 6, py + headerHeight - 10, 0xFF8394A7, false);
         if (rows.isEmpty()) {
             graphics.drawString(font, Component.translatable("hud.openwheelracing.race.no_cars").getString(), px + 6, py + headerHeight + 1, 0xFF777777, false);
             return;
@@ -564,7 +569,8 @@ public final class CarHudOverlay {
             String position = Integer.toString(row.position());
             String marker = confidenceMarker(row.confidence());
             String name = fit(font, row.displayName(), 72);
-            String gap = formatRaceGap(row.gapToLeader());
+            String gap = formatRaceGap(com.openwheelracing.client.input.WheelInputSettings.get().raceGapToLeader
+                ? row.gapToLeader() : row.intervalAhead());
             graphics.drawString(font, position, px + 5, y, color, false);
             graphics.drawString(font, marker + name, px + 20, y, color, false);
             graphics.drawString(font, gap, px + panelWidth - 6 - font.width(gap), y, color, false);

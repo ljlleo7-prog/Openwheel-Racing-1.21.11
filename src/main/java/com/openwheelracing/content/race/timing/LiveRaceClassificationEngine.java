@@ -34,6 +34,8 @@ public final class LiveRaceClassificationEngine {
     private int pendingOrderTicks;
     private long revision;
     private boolean gridStart;
+    private boolean raceContinuity;
+    private long lastServerTick;
     private double routeLengthMeters;
     private java.util.UUID trackId = new java.util.UUID(0L, 0L);
     private java.util.UUID routeId = new java.util.UUID(0L, 0L);
@@ -58,6 +60,7 @@ public final class LiveRaceClassificationEngine {
         if (this.routeLengthMeters != routeLengthMeters) {
             reset(routeLengthMeters);
         }
+        lastServerTick = serverTick;
         Map<RaceParticipantKey, RaceTimingObservation> current = new HashMap<>();
         for (RaceTimingObservation observation : observations) {
             if (observation.participant() == null) {
@@ -70,7 +73,7 @@ public final class LiveRaceClassificationEngine {
                 state.markMissing(serverTick);
             }
         }
-        participants.entrySet().removeIf(entry -> entry.getValue().missingSinceTick >= 0L
+        participants.entrySet().removeIf(entry -> !raceContinuity && entry.getValue().missingSinceTick >= 0L
             && serverTick - entry.getValue().missingSinceTick > MISSING_RETIREMENT_TICKS);
         for (RaceTimingObservation observation : current.values()) {
             ParticipantState state = participants.computeIfAbsent(observation.participant(), key -> new ParticipantState(key));
@@ -81,6 +84,7 @@ public final class LiveRaceClassificationEngine {
             .sorted(rawComparator())
             .map(state -> state.key)
             .toList();
+        if (raceContinuity) rawOrder = retainUncertainOrder(rawOrder);
         if (!new HashSet<>(stableOrder).equals(new HashSet<>(rawOrder))) {
             stableOrder = rawOrder;
             pendingOrder = List.of();
@@ -104,6 +108,42 @@ public final class LiveRaceClassificationEngine {
         this.gridStart = gridStart;
     }
 
+    /** Race sensor loss is provisional, never an implicit retirement or overtake. */
+    public void setRaceContinuity(boolean enabled) {
+        raceContinuity = enabled;
+    }
+
+    private List<RaceParticipantKey> retainUncertainOrder(List<RaceParticipantKey> rawOrder) {
+        if (!new HashSet<>(stableOrder).equals(new HashSet<>(rawOrder))) return rawOrder;
+        List<RaceParticipantKey> result = new ArrayList<>(rawOrder);
+        // Pin uncertain rows only within equal-lap groups. Never hide proven lap credit.
+        Set<Integer> lapGroups = new HashSet<>();
+        for (RaceParticipantKey key : rawOrder) lapGroups.add(participants.get(key).completedLaps);
+        for (int laps : lapGroups) {
+            List<Integer> slots = new ArrayList<>();
+            List<RaceParticipantKey> previous = new ArrayList<>();
+            for (int i = 0; i < rawOrder.size(); i++) {
+                if (participants.get(rawOrder.get(i)).completedLaps == laps) slots.add(i);
+            }
+            for (RaceParticipantKey key : stableOrder) {
+                if (participants.get(key).completedLaps == laps) previous.add(key);
+            }
+            Set<RaceParticipantKey> pinned = new HashSet<>();
+            for (int i = 0; i < previous.size(); i++) {
+                RaceParticipantKey key = previous.get(i);
+                if (participants.get(key).confidence != RaceProgressConfidence.CONFIRMED) {
+                    result.set(slots.get(i), key);
+                    pinned.add(key);
+                }
+            }
+            var reliable = rawOrder.stream().filter(key -> participants.get(key).completedLaps == laps && !pinned.contains(key)).iterator();
+            for (int i = 0; i < slots.size(); i++) {
+                if (!pinned.contains(previous.get(i))) result.set(slots.get(i), reliable.next());
+            }
+        }
+        return List.copyOf(result);
+    }
+
     public void reset(double routeLengthMeters) {
         this.routeLengthMeters = routeLengthMeters;
         participants.clear();
@@ -118,21 +158,30 @@ public final class LiveRaceClassificationEngine {
         return snapshot(serverTick, Map.of());
     }
 
-    /** Raises a participant's lap count from independently validated lap records without changing route distance. */
+    /** Raises the recorded lap floor and anchors the tracker at that known finish passage. */
     public boolean reconcileCompletedLaps(RaceParticipantKey participant, int completedLaps) {
         ParticipantState state = participants.get(participant);
-        if (state == null || !state.initialized) return false;
+        if (state == null) return false;
         completedLaps = (int) Math.clamp((long) completedLaps + state.manualLapAdjustment, 0, Integer.MAX_VALUE);
         if (completedLaps <= state.completedLaps) {
             return false;
         }
         state.completedLaps = completedLaps;
+        state.initialized = true;
         state.beforeRaceLine = false;
+        // The new record proves a finish, not another lap at the last localized position.
+        // Retaining a pre-line position here lets the next observation count it again.
+        state.routeDistanceMeters = 0;
         state.absoluteProgressMeters = completedLaps * routeLengthMeters + state.routeDistanceMeters;
         state.previousAbsoluteProgressMeters = state.absoluteProgressMeters;
         state.latestReferenceIndex = (long) Math.floor(state.absoluteProgressMeters / referenceSpacingMeters);
         state.referenceTimes.clear();
         state.previousMillis = Long.MIN_VALUE;
+        if (raceContinuity) {
+            List<RaceParticipantKey> order = participants.values().stream().sorted(rawComparator()).map(value -> value.key).toList();
+            order = retainUncertainOrder(order);
+            if (!stableOrder.equals(order)) applyOrder(order, lastServerTick);
+        }
         revision++;
         return true;
     }
@@ -311,19 +360,18 @@ public final class LiveRaceClassificationEngine {
         if (ahead == null) {
             return RaceGap.leader();
         }
+        if (ahead.confidence != RaceProgressConfidence.CONFIRMED || behind.confidence != RaceProgressConfidence.CONFIRMED
+            || ahead.absoluteProgressMeters < behind.absoluteProgressMeters) return RaceGap.unavailable();
         double absoluteDifference = ahead.absoluteProgressMeters - behind.absoluteProgressMeters;
         int lapDifference = (int) Math.floor(Math.max(0.0, absoluteDifference) / routeLengthMeters);
         long reference = behind.latestReferenceIndex;
-        if (lapDifference > 0) {
-            return RaceGap.laps(lapDifference);
-        }
         if (reference < 0) {
-            return RaceGap.unavailable();
+            return lapDifference > 0 ? RaceGap.laps(lapDifference) : RaceGap.unavailable();
         }
         Long aheadMillis = ahead.referenceTimes.get(reference);
         Long behindMillis = behind.referenceTimes.get(reference);
         if (aheadMillis == null || behindMillis == null) {
-            return RaceGap.unavailable();
+            return lapDifference > 0 ? RaceGap.laps(lapDifference) : RaceGap.unavailable();
         }
         return RaceGap.time(Math.max(0L, behindMillis - aheadMillis));
     }
@@ -462,7 +510,7 @@ public final class LiveRaceClassificationEngine {
         }
 
         private void addReferenceCrossings(double previous, double current, long previousMillis, long currentMillis, double spacing) {
-            if (current <= previous || current - previous > MAX_ACCEPTED_FORWARD_METERS) {
+            if (previousMillis == Long.MIN_VALUE || current <= previous || current - previous > MAX_ACCEPTED_FORWARD_METERS) {
                 return;
             }
             long first = (long) Math.floor(previous / spacing) + 1L;

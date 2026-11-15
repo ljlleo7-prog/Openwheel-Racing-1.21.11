@@ -72,6 +72,15 @@ public class TrackDefinitionsData extends SavedData {
         level.getDataStorage().set(TYPE, copy);
     }
 
+    /** Repair a stale cross-dimension/missing legacy selection only when unambiguous. */
+    public boolean recoverActiveTimingTrack(String dimensionId) {
+        if (activeTrack(dimensionId).isPresent()) return false;
+        List<TrackDefinition> candidates = tracksInDimension(dimensionId).stream()
+            .filter(track -> track.startFinish().isPresent()).toList();
+        if (candidates.size() != 1) return false;
+        return setActiveTrack(candidates.getFirst().trackId(), dimensionId);
+    }
+
     public int getRevision() {
         return revision;
     }

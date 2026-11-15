@@ -25,6 +25,11 @@ public final class OWRLegacyDimensionDataImporter {
             OWRRaceControlState.importLegacy(level, legacyRaceControl);
             OWRLapRecords.importLegacy(level, legacyLapRecords, dimensionId);
             TrackDefinitionsData.importLegacy(level, legacyTracks, dimensionId);
+            TrackDefinitionsData definitions = TrackDefinitionsData.getIfPresent(level);
+            if (definitions != null && definitions.recoverActiveTimingTrack(dimensionId)) {
+                com.mojang.logging.LogUtils.getLogger().info("Recovered active timing track {} in {} from legacy selection",
+                    definitions.activeTrack(dimensionId).orElseThrow().trackId(), dimensionId);
+            }
         }
     }
 }

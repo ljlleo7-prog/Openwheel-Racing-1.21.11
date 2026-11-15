@@ -72,6 +72,15 @@ public final class OWRCommands {
     }
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+        dispatcher.register(Commands.literal("owrnetstatus").executes(context -> {
+            var player = context.getSource().getPlayerOrException();
+            if (!(player.getVehicle() instanceof OpenwheelCarEntity car)) {
+                context.getSource().sendFailure(Component.literal("Enter an Openwheel car first."));
+                return 0;
+            }
+            context.getSource().sendSuccess(() -> Component.literal(car.rollbackDiagnostics()), false);
+            return 1;
+        }));
         dispatcher.register(Commands.literal("owr")
             .requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_MODERATOR))
             .then(Commands.literal("regulation")
@@ -1382,10 +1391,19 @@ public final class OWRCommands {
     }
 
     private static int showActiveTrack(CommandContext<CommandSourceStack> context) {
-        TrackDefinition track = activeOrDefaultTrack(context);
+        Optional<TrackDefinition> selected = trackData(context).activeTrack(dimensionId(context));
+        if (selected.isEmpty()) {
+            send(context, "No active track in this dimension. Use /owr steward list and /owr steward select <track UUID>.");
+            return 0;
+        }
+        TrackDefinition track = selected.get();
         Optional<SurveyRoute> survey = TrackSurveyData.get(context.getSource().getLevel()).get(track.trackId());
         String surveyStatus = survey.map(route -> Math.round(route.length()) + "m/" + route.nodes().size() + " nodes").orElse("none");
         send(context, "Active stewarding track: " + track.name() + " [" + track.trackId() + "] centerline=" + Math.round(track.length()) + "m/" + track.centerline().size() + " nodes survey=" + surveyStatus);
+        track.startFinish().ifPresentOrElse(line -> send(context, String.format(java.util.Locale.ROOT,
+            "Finish: (%.2f, %.2f, %.2f) -> (%.2f, %.2f, %.2f), forward heading %.1f degrees; vertical tolerance 2.5m.",
+            line.left().x(), line.left().y(), line.left().z(), line.right().x(), line.right().y(), line.right().z(),
+            Math.toDegrees(line.headingRadians()))), () -> send(context, "Finish: MISSING; survey alone does not define a timing line."));
         return 1;
     }
 

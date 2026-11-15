@@ -48,6 +48,12 @@ public final class VehiclePhysics {
     private VehiclePhysics() {
     }
 
+    /** Terrain/step displacement is not momentum: only a requested upward velocity may persist. */
+    public static double carriedVerticalMovement(double requestedY, double actualY, boolean grounded, double stepHeight) {
+        if (grounded && Math.abs(actualY) <= stepHeight + 0.15) return 0;
+        return actualY > 0 ? Math.min(actualY, Math.max(0, requestedY)) : actualY;
+    }
+
     public static boolean isNewerSequence(int candidate, int current) {
         return candidate != current && candidate - current > 0;
     }
@@ -141,6 +147,18 @@ public final class VehiclePhysics {
         return new BodyAcceleration(
             forceLongitudinal / massKg - yawRate * velocityLateral,
             forceLateral / massKg + yawRate * velocityLongitudinal);
+    }
+
+    /** Remaining motion is already collision-clipped; friction scales with the blocked fraction. */
+    static double blockSlideRetention(double incomingSpeed, double survivingSpeed) {
+        if (incomingSpeed <= 1.0E-9) return 1.0;
+        if (survivingSpeed <= 1.0E-9) return 0.0;
+        double tangentSpeed = Math.min(incomingSpeed, survivingSpeed);
+        double blockedNormalSpeed = Math.sqrt(Math.max(0.0,
+            incomingSpeed * incomingSpeed - tangentSpeed * tangentSpeed));
+        // Coulomb-style scrub: remove tangential speed in proportion to normal impulse.
+        // Each contact applies this once; sustained scraping accumulates friction naturally.
+        return Math.max(0.0, 1.0 - 0.15 * blockedNormalSpeed / survivingSpeed);
     }
 
     static CollisionResponse resolvePlanarCollision(double firstVelocityX, double firstVelocityZ, double firstMass,

@@ -2,10 +2,20 @@ package com.openwheelracing.content.race;
 
 import net.minecraft.network.FriendlyByteBuf;
 
-public record RaceDirectorLapRow(long id, String driverName, int lapMillis, long completedWorldTime, int checkpointCount, boolean invalidated, String invalidationReason, long startFinishPos, int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled, long sessionId, String sessionName, String driverId, String tyre, int bopWeightPercent, int bopPowerPercent, double traveledMeters) {
+public record RaceDirectorLapRow(long id, String driverName, int lapMillis, long completedWorldTime, int checkpointCount, boolean invalidated, String invalidationReason, long startFinishPos, int power, int grip, int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled, long sessionId, String sessionName, String driverId, String tyre, int bopWeightPercent, int bopPowerPercent, double traveledMeters, boolean recoveredTiming, boolean estimatedTiming) {
+    public RaceDirectorLapRow(long id, String driverName, int lapMillis, long completedWorldTime, int checkpointCount,
+                              boolean invalidated, String invalidationReason, long startFinishPos, int power, int grip,
+                              int aero, int gearing, int damagePercent, int tyreWearPercent, boolean absEnabled,
+                              long sessionId, String sessionName, String driverId, String tyre, int bopWeightPercent,
+                              int bopPowerPercent, double traveledMeters) {
+        this(id, driverName, lapMillis, completedWorldTime, checkpointCount, invalidated, invalidationReason,
+            startFinishPos, power, grip, aero, gearing, damagePercent, tyreWearPercent, absEnabled, sessionId,
+            sessionName, driverId, tyre, bopWeightPercent, bopPowerPercent, traveledMeters, false, false);
+    }
+
     public static RaceDirectorLapRow fromRecord(OWRLapRecords.LapRecord record) {
         OWRLapRecords.CarSnapshot car = record.car();
-        return new RaceDirectorLapRow(record.id(), record.driverName(), record.lapMillis(), record.completedWorldTime(), record.checkpointCount(), record.invalidated(), record.invalidationReason(), record.startFinishPos(), car.power(), car.grip(), car.aero(), car.gearing(), car.damagePercent(), car.tyreWearPercent(), car.absEnabled(), record.sessionId(), record.sessionName(), record.driverId().toString(), car.tyre(), car.bopWeightPercent(), car.bopPowerPercent(), car.traveledMeters());
+        return new RaceDirectorLapRow(record.id(), record.driverName(), record.lapMillis(), record.completedWorldTime(), record.checkpointCount(), record.invalidated(), record.invalidationReason(), record.startFinishPos(), car.power(), car.grip(), car.aero(), car.gearing(), car.damagePercent(), car.tyreWearPercent(), car.absEnabled(), record.sessionId(), record.sessionName(), record.driverId().toString(), car.tyre(), car.bopWeightPercent(), car.bopPowerPercent(), car.traveledMeters(), car.recoveredTiming(), car.estimatedTiming());
     }
 
     public static void encode(RaceDirectorLapRow row, FriendlyByteBuf buffer) {
@@ -31,9 +41,11 @@ public record RaceDirectorLapRow(long id, String driverName, int lapMillis, long
         buffer.writeInt(row.bopWeightPercent);
         buffer.writeInt(row.bopPowerPercent);
         buffer.writeDouble(row.traveledMeters);
+        buffer.writeBoolean(row.recoveredTiming);
+        buffer.writeBoolean(row.estimatedTiming);
     }
 
     public static RaceDirectorLapRow decode(FriendlyByteBuf buffer) {
-        return new RaceDirectorLapRow(buffer.readLong(), buffer.readUtf(), buffer.readInt(), buffer.readLong(), buffer.readInt(), buffer.readBoolean(), buffer.readUtf(), buffer.readLong(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readBoolean(), buffer.readLong(), buffer.readUtf(), buffer.readUtf(), buffer.readUtf(), buffer.readInt(), buffer.readInt(), buffer.readDouble());
+        return new RaceDirectorLapRow(buffer.readLong(), buffer.readUtf(), buffer.readInt(), buffer.readLong(), buffer.readInt(), buffer.readBoolean(), buffer.readUtf(), buffer.readLong(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readInt(), buffer.readBoolean(), buffer.readLong(), buffer.readUtf(), buffer.readUtf(), buffer.readUtf(), buffer.readInt(), buffer.readInt(), buffer.readDouble(), buffer.readBoolean(), buffer.readBoolean());
     }
 }

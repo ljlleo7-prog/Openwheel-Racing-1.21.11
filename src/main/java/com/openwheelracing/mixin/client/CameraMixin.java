@@ -25,6 +25,15 @@ public abstract class CameraMixin {
             Vec3 position = OWRCameraMode.tCameraPosition(car, viewEntity, partialTick);
             this.setPosition(position);
         }
+        Vec3 correction = car.correctionRenderOffset();
+        Vec3 visualPosition = ((Camera) (Object) this).position();
+        float visualYaw = car.correctionRenderYaw();
+        if (detached && !tCamera && visualYaw != 0.0f) {
+            Vec3 eye = viewEntity.getEyePosition(partialTick);
+            visualPosition = eye.add(visualPosition.subtract(eye).yRot((float) -Math.toRadians(visualYaw)));
+        }
+        this.setPosition(visualPosition.add(correction));
+        this.setRotation(this.yRot + visualYaw, this.xRot);
         if (!detached || tCamera) {
             // Reuse the interpolated chassis pitch, preserving the player's free look.
             float relativeYaw = this.yRot - car.getYRot(partialTick);

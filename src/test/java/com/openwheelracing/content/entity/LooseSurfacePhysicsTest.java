@@ -11,7 +11,10 @@ class LooseSurfacePhysicsTest {
         double fast = LooseSurfacePhysics.resistanceCoefficient(true, false, false, 30.0);
         assertTrue(slow + 0.035 < 0.10);
         assertTrue(fast > slow);
-        assertEquals(fast, LooseSurfacePhysics.resistanceCoefficient(true, false, false, 100.0));
+        assertTrue(fast > 0.6);
+        assertTrue(LooseSurfacePhysics.resistanceCoefficient(true, false, false, 60.0) > fast);
+        assertEquals(LooseSurfacePhysics.resistanceCoefficient(true, false, false, 60.0),
+            LooseSurfacePhysics.resistanceCoefficient(true, false, false, 100.0));
         assertTrue(LooseSurfacePhysics.resistanceCoefficient(false, true, false, 30.0) >
             LooseSurfacePhysics.resistanceCoefficient(false, true, false, 1.0));
         assertEquals(0.0, LooseSurfacePhysics.resistanceCoefficient(false, false, false, 30.0));

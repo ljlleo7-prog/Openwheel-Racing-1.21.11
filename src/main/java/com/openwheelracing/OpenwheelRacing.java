@@ -46,6 +46,11 @@ public final class OpenwheelRacing {
         modBus.addListener(BasicAiFleetChunkTickets::register);
         com.openwheelracing.content.block.TrackWeatherGameTests.register(modBus);
         com.openwheelracing.content.recovery.CarRecoveryGameTests.register(modBus);
+        com.openwheelracing.content.entity.LapCaptureGameTests.register(modBus);
+        com.openwheelracing.content.entity.LapNetworkGameTests.register(modBus);
+        com.openwheelracing.content.entity.BlockRollbackGameTests.register(modBus);
+        com.openwheelracing.content.entity.ClientAuthorityGameTests.register(modBus);
+        com.openwheelracing.content.entity.SurveyCompensationGameTests.register(modBus);
         modBus.addListener(this::commonSetup);
         modBus.addListener(OWRNetwork::register);
         modBus.addListener(com.openwheelracing.network.RegionalWeatherPayload::register);
@@ -76,6 +81,7 @@ public final class OpenwheelRacing {
         NeoForge.EVENT_BUS.addListener(LiveRaceTimingService::onServerTick);
         NeoForge.EVENT_BUS.addListener(GrandPrixWeekendService::onServerTick);
         NeoForge.EVENT_BUS.addListener(RaceAutoFlagService::onServerTick);
+        NeoForge.EVENT_BUS.addListener(com.openwheelracing.network.TechnicalRulesNetwork::tick);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -88,6 +94,7 @@ public final class OpenwheelRacing {
 
     private void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         SurveyRouteRuntime.clearPlayer(event.getEntity().getUUID());
+        com.openwheelracing.network.TechnicalRulesNetwork.clear(event.getEntity().getUUID());
     }
 
     private void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
@@ -119,6 +126,7 @@ public final class OpenwheelRacing {
         BasicAiFleetChunkTickets.releaseAll();
         TrackMapAutoDetector.clearJobs();
         SurveyRouteRuntime.clearAll();
+        com.openwheelracing.network.TechnicalRulesNetwork.clearAll();
     }
 
     private void syncPlayerCircuit(PlayerEvent event) {
@@ -129,6 +137,7 @@ public final class OpenwheelRacing {
         OWRNetwork.sendRankingBoard(serverPlayer, level);
         OWRNetwork.sendRaceFlag(serverPlayer, level, false);
         OWRNetwork.sendVehiclePhysicsPreset(serverPlayer);
+        com.openwheelracing.network.TechnicalRulesNetwork.begin(serverPlayer);
         LiveRaceTimingService.sendCurrent(serverPlayer);
         OWRNetwork.sendSurveyRouteOverlay(serverPlayer, false, "", new java.util.UUID(0L, 0L), "", false, null);
         OWRNetwork.syncVisibleLiveries(serverPlayer);

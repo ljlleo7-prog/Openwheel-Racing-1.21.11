@@ -61,6 +61,43 @@ class ModularCollisionGeometryTest {
         assertTrue(0.50 * contact.normalZ() < 0.0);
     }
 
+    @Test
+    void acceleratingParallelToNearbyBarrierNeverProducesAnApproachingContact() {
+        for (double speed = 0.05; speed <= 5.0; speed += 0.05) {
+            for (double clearance : new double[] {0.001, 0.02, 0.10, 0.34}) {
+                var car = worldRectangle(0.0, 0.0, 0.0, 0.95, 2.0);
+                var wall = worldRectangle(1.45 + clearance, 0.0, 0.0, 0.5, 20.0);
+                assertTrue(ModularCollisionGeometry.firstContact(car, 0.0, speed, wall) == null,
+                    "Nearby parallel walls must not stop acceleration");
+            }
+        }
+    }
+
+    @Test
+    void rotatedCarCanPassWhenAxisAlignedBoundsOverlapBarrierBounds() {
+        double yaw = Math.PI / 4.0;
+        var car = worldRectangle(0.0, 0.0, yaw, 0.95, 2.0);
+        // Same heading, separated sideways: their world AABBs overlap but rectangles do not.
+        var wall = worldRectangle(Math.cos(yaw) * 1.6, Math.sin(yaw) * 1.6,
+            yaw, 0.5, 20.0);
+        for (double speed : new double[] {0.5, 2.0, 4.5}) {
+            assertTrue(ModularCollisionGeometry.firstContact(car,
+                -Math.sin(yaw) * speed, Math.cos(yaw) * speed, wall) == null);
+        }
+    }
+
+    @Test
+    void touchingWallAllowsParallelTravelAndEscapeButDetectsApproach() {
+        var car = worldRectangle(0.0, 0.0, 0.0, 0.95, 2.0);
+        var wall = worldRectangle(1.45, 0.0, 0.0, 0.5, 20.0);
+        for (double lateral : new double[] {-0.1, 0.0, 0.1}) {
+            var contact = ModularCollisionGeometry.firstContact(car, lateral, 4.0, wall);
+            assertTrue(contact != null);
+            double approach = lateral * contact.normalX() + 4.0 * contact.normalZ();
+            assertEquals(lateral > 0.0, approach < -1.0E-8);
+        }
+    }
+
     private static ModularCollisionGeometry.Rectangle rectangle(
             double localX, double localZ, double yaw, double halfWidth, double halfLength) {
         double forwardX = -Math.sin(yaw);

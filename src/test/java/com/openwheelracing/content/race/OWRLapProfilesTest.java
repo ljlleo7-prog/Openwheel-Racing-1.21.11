@@ -18,6 +18,14 @@ class OWRLapProfilesTest {
     }
 
     @Test
+    void interpolatesAcrossDetectionLineAwayFromSurveyOrigin() {
+        var profile = profile(UUID.randomUUID(), UUID.randomUUID(), new int[]{2000, 3000, 0, 1000}, new int[]{1000, 1000, 1000, 1000});
+        assertEquals(3500, profile.referenceMillis(6));
+        assertEquals(0, profile.referenceMillis(8));
+        assertEquals(1500, profile.referenceMillis(14));
+    }
+
+    @Test
     void interpolatesSpeedInKmh() {
         OWRLapProfiles.BestLapProfile profile = profile(UUID.randomUUID(), UUID.randomUUID(), new int[]{0, 1000, 2000, 3000}, new int[]{1000, 2000, 3000, 4000});
         assertEquals(90.0, profile.speedKmh(6.0), 0.001);

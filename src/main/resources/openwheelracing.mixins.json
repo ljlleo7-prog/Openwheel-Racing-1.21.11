@@ -1,9 +1,13 @@
 {
   "required": true,
   "package": "com.openwheelracing.mixin",
-  "mixins": ["LevelWeatherMixin", "ServerWeatherMixin"],
+  "mixins": ["LevelWeatherMixin", "ServerWeatherMixin", "ServerVehicleMovementMixin"],
   "client": [
     "client.CameraMixin",
+    "client.RiderCorrectionRenderMixin",
+    "client.VehiclePacketDelayMixin",
+    "client.VehicleCorrectionEpochMixin",
+    "client.LocalVehicleStateMixin",
     "client.WeatherEffectRendererMixin",
     "client.MinecraftMixin"
   ],

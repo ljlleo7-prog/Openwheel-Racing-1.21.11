@@ -86,7 +86,7 @@ public final class LapRecordsScreen extends Screen {
                 RaceDirectorLapRow row = rows.get(i);
                 int y = 132 + i * rowHeight();
                 addRenderableWidget(Button.builder(Component.literal(row.invalidated() ? t("revalidate") : t("invalidate")),
-                    b -> request(row.id(), row.invalidated() ? 2 : 1)).bounds(width - 182, y + 63, 94, 18).build());
+                    b -> request(row.id(), row.invalidated() ? 2 : 1)).bounds(width - 182, y + 63, 94, 18).build()).active = !row.estimatedTiming();
                 addRenderableWidget(Button.builder(Component.literal(t("discard")), b -> request(row.id(), 3))
                     .bounds(width - 84, y + 63, 60, 18).build());
             }
@@ -132,8 +132,10 @@ public final class LapRecordsScreen extends Screen {
             RaceDirectorLapRow row = rows.get(i);
             int x = 16 + i % columns() * (panelWidth + 8), y = 132 + i / columns() * rowHeight();
             g.fill(x, y, x + panelWidth, y + rowHeight() - 4, 0xFF1B2A35);
-            int color = row.invalidated() ? 0xFFFF7777 : 0xFF7EE787;
-            line(g, time(row.lapMillis()) + "  " + row.driverName() + "  [" + (row.invalidated() ? t("invalid") : t("valid")) + "]", x, y + 5, panelWidth, color);
+            int color = row.estimatedTiming() ? 0xFFFFD166 : row.invalidated() ? 0xFFFF7777 : 0xFF7EE787;
+            String status = row.estimatedTiming() ? t("recovered_estimated") : row.invalidated() ? t("invalid")
+                : row.recoveredTiming() ? t("recovered_precise") : t("valid");
+            line(g, time(row.lapMillis()) + "  " + row.driverName() + "  [" + status + "]", x, y + 5, panelWidth, color);
             line(g, "#" + row.id() + "  " + timestamp(row.completedWorldTime()) + " UTC", x, y + 17, panelWidth, 0xFFC9D1D9);
             line(g, t("session_row", row.sessionId(), row.sessionName()), x, y + 29, panelWidth, 0xFFC9D1D9);
             if (expanded) {

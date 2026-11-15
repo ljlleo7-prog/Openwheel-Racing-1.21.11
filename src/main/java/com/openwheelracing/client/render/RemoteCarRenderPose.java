@@ -19,7 +19,9 @@ final class RemoteCarRenderPose {
     static float apply(OpenwheelCarEntity car, EntityRenderState state, float partialTick, boolean localCar) {
         if (localCar) {
             POSES.remove(car);
-            return car.getYRot(partialTick);
+            var offset = car.correctionRenderOffset();
+            state.x += offset.x; state.y += offset.y; state.z += offset.z;
+            return car.getYRot(partialTick) + car.correctionRenderYaw();
         }
 
         Pose pose = POSES.computeIfAbsent(car, ignored -> new Pose());

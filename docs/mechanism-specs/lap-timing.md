@@ -128,3 +128,49 @@
 - The director receives the resulting count, and adjustments are logged with director, session, car, delta, and total.
 
 - An actual forward start-line trigger is authoritative for start validity, regardless of where or when the first telemetry sample is captured. The 3m grace applies only to attempts lacking an actual trigger. Line-triggered timing retains its interpolated crossing timestamp; later telemetry samples cannot shift or invalidate that origin. Other validity checks (off-track, checkpoints, driver changes, and minimum duration/distance) still apply.
+
+## In-world Capture Reproduction
+
+- `./gradlew runLapCaptureTestServer --offline` runs the isolated strict capture campaign against actual server entities, blocks, telemetry and lap SavedData. It currently fails on reproduced capture defects; it is separate from the normal build checks.
+- See [lap capture investigation](../lap-capture-investigation.md) for diagnostic mode, CSV artifacts, controlled trajectory versus native-physics coverage, observed thresholds, and the distinction between missing and invalid lap records.
+
+- `./gradlew runLapNetworkTestServer --offline` separately reproduces vanilla vehicle-position packet movements that bypass the configured finish-line scan, with checkpoint checking disabled. This strict regression now passes with final accepted-motion observation; delayed drive-input controls and rejected/duplicate packet checks are included.
+
+## Continuous Survey Compensation and Timing Accuracy
+
+- Final accepted vanilla vehicle movement feeds finish detection without changing client prediction or vanilla movement acceptance. Exact intersection uses committed positions and skips distant movements through conservative swept bounds.
+- Continuous surveyed-distance interval union supplies recovery evidence; reversals and repeated portions do not inflate coverage. At least 90% distinct length and a forward configured-finish seam transition are required, with discontinuities and unreliable gaps excluded.
+- Movement-backed recoveries use the primary geometric clock and can establish qualifying bests when the starting boundary is also precise. Route-only estimates and uncertain starts supply race credit but remain outside qualifying/profile bests; their timing source is persisted and shown in records.
+- See [implementation, accuracy trials and validation](../lap-recording-reliability.md).
+
+### Race interval continuity and migrated tracks
+
+Race timing retains uncertain rows within their previous same-lap order, with visible confidence markers and automatic detection-gap logs. Proven lap credit overrides held order; reliable reacquisition permits genuine overtakes. Missing observation alone does not retire a race participant. Practice/qualifying do not use this race continuity mode. Shared route-reference timestamps provide intervals and leader gaps continuously across the finish; `/owrgap interval|leader` selects the saved client display preference. Uncertain gaps remain unavailable.
+
+On legacy world startup, a missing/foreign active track selection is recovered only if exactly one local track has a finish line. Explicit local choices and track/survey/line geometry are preserved. `/owr steward active` diagnoses selection and finish geometry without creating a track. See `docs/race-failure-behavior.md` for simulations and limits.
+
+### Delta references and recorded personal bests
+
+- The HUD best lap uses the valid lap-record personal best for the selected timing scope. A missing/sparser survey profile never replaces that best with a slower time.
+- A valid precisely timed lap with sufficient route samples remains eligible as a delta reference after an impact. Impacted trajectories contain timing/speed samples but no learned lateral/heading line, and remain excluded from AI line/speed learning. Clean AI lines and timing-only references are retained independently per driver, route and session.
+- Profile sample timestamps interpolate between actual observed sample times. Revisits and the finish wrap preserve first-passage timestamps; circular reference interpolation supports a detection line away from the survey coordinate origin. Small missing regions interpolate between observed endpoints within the existing 97% coverage requirement.
+- The delta label shows its reference lap time when it differs from the recorded best. Inadequate route coverage reports that a lap was recorded but no delta reference was saved. Previously omitted profiles require a new adequately sampled lap; existing lap records remain authoritative.
+
+## Server-test readiness fixes (2026-11-14)
+
+Physical marker discovery now includes the same vertical support used by its
+crossing geometry, instead of truncating discovery at 0.2 m. This preserves the
+existing geometry guard; it does not turn a ground marker into a tall checkpoint.
+Steward timing dispatch processes every crossed line in movement-fraction order,
+so adjacent checkpoints inside one tick are both counted. The strict seeded
+lap-capture campaign covers the airborne marker and high-speed checkpoint cases.
+
+## Accepted client motion (protocol 27)
+
+For technically admitted human drivers, all crossing detection and recording use
+validated client movement segments, not an independently simulated server path.
+Each accepted sequence retains a distinct time interval during packet bursts;
+duplicates and rejected motion cannot create a crossing. Long client freezes
+cannot indefinitely stop elapsed race time. Telemetry and profile sampling use
+the same accepted timeline. See [client-authoritative motion](client-authoritative-motion.md)
+for admission, timing grace and limitations. AI retains the server physics path.

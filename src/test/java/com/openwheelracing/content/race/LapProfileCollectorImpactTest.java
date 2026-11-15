@@ -40,6 +40,47 @@ class LapProfileCollectorImpactTest {
         assertNotNull(collector.finish("test", route.trackId(), "Driver", 3, 10_000, 200));
     }
 
+    @Test
+    void impactDoesNotDiscardValidTimingButStillCannotTeachAi() {
+        var route = route();
+        var collector = collect(route, true);
+        assertNull(collector.finish("test", route.trackId(), "Driver", 1, 10_000, 200));
+        var timing = collector.finishTiming("test", route.trackId(), "Driver",
+            1, 10_000, 200);
+        assertNotNull(timing);
+        assertFalse(timing.hasRecordedLine());
+        assertEquals(10_000, timing.lapMillis());
+    }
+
+    @Test
+    void unequalSampleIntervalsUseActualElapsedTime() {
+        var route = route();
+        var collector = new LapProfileCollector();
+        collector.start(route, UUID.randomUUID(), 0);
+        for (int i = 0; i * 8 < route.length(); i++) {
+            var point = SurveyRouteSampler.sample(route, i * 8);
+            collector.sample(point.position(), point.headingRadians(), i * 3, 192);
+        }
+        var timing = collector.finishTiming("test", route.trackId(), "Driver",
+            1, (int) Math.round(route.length() / 8 * 150), 200);
+        assertNotNull(timing);
+        assertEquals(75, timing.referenceMillis(4), 2);
+        assertEquals(225, timing.referenceMillis(12), 2);
+    }
+
+    @Test
+    void finishWrapAndSpinRevisitsDoNotOverwriteFirstPassageTime() {
+        var route = route();
+        var collector = collect(route, false);
+        var afterFinish = SurveyRouteSampler.sample(route, 2);
+        collector.sample(afterFinish.position(), afterFinish.headingRadians(), 200, 144);
+        var timing = collector.finishTiming("test", route.trackId(), "Driver",
+            1, 10_000, 200);
+        assertNotNull(timing);
+        assertEquals(0, timing.referenceMillis(0));
+        assertEquals(100, timing.referenceMillis(4), 2);
+    }
+
     private static LapProfileCollector collect(SurveyRouteModel route, boolean impact) {
         LapProfileCollector collector = new LapProfileCollector();
         collector.start(route, UUID.randomUUID(), 0);

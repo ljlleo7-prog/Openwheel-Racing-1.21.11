@@ -53,7 +53,8 @@ public class SafetyCarRenderer extends EntityRenderer<SafetyCarEntity, SafetyCar
     @Override
     public void extractRenderState(SafetyCarEntity car, SafetyCarRenderState state, float partialTick) {
         super.extractRenderState(car, state, partialTick);
-        state.yRot = car.getYRot(partialTick);
+        boolean local = Minecraft.getInstance().player != null && Minecraft.getInstance().player.getVehicle() == car;
+        state.yRot = RemoteCarRenderPose.apply(car, state, partialTick, local);
         state.lightCoords = 15728880;
     }
 

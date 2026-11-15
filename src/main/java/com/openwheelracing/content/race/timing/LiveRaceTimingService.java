@@ -57,8 +57,9 @@ public final class LiveRaceTimingService {
         }
         RuntimeState runtime = new RuntimeState(sessionId, sessionName, activeTrack.get().trackId(), route.get().routeId(),
             surveys.revision(), route.get().toModel(), lapLimit, eligibleParticipants, remainingRaceTicks);
-        OWRLapRecords.get(level).getValidSessionLaps(OWRLapRecords.get(level).getActiveSessionId())
+        OWRLapRecords.get(level).getRaceSessionLaps(OWRLapRecords.get(level).getActiveSessionId())
             .forEach(lap -> runtime.recordedLapBaseline.merge(lap.driverId(), 1, Integer::sum));
+        runtime.engine.setRaceContinuity(true);
         configureGridTiming(level, runtime);
         RuntimeState previous = RUNTIMES.get(level);
         if (previous != null) runtime.engine.ensureRevisionAfter(previous.engine.revision());
@@ -122,6 +123,7 @@ public final class LiveRaceTimingService {
         runtime.remainingRaceTicks = Math.max(-1L, remainingRaceTicks);
         runtime.weekendName = weekendName == null ? "" : weekendName;
         runtime.sessionType = sessionType == null ? "" : sessionType;
+        runtime.engine.setRaceContinuity(!runtime.sessionType.equals("PRACTICE") && !runtime.sessionType.equals("QUALIFYING"));
     }
 
     /** Removes GP-only HUD decoration while retaining the finished timing snapshot for Race Director records. */
@@ -235,6 +237,7 @@ public final class LiveRaceTimingService {
         }
         RuntimeState runtime = new RuntimeState(checkpoint.sessionId(), checkpoint.sessionName(), checkpoint.trackId(), checkpoint.routeId(),
             surveys.revision(), route.get().toModel(), checkpoint.lapLimit(), Set.copyOf(checkpoint.eligibleParticipants()), -1L);
+        runtime.engine.setRaceContinuity(true);
         configureGridTiming(level, runtime);
         runtime.active = false;
         runtime.suspensionReason = "SERVER_RECOVERY";
@@ -244,7 +247,7 @@ public final class LiveRaceTimingService {
                 saved.routeDistanceMeters(), saved.stablePosition(), saved.beforeRaceLine(), saved.manualLapAdjustment())).toList();
         runtime.engine.restore(route.get().length(), restored);
         Map<UUID, Integer> recordedSessionLaps = new HashMap<>();
-        OWRLapRecords.get(level).getValidSessionLaps(OWRLapRecords.get(level).getActiveSessionId())
+        OWRLapRecords.get(level).getRaceSessionLaps(OWRLapRecords.get(level).getActiveSessionId())
             .forEach(lap -> recordedSessionLaps.merge(lap.driverId(), 1, Integer::sum));
         restored.forEach(progress -> runtime.recordedLapBaseline.put(progress.participant().id(),
             Math.max(0, recordedSessionLaps.getOrDefault(progress.participant().id(), 0) - (progress.completedLaps() - progress.manualLapAdjustment()))));
@@ -281,6 +284,7 @@ public final class LiveRaceTimingService {
         private final SurveyRouteModel route;
         private final int lapLimit;
         private final LiveRaceClassificationEngine engine = new LiveRaceClassificationEngine();
+        private final Map<RaceParticipantKey, Long> detectionGaps = new HashMap<>();
         private final Map<RaceParticipantKey, LocalizedParticipant> localized = new HashMap<>();
         private boolean active = true;
         private String suspensionReason = "";
@@ -321,6 +325,7 @@ public final class LiveRaceTimingService {
         }
 
         private void tick(ServerLevel level) {
+            engine.setRaceContinuity(!sessionType.equals("PRACTICE") && !sessionType.equals("QUALIFYING"));
             if (!validateRoute(level)) {
                 suspend("ROUTE_CHANGED");
             }
@@ -328,6 +333,20 @@ public final class LiveRaceTimingService {
                 List<RaceTimingObservation> observations = collectObservations(level);
                 long tick = level.getGameTime();
                 engineSnapshot = engine.advance(route.length(), tick, tick * 50L, observations);
+                for (RaceTimingRow row : engineSnapshot.rows()) {
+                    if (row.confidence() != RaceProgressConfidence.CONFIRMED) {
+                        if (detectionGaps.putIfAbsent(row.participant(), tick) == null) {
+                            com.mojang.logging.LogUtils.getLogger().warn(
+                                "Race timing provisional: session={} driver={} id={} tick={} laps={} confidence={}; automatic classification continues",
+                                sessionId, row.displayName(), row.participant().id(), tick, row.completedLaps(), row.confidence());
+                        }
+                    } else {
+                        Long start = detectionGaps.remove(row.participant());
+                        if (start != null) com.mojang.logging.LogUtils.getLogger().info(
+                            "Race timing detection recovered: session={} driver={} id={} gapTicks={}..{} laps={}; historical gap remains in this log",
+                            sessionId, row.displayName(), row.participant().id(), start, tick, row.completedLaps());
+                    }
+                }
             }
             long tick = level.getGameTime();
             boolean materialChange = engineSnapshot != null && engineSnapshot.revision() != lastBroadcastRevision;

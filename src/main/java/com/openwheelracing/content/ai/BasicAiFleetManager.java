@@ -263,7 +263,7 @@ public final class BasicAiFleetManager {
         Optional<SurveyRoute> stored = TrackSurveyData.get(level).get(trackId);
         if (stored.isEmpty()) return List.of();
         SurveyRouteModel route = stored.get().toModel();
-        OWRLapProfiles.BestLapProfile profile = OWRLapProfiles.get(level).get(trackId, route.routeId(), playerId).orElse(null);
+        OWRLapProfiles.BestLapProfile profile = OWRLapProfiles.get(level).recordedLine(trackId, route.routeId(), playerId).orElse(null);
         if (profile == null || profile.origin() != OWRLapProfiles.Origin.PLAYER || !profile.hasRecordedLine()) return List.of();
         int count = Math.max(3, (int) Math.ceil(route.length() / 2.0));
         List<com.openwheelracing.content.race.LapProfileCollector.TracePoint> points = new ArrayList<>(count);
@@ -867,12 +867,14 @@ public final class BasicAiFleetManager {
 
     private static int playerPriorSampleCount(ServerLevel level, SurveyRouteModel route) {
         if (!BasicAiPlayerPrior.enabled()) return 0;
-        return OWRLapProfiles.get(level).matching(route.trackId(), route.routeId(), OWRLapProfiles.Origin.PLAYER).size();
+        return (int) OWRLapProfiles.get(level).matching(route.trackId(), route.routeId(), OWRLapProfiles.Origin.PLAYER).stream()
+            .filter(OWRLapProfiles.BestLapProfile::hasRecordedLine).count();
     }
 
     private static double playerPriorSpeed(ServerLevel level, SurveyRouteModel route, double routeDistance, BasicAiTrafficMode mode) {
         if (!BasicAiPlayerPrior.enabled() || mode != BasicAiTrafficMode.RACE) return 0.0;
-        List<OWRLapProfiles.BestLapProfile> profiles = OWRLapProfiles.get(level).matching(route.trackId(), route.routeId(), OWRLapProfiles.Origin.PLAYER);
+        List<OWRLapProfiles.BestLapProfile> profiles = OWRLapProfiles.get(level).matching(route.trackId(), route.routeId(), OWRLapProfiles.Origin.PLAYER).stream()
+            .filter(OWRLapProfiles.BestLapProfile::hasRecordedLine).toList();
         if (profiles.isEmpty()) return 0.0;
         double total = 0.0;
         int count = 0;

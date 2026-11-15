@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:function",
+  "function": "openwheelracing:client_authority",
+  "environment": "openwheelracing:lap_network",
+  "structure": "openwheelracing:car_recovery",
+  "max_ticks": 220,
+  "sky_access": true
+}

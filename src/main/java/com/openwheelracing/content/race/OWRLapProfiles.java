@@ -84,12 +84,22 @@ public final class OWRLapProfiles extends SavedData {
             .min(Comparator.comparingInt(BestLapProfile::lapMillis));
     }
 
+    public Optional<BestLapProfile> recordedLine(UUID trackId, UUID routeId, UUID driverId) {
+        return matching(trackId, routeId, Origin.PLAYER).stream()
+            .filter(profile -> profile.driverId().equals(driverId) && profile.hasRecordedLine())
+            .min(Comparator.comparingInt(BestLapProfile::lapMillis));
+    }
+
     public boolean putIfFaster(BestLapProfile profile) {
-        Optional<BestLapProfile> previous = get(profile.trackId(), profile.routeId(), profile.driverId(), LapTimingScope.SESSION, profile.sessionId());
-        if (previous.isPresent() && previous.get().lapMillis() <= profile.lapMillis()
-            && (previous.get().hasRecordedLine() || !profile.hasRecordedLine())) return false;
+        Optional<BestLapProfile> previous = profiles.stream()
+            .filter(existing -> existing.trackId().equals(profile.trackId()) && existing.routeId().equals(profile.routeId())
+                && existing.driverId().equals(profile.driverId()) && existing.sessionId() == profile.sessionId()
+                && existing.hasRecordedLine() == profile.hasRecordedLine())
+            .min(Comparator.comparingInt(BestLapProfile::lapMillis));
+        if (previous.isPresent() && previous.get().lapMillis() <= profile.lapMillis()) return false;
         profiles.removeIf(existing -> existing.trackId().equals(profile.trackId()) && existing.routeId().equals(profile.routeId())
-            && existing.driverId().equals(profile.driverId()) && existing.sessionId() == profile.sessionId());
+            && existing.driverId().equals(profile.driverId()) && existing.sessionId() == profile.sessionId()
+            && existing.hasRecordedLine() == profile.hasRecordedLine());
         profiles.add(profile);
         trim(profile.trackId(), profile.routeId());
         revision++;
@@ -192,9 +202,16 @@ public final class OWRLapProfiles extends SavedData {
             double index = normalize(routeDistance, routeLength) / spacing;
             int lower = Math.min((int) Math.floor(index), timeMillis.length - 1);
             int upper = (lower + 1) % timeMillis.length;
-            double fraction = index - Math.floor(index);
-            int upperTime = upper == 0 ? lapMillis : timeMillis[upper];
-            return (int) Math.round(timeMillis[lower] + (upperTime - timeMillis[lower]) * fraction);
+            double lowerDistance = lower * spacing;
+            double upperDistance = upper == 0 ? routeLength : upper * spacing;
+            double fraction = Math.max(0.0, Math.min(1.0,
+                (normalize(routeDistance, routeLength) - lowerDistance) / Math.max(1.0E-9, upperDistance - lowerDistance)));
+            int lowerTime = timeMillis[lower];
+            int upperTime = timeMillis[upper];
+            // The detection line need not coincide with the survey's coordinate seam.
+            if (upperTime < lowerTime || upper == 0 && upperTime == lowerTime) upperTime += lapMillis;
+            int result = (int) Math.round(lowerTime + (upperTime - lowerTime) * fraction);
+            return lapMillis > 0 ? Math.floorMod(result, lapMillis) : 0;
         }
 
         public double speedKmh(double routeDistance) {
