@@ -21,9 +21,26 @@ gradle-app.setting
 .classpath
 
 **/run/
-
+/docs/*
 *.mca
 net/*
 patches/*
 
 .gradle-validation/*
+
+# Independent website encrypted runtime state and locks
+**/metadata.vault*
+**/metadata.lock
+
+# Local standalone website paths and hostname
+**/monitor.config.json
+
+# Private race monitor project: website, manager, listener add-on, docs and builds.
+/private/race-monitor/
+# Guard old locations against accidental reintroduction into the public repository.
+/tools/race-monitor/
+/tools/race-manager/
+/src/main/resources/monitor/
+/src/main/java/com/openwheelracing/monitor/
+/src/test/java/com/openwheelracing/monitor/
+/docs/race-monitor.md

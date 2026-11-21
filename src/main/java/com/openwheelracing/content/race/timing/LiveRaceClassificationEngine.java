@@ -53,6 +53,26 @@ public final class LiveRaceClassificationEngine {
         this.swapConfirmationTicks = swapConfirmationTicks;
     }
 
+    /** Re-anchor cars moved during a stoppage without awarding laps or interpolating stopped time. */
+    public void resumeAt(List<RaceTimingObservation> observations) {
+        pendingOrder = List.of();
+        pendingOrderTicks = 0;
+        for (RaceTimingObservation observation : observations) {
+            ParticipantState state = participants.get(observation.participant());
+            if (state == null || !observation.confidence().canInitiatePositionChange()) continue;
+            double distance = ParticipantState.wrap(observation.routeDistanceMeters(), routeLengthMeters);
+            boolean relocated = Math.abs(distance - state.routeDistanceMeters) > 1.0;
+            state.routeDistanceMeters = distance;
+            if (relocated) state.beforeRaceLine = distance > routeLengthMeters * 0.5;
+            state.absoluteProgressMeters = (state.completedLaps - (state.beforeRaceLine ? 1 : 0)) * routeLengthMeters + distance;
+            state.previousAbsoluteProgressMeters = state.absoluteProgressMeters;
+            state.previousMillis = observation.preciseMillis();
+            state.lastAcceptedMillis = observation.preciseMillis();
+            state.missingSinceTick = -1L;
+            state.referenceTimes.clear();
+        }
+    }
+
     public LiveRaceTimingSnapshot advance(double routeLengthMeters, long serverTick, long preciseMillis, List<RaceTimingObservation> observations) {
         if (!(routeLengthMeters > 0.0) || !Double.isFinite(routeLengthMeters)) {
             throw new IllegalArgumentException("Route length must be positive and finite");

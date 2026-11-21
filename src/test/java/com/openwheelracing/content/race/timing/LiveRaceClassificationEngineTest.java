@@ -14,6 +14,23 @@ class LiveRaceClassificationEngineTest {
     private static final RaceParticipantKey BRAVO = key("00000000-0000-0000-0000-000000000002", RaceParticipantKind.AI);
 
     @Test
+    void restartAfterGridRelocationPreservesLapsAndAcceptsForwardProgress() {
+        var engine = new LiveRaceClassificationEngine();
+        engine.restore(ROUTE_LENGTH, List.of(
+            new LiveRaceClassificationEngine.RestoredProgress(ALPHA, "Alpha", 3, 60, 1)));
+        engine.resumeAt(List.of(observation(ALPHA, "Alpha", 95, 2000, 100000, RaceProgressConfidence.CONFIRMED)));
+        var released = engine.advance(ROUTE_LENGTH, 2001, 100050, List.of(
+            observation(ALPHA, "Alpha", 96, 2001, 100050, RaceProgressConfidence.CONFIRMED))).rows().getFirst();
+        assertEquals(3, released.completedLaps());
+        assertEquals(96, released.routeDistanceMeters());
+        assertEquals(RaceProgressConfidence.CONFIRMED, released.confidence());
+        var crossing = engine.advance(ROUTE_LENGTH, 2002, 100100, List.of(
+            observation(ALPHA, "Alpha", 1, 2002, 100100, RaceProgressConfidence.CONFIRMED))).rows().getFirst();
+        assertEquals(3, crossing.completedLaps());
+        assertEquals(301, crossing.absoluteProgressMeters());
+    }
+
+    @Test
     void directorAwardImmediatelyChangesRankAndPreservesRoutePosition() {
         var engine = new LiveRaceClassificationEngine();
         engine.advance(ROUTE_LENGTH, 1, 50, List.of(

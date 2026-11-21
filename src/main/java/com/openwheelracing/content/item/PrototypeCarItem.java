@@ -154,6 +154,7 @@ public class PrototypeCarItem extends Item {
             car.applyTyres(getSetup(stack).grip(), getTyreType(stack));
             car.setComponentDamage(getComponentDamage(stack));
             car.setTyreWearPercent(getTyreWear(stack));
+            car.setTyresFitted(stack.getOrDefault(OWRDataComponents.TYRES_FITTED.get(), true));
             car.setLivery(getLivery(stack));
             car.setLiveryColors(getLiveryColors(stack));
             car.setLiveryTexture(getLiveryTexture(stack));
@@ -174,7 +175,7 @@ public class PrototypeCarItem extends Item {
         PrototypeCarSetup setup = getSetup(stack);
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.single_seat").withStyle(ChatFormatting.GRAY));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.power", setup.power()).withStyle(ChatFormatting.RED));
-        tooltip.accept(TyreItem.tyreDescription(getTyreType(stack), setup.grip()));
+        if (stack.getOrDefault(OWRDataComponents.TYRES_FITTED.get(), true)) tooltip.accept(TyreItem.tyreDescription(getTyreType(stack), setup.grip()));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.aero", setup.aero()).withStyle(ChatFormatting.AQUA));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.gearing", setup.gearing()).withStyle(ChatFormatting.GOLD));
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.livery", CarLivery.fromIndex(getLivery(stack)).displayName()).withStyle(ChatFormatting.BLUE));
@@ -185,6 +186,8 @@ public class PrototypeCarItem extends Item {
             tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.livery_texture", texture.id()).withStyle(ChatFormatting.BLUE));
         }
         tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.damage", getCarDamage(stack)).withStyle(ChatFormatting.DARK_RED));
-        tooltip.accept(Component.translatable("tooltip.openwheelracing.prototype_car.tyres", Math.max(0, 100 - getTyreWear(stack))).withStyle(ChatFormatting.YELLOW));
+        tooltip.accept(stack.getOrDefault(OWRDataComponents.TYRES_FITTED.get(), true)
+            ? Component.translatable("tooltip.openwheelracing.prototype_car.tyres", Math.max(0, 100 - getTyreWear(stack))).withStyle(ChatFormatting.YELLOW)
+            : Component.translatable("message.openwheelracing.pit.tyreless").withStyle(ChatFormatting.RED));
     }
 }

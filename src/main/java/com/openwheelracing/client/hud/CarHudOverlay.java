@@ -223,6 +223,9 @@ public final class CarHudOverlay {
 
         if (car.isInPitStop()) {
             renderPitStop(graphics, font, car, x + 36, y - 17, PRIMARY_WIDTH - 72);
+        } else if (!car.hasTyres()) {
+            graphics.drawCenteredString(font, Component.translatable("message.openwheelracing.pit.tyreless"),
+                x + PRIMARY_WIDTH / 2, y - 17, 0xFFFF5C5C);
         }
     }
 

@@ -39,6 +39,7 @@ public class SafetyCarRenderer extends EntityRenderer<SafetyCarEntity, SafetyCar
 
     private static ColoredObjModel model;
     private static int[] bakedColors;
+    private static boolean[] wheelFaces;
 
     public SafetyCarRenderer(EntityRendererProvider.Context context) {
         super(context);
@@ -56,6 +57,8 @@ public class SafetyCarRenderer extends EntityRenderer<SafetyCarEntity, SafetyCar
         boolean local = Minecraft.getInstance().player != null && Minecraft.getInstance().player.getVehicle() == car;
         state.yRot = RemoteCarRenderPose.apply(car, state, partialTick, local);
         state.lightCoords = 15728880;
+        state.tyresFitted = car.hasTyres();
+        state.jackLift = car.getJackLift(partialTick);
     }
 
     @Override
@@ -64,10 +67,12 @@ public class SafetyCarRenderer extends EntityRenderer<SafetyCarEntity, SafetyCar
         loadModel();
 
         poseStack.pushPose();
+        poseStack.translate(0, state.jackLift, 0);
         poseStack.mulPose(Axis.YP.rotationDegrees(-state.yRot));
         int light = state.lightCoords;
-        nodeCollector.submitCustomGeometry(poseStack, RT_CAR, (pose, consumer) -> drawModel(consumer, pose, model, bakedColors, light, false));
-        nodeCollector.submitCustomGeometry(poseStack, RT_GLASS, (pose, consumer) -> drawModel(consumer, pose, model, bakedColors, light, true));
+        boolean tyresFitted = state.tyresFitted;
+        nodeCollector.submitCustomGeometry(poseStack, RT_CAR, (pose, consumer) -> drawModel(consumer, pose, model, bakedColors, light, false, tyresFitted));
+        nodeCollector.submitCustomGeometry(poseStack, RT_GLASS, (pose, consumer) -> drawModel(consumer, pose, model, bakedColors, light, true, tyresFitted));
         poseStack.popPose();
     }
 
@@ -75,12 +80,19 @@ public class SafetyCarRenderer extends EntityRenderer<SafetyCarEntity, SafetyCar
         if (model == null) {
             model = ColoredObjModel.load(Minecraft.getInstance().getResourceManager(), SAFETY_CAR_OBJ, false);
             bakedColors = model.bakeColors(SafetyCarRenderer::safetyCarColor);
+            wheelFaces = new boolean[model.faces.size()];
+            for (int i = 0; i < wheelFaces.length; i++) {
+                var f = model.faces.get(i);
+                wheelFaces[i] = wheelVertex(f.x0(), f.y0(), f.z0()) && wheelVertex(f.x1(), f.y1(), f.z1())
+                    && wheelVertex(f.x2(), f.y2(), f.z2()) && wheelVertex(f.x3(), f.y3(), f.z3());
+            }
         }
     }
 
-    private static void drawModel(VertexConsumer consumer, PoseStack.Pose pose, ColoredObjModel model, int[] colors, int light, boolean glassPass) {
+    private static void drawModel(VertexConsumer consumer, PoseStack.Pose pose, ColoredObjModel model, int[] colors, int light, boolean glassPass, boolean tyresFitted) {
         List<ColoredObjModel.Face> faces = model.faces;
         for (int i = 0; i < faces.size(); i++) {
+            if (!tyresFitted && wheelFaces[i]) continue;
             ColoredObjModel.Face face = faces.get(i);
             int color = colors[i];
             if (isGlassColor(color) != glassPass) {
@@ -91,6 +103,15 @@ public class SafetyCarRenderer extends EntityRenderer<SafetyCarEntity, SafetyCar
             vertex(consumer, pose, face.x2(), face.y2(), face.z2(), face.nx(), face.ny(), face.nz(), color, light);
             vertex(consumer, pose, face.x3(), face.y3(), face.z3(), face.nx(), face.ny(), face.nz(), color, light);
         }
+    }
+
+    // The safety-car OBJ groups by material, so classify its four wheel volumes once at load time.
+    private static boolean wheelVertex(float x, float y, float z) {
+        if (Math.abs(x) < 61) return false;
+        float centerZ = z < 0 ? -130 : 131.25f;
+        float centerY = z < 0 ? 21.15f : 20.3f;
+        float dy = y - centerY, dz = z - centerZ;
+        return dy * dy + dz * dz <= 36 * 36;
     }
 
     private static int safetyCarColor(ColoredObjModel.Face face) {
@@ -151,5 +172,7 @@ public class SafetyCarRenderer extends EntityRenderer<SafetyCarEntity, SafetyCar
     public static class SafetyCarRenderState extends EntityRenderState {
         public float yRot;
         public int lightCoords;
+        public boolean tyresFitted = true;
+        public float jackLift;
     }
 }

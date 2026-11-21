@@ -62,7 +62,7 @@ The reusable `openwheelracing:car_dragger` moves the existing car entity and its
 as one assembly. It preserves damage, setup, livery, inventory and passenger identity; it does
 not package an occupied vehicle into an item. Safety cars inherit the same recovery behavior.
 
-- Right-click a nearby, nearly stationary car on foot to attach. Active AI and tyre service must
+- Right-click a nearby, nearly stationary car on foot to attach. Active AI and pit service must
   be stopped first. Each marshal holds one car; each car has one owner.
 - Walk and look to position the car horizontally at a point 4.5 blocks ahead. Looking up
   continuously raises the car with no recovery height ceiling. Looking straight up lifts
@@ -110,3 +110,11 @@ Upward-extraction tests `openwheelracing:upward_car_recovery` and
 more than 20 blocks above the marshal, hold the elevated car with a level view, then lower it
 using the item. These cover unlimited height, owner lookup beyond the former 16-block range,
 vertical tether behavior, and retention of the seated driver.
+
+Protocol 28 uses explicit server-control snapshots throughout occupied recovery
+and a final driver-control snapshot at release. Late pre-grab driver frames are
+invalidated by epochs. See [shared-car authority](physical-pit-service.md).
+
+Car-to-car contact now uses [swept component contact and a shared impulse solver](car-to-car-contact.md).
+Client prediction and accepted server movement both participate; old driver
+frames cannot overwrite the resulting impulse on either vehicle.

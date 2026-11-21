@@ -29,7 +29,7 @@ public final class LiveryPreviewRenderer {
 
     private LiveryPreviewRenderer() {}
 
-    public static Preview render(NativeImage livery, CarLiveryColors fallbackColors, float yawDegrees, int width, int height) {
+    public static Preview render(NativeImage livery, CarLiveryColors fallbackColors, float yawDegrees, int width, int height, boolean picture) {
         loadModel();
         NativeImage image = new NativeImage(width, height, true);
         image.fillRect(0, 0, width, height, 0x00000000);
@@ -66,8 +66,8 @@ public final class LiveryPreviewRenderer {
             int fallback = fallbackColor(face, fallbackColors);
             boolean paintable = LiveryUvMapping.isPaintableMaterial(face.materialRgb()) && face.hasLiveryRegion();
             int color = previewFaceColor(face, livery, fallback, paintable);
-            rasterize(image, depth, hitU, hitV, a, b, c, auv, buv, cuv, color, paintable);
-            rasterize(image, depth, hitU, hitV, a, c, d, auv, cuv, duv, color, paintable);
+            rasterize(image, depth, hitU, hitV, a, b, c, auv, buv, cuv, color, paintable, picture ? livery : null);
+            rasterize(image, depth, hitU, hitV, a, c, d, auv, cuv, duv, color, paintable, picture ? livery : null);
         }
         return new Preview(image, hitU, hitV, width, height);
     }
@@ -104,7 +104,7 @@ public final class LiveryPreviewRenderer {
         return new Vertex(width * 0.5f + yawX * scale, height * 0.54f - pitchY * scale, pitchZ);
     }
 
-    private static void rasterize(NativeImage image, float[] depth, int[] hitU, int[] hitV, Vertex a, Vertex b, Vertex c, Uv auv, Uv buv, Uv cuv, int color, boolean paintable) {
+    private static void rasterize(NativeImage image, float[] depth, int[] hitU, int[] hitV, Vertex a, Vertex b, Vertex c, Uv auv, Uv buv, Uv cuv, int color, boolean paintable, NativeImage picture) {
         int minX = clamp((int) Math.floor(Math.min(a.x, Math.min(b.x, c.x))), 0, image.getWidth() - 1);
         int maxX = clamp((int) Math.ceil(Math.max(a.x, Math.max(b.x, c.x))), 0, image.getWidth() - 1);
         int minY = clamp((int) Math.floor(Math.min(a.y, Math.min(b.y, c.y))), 0, image.getHeight() - 1);
@@ -132,8 +132,13 @@ public final class LiveryPreviewRenderer {
                 if (paintable) {
                     hitU[index] = clamp(Math.round(auv.u * w0 + buv.u * w1 + cuv.u * w2), 0, ClientLiveryTextures.SIZE - 1);
                     hitV[index] = clamp(Math.round(auv.v * w0 + buv.v * w1 + cuv.v * w2), 0, ClientLiveryTextures.SIZE - 1);
+                } else {
+                    hitU[index] = -1;
+                    hitV[index] = -1;
                 }
-                image.setPixel(x, y, shadeByDepth(color, z));
+                int pixelColor = picture != null && paintable
+                    ? PictureLivery.composite(picture.getPixel(hitU[index], hitV[index]), color) : color;
+                image.setPixel(x, y, shadeByDepth(pixelColor, z));
             }
         }
     }

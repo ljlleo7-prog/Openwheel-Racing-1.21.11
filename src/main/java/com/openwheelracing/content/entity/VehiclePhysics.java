@@ -150,6 +150,10 @@ public final class VehiclePhysics {
     }
 
     /** Remaining motion is already collision-clipped; friction scales with the blocked fraction. */
+    static double barrierDamageSeverity(double normalSpeed) {
+        return Math.max(0, normalSpeed - .28) * 10;
+    }
+
     static double blockSlideRetention(double incomingSpeed, double survivingSpeed) {
         if (incomingSpeed <= 1.0E-9) return 1.0;
         if (survivingSpeed <= 1.0E-9) return 0.0;
@@ -183,6 +187,26 @@ public final class VehiclePhysics {
             secondVelocityX + nx * impulse / secondMass,
             secondVelocityZ + nz * impulse / secondMass);
     }
+
+    /** Frictionless normal impulse including contact-point rotation; all velocities use the same time unit. */
+    static RigidCollisionResponse resolveRigidPlanarCollision(double ax, double az, double am, double aw, double ai,
+            double arx, double arz, double bx, double bz, double bm, double bw, double bi,
+            double brx, double brz, double nx, double nz, double restitution) {
+        double length = Math.hypot(nx, nz);
+        if (length < 1e-9 || am <= 0 || bm <= 0 || ai <= 0 || bi <= 0)
+            return new RigidCollisionResponse(ax, az, aw, bx, bz, bw);
+        nx /= length; nz /= length;
+        double ac = arx * nz - arz * nx, bc = brx * nz - brz * nx;
+        double closing = (ax - bx) * nx + (az - bz) * nz + aw * ac - bw * bc;
+        if (closing <= 0) return new RigidCollisionResponse(ax, az, aw, bx, bz, bw);
+        double impulse = (1 + clamp(restitution, 0, 1)) * closing
+            / (1 / am + 1 / bm + ac * ac / ai + bc * bc / bi);
+        return new RigidCollisionResponse(ax - impulse * nx / am, az - impulse * nz / am,
+            aw - impulse * ac / ai, bx + impulse * nx / bm, bz + impulse * nz / bm, bw + impulse * bc / bi);
+    }
+
+    record RigidCollisionResponse(double firstVelocityX, double firstVelocityZ, double firstYawRate,
+        double secondVelocityX, double secondVelocityZ, double secondYawRate) {}
 
     static double kinematicLongitudinalSlip(double wheelAngularSpeed, double wheelRadius,
                                             double patchLongitudinalSpeed) {

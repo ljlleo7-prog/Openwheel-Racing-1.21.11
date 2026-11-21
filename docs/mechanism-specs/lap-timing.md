@@ -165,7 +165,7 @@ Steward timing dispatch processes every crossed line in movement-fraction order,
 so adjacent checkpoints inside one tick are both counted. The strict seeded
 lap-capture campaign covers the airborne marker and high-speed checkpoint cases.
 
-## Accepted client motion (protocol 27)
+## Accepted client motion (protocol 32)
 
 For technically admitted human drivers, all crossing detection and recording use
 validated client movement segments, not an independently simulated server path.

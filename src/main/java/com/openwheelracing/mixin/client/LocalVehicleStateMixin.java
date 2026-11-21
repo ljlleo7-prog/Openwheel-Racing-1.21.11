@@ -20,7 +20,7 @@ public abstract class LocalVehicleStateMixin {
         if (!mc.isSameThread() || mc.player == null
                 || !(mc.player.getVehicle() instanceof OpenwheelCarEntity car)
                 || car.getId() != entityId || !car.usesFramedVehicleMovement()
-                || car.isRecoveryActive()) return null;
+                || car.isDrivingSuspended()) return null;
         return car;
     }
 

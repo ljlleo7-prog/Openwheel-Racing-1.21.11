@@ -99,9 +99,10 @@ public final class OWRGrandPrixRegistry extends SavedData {
         SESSION_RESULT_CODEC.optionalFieldOf("result").forGetter(snapshot -> Optional.ofNullable(snapshot.result())),
         UUID_CODEC.listOf().optionalFieldOf("grid", List.of()).forGetter(GrandPrixWeekend.SessionSnapshot::grid),
         Codec.LONG.optionalFieldOf("countdown_elapsed_ticks", 0L).forGetter(GrandPrixWeekend.SessionSnapshot::countdownElapsedTicks),
-        Codec.LONG.optionalFieldOf("race_countdown_ticks", 100L).forGetter(GrandPrixWeekend.SessionSnapshot::raceCountdownTicks)
-    ).apply(instance, (config, lifecycle, result, grid, countdownElapsed, raceCountdown) ->
-        new GrandPrixWeekend.SessionSnapshot(config, lifecycle, result.orElse(null), grid, countdownElapsed, raceCountdown)));
+        Codec.LONG.optionalFieldOf("race_countdown_ticks", 100L).forGetter(GrandPrixWeekend.SessionSnapshot::raceCountdownTicks),
+        Codec.LONG.optionalFieldOf("restart_grace_ticks", -1L).forGetter(GrandPrixWeekend.SessionSnapshot::restartGraceTicks)
+    ).apply(instance, (config, lifecycle, result, grid, countdownElapsed, raceCountdown, restartGrace) ->
+        new GrandPrixWeekend.SessionSnapshot(config, lifecycle, result.orElse(null), grid, countdownElapsed, raceCountdown, restartGrace)));
     private static final Codec<GrandPrixWeekend.Snapshot> WEEKEND_CODEC = RecordCodecBuilder.create(instance -> instance.group(
         UUID_CODEC.fieldOf("event_id").forGetter(GrandPrixWeekend.Snapshot::eventId),
         Codec.STRING.fieldOf("name").forGetter(GrandPrixWeekend.Snapshot::name),

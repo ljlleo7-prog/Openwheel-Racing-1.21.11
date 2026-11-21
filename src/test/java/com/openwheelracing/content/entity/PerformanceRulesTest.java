@@ -17,6 +17,21 @@ class PerformanceRulesTest {
     }
 
     @Test
+    void effectiveControlsInMotionFramesMustBeFiniteUnitValues() {
+        double[] state = new double[80];
+        java.util.Arrays.fill(state, 0, 7, 1.0);
+        state[8] = 1.02; state[9] = .98;
+        state[78] = .35; state[79] = .6;
+        assertTrue(PerformanceRules.legalControls(state));
+        state[78] = 1.01;
+        assertFalse(PerformanceRules.legalControls(state));
+        state[78] = .35; state[79] = -.01;
+        assertFalse(PerformanceRules.legalControls(state));
+        state[79] = Double.NaN;
+        assertFalse(PerformanceRules.legalControls(state));
+    }
+
+    @Test
     void probeIsRepeatableAndBoundToServerPreset() {
         assertEquals(PerformanceRules.probe(0), PerformanceRules.probe(0));
         assertNotEquals(PerformanceRules.probe(0), PerformanceRules.probe(1));

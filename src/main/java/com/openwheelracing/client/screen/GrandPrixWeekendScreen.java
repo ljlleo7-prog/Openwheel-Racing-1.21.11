@@ -32,6 +32,7 @@ public final class GrandPrixWeekendScreen extends Screen {
     private EditBox lapLimitBox;
     private EditBox countdownBox;
     private EditBox graceBox;
+    private EditBox restartGraceBox;
     private EditBox worldTimeBox;
     private EditBox driverNameBox;
     private EditBox driverCodeBox;
@@ -66,6 +67,7 @@ public final class GrandPrixWeekendScreen extends Screen {
         String worldTime = text(worldTimeBox, "6000");
         String driverName = text(driverNameBox, "");
         String driverCode = text(driverCodeBox, "");
+        String restartGrace = text(restartGraceBox, "60");
         clearWidgets();
         int left = (width - WIDTH) / 2;
         int top = (height - HEIGHT) / 2;
@@ -78,7 +80,7 @@ public final class GrandPrixWeekendScreen extends Screen {
         addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.race_director.refresh"), button -> refresh())
             .bounds(left + WIDTH - 84, top + HEIGHT - 26, 72, 18).build());
         if (page == Page.CONTROL) {
-            buildControls(left, top);
+            buildControls(left, top, restartGrace);
             return;
         }
         if (!info.present()) {
@@ -140,7 +142,7 @@ public final class GrandPrixWeekendScreen extends Screen {
         setSetupFieldsEditable(editable);
     }
 
-    private void buildControls(int left, int top) {
+    private void buildControls(int left, int top, String restartGrace) {
         if (!info.present()) return;
         addControl(left + 390, top + 158, "advance", "screen.openwheelracing.gp_weekend.advance");
         addControl(left + 500, top + 158, "stage", "screen.openwheelracing.gp_weekend.stage");
@@ -153,6 +155,26 @@ public final class GrandPrixWeekendScreen extends Screen {
         addControl(left + 500, top + 250, "provisional", "screen.openwheelracing.gp_weekend.provisional");
         addControl(left + 390, top + 274, "official", "screen.openwheelracing.gp_weekend.official");
         addControl(left + 500, top + 274, "complete", "screen.openwheelracing.gp_weekend.complete");
+        restartGraceBox = edit(left + 500, top + 306, 102, 18, 4, restartGrace,
+            "screen.openwheelracing.gp_weekend.restart_grace_seconds");
+        restartGraceBox.setFilter(value -> value.isEmpty() || value.chars().allMatch(c -> c >= '0' && c <= '9'));
+        Button restart = Button.builder(Component.translatable("screen.openwheelracing.gp_weekend.restart"), button -> {
+            int seconds = restartGraceSeconds();
+            if (seconds >= 0) OWRNetwork.sendToServer(
+                new OWRNetwork.RaceDirectorGrandPrixControlMessage(info.eventName(), "restart", seconds));
+        }).bounds(left + 390, top + 306, 102, 18).build();
+        restart.active = info.can("restart") && restartGraceSeconds() >= 0;
+        restartGraceBox.setResponder(value -> restart.active = info.can("restart") && restartGraceSeconds() >= 0);
+        addRenderableWidget(restart);
+    }
+
+    private int restartGraceSeconds() {
+        try {
+            int seconds = Integer.parseInt(restartGraceBox.getValue());
+            return seconds >= 0 && seconds <= 3600 ? seconds : -1;
+        } catch (NumberFormatException exception) {
+            return -1;
+        }
     }
 
     private EditBox edit(int x, int y, int width, int height, int maxLength, String value, String hintKey) {
@@ -359,7 +381,8 @@ public final class GrandPrixWeekendScreen extends Screen {
         Component next = nextAction();
         graphics.drawString(font, fit(Component.translatable("screen.openwheelracing.gp_weekend.next", next).getString(), 210),
             left + 390, y + 42, 0xFFFFD76A, false);
-        int clockY = top + 307;
+        drawFieldLabel(graphics, "screen.openwheelracing.gp_weekend.restart_grace_seconds", left + 500, top + 296, 102);
+        int clockY = top + 330;
         if (info.activeSessionState().equals("COUNTDOWN") || info.activeSessionState().equals("FORMATION_COUNTDOWN")) {
             String countdown = Component.translatable("screen.openwheelracing.gp_weekend.countdown_display",
                 formatClock(info.countdownRemainingTicks())).getString();
@@ -389,7 +412,8 @@ public final class GrandPrixWeekendScreen extends Screen {
             case "AWAITING_START" -> Component.translatable("screen.openwheelracing.gp_weekend.next_countdown");
             case "COUNTDOWN" -> Component.translatable("screen.openwheelracing.gp_weekend.next_counting");
             case "RUNNING" -> Component.translatable("screen.openwheelracing.gp_weekend.next_finish");
-            case "SUSPENDED" -> Component.translatable("screen.openwheelracing.gp_weekend.next_resume");
+            case "SUSPENDED" -> Component.translatable(info.can("restart")
+                ? "screen.openwheelracing.gp_weekend.next_restart" : "screen.openwheelracing.gp_weekend.next_resume");
             case "FINISHING" -> Component.translatable("screen.openwheelracing.gp_weekend.next_provisional");
             case "PROVISIONAL" -> Component.translatable("screen.openwheelracing.gp_weekend.next_official");
             case "OFFICIAL" -> Component.translatable(info.activeSessionIndex() == info.sessions().size() - 1

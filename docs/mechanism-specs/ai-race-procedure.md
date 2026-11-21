@@ -78,3 +78,15 @@ Unit tests include a kinematic grid-docking simulation, obstructed path search, 
 ## Runtime diagnosis
 
 The fleet logs `controller=terrain-feedback-v2` when armed, and `OWR AI motion` per car every five seconds with procedure, mode, actual/target speed, throttle, brake, gear, RPM, position, and grid-search/blocking reason. A currently running client must be fully restarted to load changed Java classes; a Gradle rebuild alone cannot update an already loaded controller.
+
+## Red-flag restart
+
+After clearing red, use `/owr gp control <gp> restart [restartGraceSeconds]` (default 60 seconds).
+The grace period holds AI while drivers service tyres and prepare. Its expiry releases formation heating;
+drivers warm tyres and return to their assigned grid slots. The director then requests
+`/owr gp control <gp> countdown` and the normal five-light sequence releases the race.
+Preparation and formation do not advance the sporting clock. Restart preparation survives server recovery.
+The existing live timing session is resumed at lights-out, preserving completed laps and records.
+Cars are re-anchored at their release positions; grid relocation never awards a lap. Old gap reference
+samples are discarded so fresh gaps reflect restart crossings rather than stopped time.
+`resume` remains available for immediate continuation without a restart procedure.

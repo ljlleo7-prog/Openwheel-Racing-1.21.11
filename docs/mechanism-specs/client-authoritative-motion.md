@@ -1,4 +1,4 @@
-# Client driving and accepted server motion — protocol 27
+# Client driving and accepted server motion — protocol 31
 
 ## Authority
 
@@ -46,14 +46,14 @@ Movement bounds are also not a complete acceleration/grip/aero anti-cheat.
 
 Frames must be contiguous; duplicates do nothing. Pending work is capped at 64
 frames, and admission has a 12-frame burst budget refilled at 20 frames per real
-second. Per-frame displacement/velocity bounds and loaded-chunk, world-border,
-modular barrier and block swept-path checks run without moving the live entity
-as a collision probe. Invalid paths/envelopes reset the stream to the last
-accepted pose with stopped momentum; they do not by themselves accuse the
-player of cheating. Terrain-following motion is checked using the same floor
-contour geometry as the local solver, including the reported heading, rather
-than requiring a descending car to pass a straight downward-first sweep.
-A real obstructing wall still rejects that path.
+second. Per-frame displacement/velocity bounds, loaded-chunk and world-border checks
+run without moving the live entity as a probe. Solid-block and barrier geometry
+are resolved by the driving client; the accepted server stream does not reject
+wall overlap or retreat paths. This intentionally favors driver control when a
+car is embedded or server/client geometry disagrees. The server no longer
+independently prevents bounded client-reported movement through solid walls.
+Invalid envelopes or unavailable areas still reset the stream to the last
+accepted pose with stopped momentum.
 
 Step/climb displacement does not become upward velocity on the next physics
 frame. Genuine upward input momentum and gravity-driven free fall remain.
@@ -136,3 +136,31 @@ and unusual collision shapes, real socket stalls and sustained low TPS,
 remote visual smoothness, tyre service while old frames are in flight, delayed
 thermal echoes, mixed entity/car impacts and production-sized fields. Read-only
 path validation can conservatively reject a locally legal step/edge contact.
+
+## Shared-car operations
+
+[Physical pit service](physical-pit-service.md) defines independent jack/tyre
+states, technician action leases, tyreless persistence, and explicit server/driver
+control handoffs. Driver changes invalidate the epoch synchronously. Framed
+recovery sends current and final carried poses. Server-owned tyre configuration
+is restored atomically before driving resumes, and known service time stays on
+the lap clock. These are one-time authority boundaries, not ordinary driving
+request/response dependencies.
+
+## Car contacts
+
+[Car-to-car contact](car-to-car-contact.md) adds immediate local sweep/impulse
+prediction and server confirmation affecting both owners. Pre-contact queues
+are invalidated once at that boundary. Normal driving continues without an
+ordinary correction loop. Car-contact evidence is distinct from block contact.
+
+## Barrier contacts
+
+[Barrier contact acceptance](barrier-contact-acceptance.md) validates resolved
+contact/slide paths and their collision headings. These contacts continue without
+normal resync or pedal-release interruption. Rebound is predicted locally and
+server feedback cannot apply its torque twice.
+
+## Effective control telemetry
+
+Motion state indices 78 and 79 carry tick-averaged post-assist throttle and braking fractions (0–1), validated as finite unit values. They are observed in the solver after stability/launch/traction and ABS force-request limits without modifying the physics. Engine braking alone is not a brake pedal input. They are captured/restored with the existing rollback motion so accepted client-driven cars and server-driven AI expose the same monitor readings. This adds 16 bytes to an existing frame; protocol 31 requires matching server/client builds.

@@ -128,6 +128,8 @@ public record GrandPrixWeekendInfo(boolean present, String eventName, String eve
             case "start" -> state == RaceSessionState.COUNTDOWN || state == RaceSessionState.OPEN
                 && (activeSessionType.equals("PRACTICE") || activeSessionType.equals("QUALIFYING"));
             case "suspend" -> state != null && state.isActive();
+            case "restart" -> state == RaceSessionState.SUSPENDED && suspendedFrom.equals("RUNNING")
+                && (activeSessionType.equals("SPRINT") || activeSessionType.equals("RACE"));
             case "resume" -> state == RaceSessionState.SUSPENDED;
             case "finish" -> state == RaceSessionState.RUNNING || state == RaceSessionState.SUSPENDED && suspendedFrom.equals("RUNNING");
             case "provisional" -> state == RaceSessionState.FINISHING;

@@ -70,7 +70,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class OWRNetwork {
-    private static final String PROTOCOL = "27";
+    private static final String PROTOCOL = "32";
 
     public static final int TIMING_STATUS_UNREACHED = 0;
     public static final int TIMING_STATUS_SLOWER = 1;
@@ -887,8 +887,7 @@ public final class OWRNetwork {
                     }
                 }
 
-                if (best != null) {
-                    player.startRiding(best);
+                if (best != null && player.startRiding(best)) {
                     best.prepareForDriver(player);
                 }
             });
@@ -1812,7 +1811,10 @@ public final class OWRNetwork {
         }
     }
 
-    public record RaceDirectorGrandPrixControlMessage(String eventName, String action) implements CustomPacketPayload {
+    public record RaceDirectorGrandPrixControlMessage(String eventName, String action, int restartGraceSeconds) implements CustomPacketPayload {
+        public RaceDirectorGrandPrixControlMessage(String eventName, String action) {
+            this(eventName, action, 60);
+        }
         public static final CustomPacketPayload.Type<RaceDirectorGrandPrixControlMessage> TYPE = payloadType("race_director_grand_prix_control_message");
 
         @Override
@@ -1823,10 +1825,11 @@ public final class OWRNetwork {
         private static void encode(RaceDirectorGrandPrixControlMessage message, FriendlyByteBuf buffer) {
             buffer.writeUtf(message.eventName, 80);
             buffer.writeUtf(message.action, 24);
+            buffer.writeVarInt(message.restartGraceSeconds);
         }
 
         private static RaceDirectorGrandPrixControlMessage decode(FriendlyByteBuf buffer) {
-            return new RaceDirectorGrandPrixControlMessage(buffer.readUtf(80), buffer.readUtf(24));
+            return new RaceDirectorGrandPrixControlMessage(buffer.readUtf(80), buffer.readUtf(24), buffer.readVarInt());
         }
 
         private static void handle(RaceDirectorGrandPrixControlMessage message, IPayloadContext context) {
@@ -1836,11 +1839,13 @@ public final class OWRNetwork {
                     return;
                 }
                 String action = message.action.toLowerCase(java.util.Locale.ROOT);
-                if (!java.util.Set.of("advance", "stage", "countdown", "start", "suspend", "resume", "finish",
+                if (!java.util.Set.of("advance", "stage", "countdown", "start", "suspend", "resume", "restart", "finish",
                     "provisional", "official", "complete").contains(action)) {
                     return;
                 }
-                String command = "owr gp control " + StringArgumentType.escapeIfRequired(message.eventName) + " " + action;
+                if (action.equals("restart") && (message.restartGraceSeconds < 0 || message.restartGraceSeconds > 3600)) return;
+                String command = "owr gp control " + StringArgumentType.escapeIfRequired(message.eventName) + " " + action
+                    + (action.equals("restart") ? " " + message.restartGraceSeconds : "");
                 player.level().getServer().getCommands().performPrefixedCommand(
                     player.createCommandSourceStack().withPermission(LevelBasedPermissionSet.MODERATOR), command);
                 sendRaceDirectorSnapshot(player, menu.createSnapshot(player.level()));

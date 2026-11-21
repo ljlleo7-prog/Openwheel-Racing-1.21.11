@@ -78,3 +78,9 @@ loss is 15% of the inferred blocked normal speed, capped at the remaining slide
 speed to prevent reversal. Near-parallel scrapes lose little speed, while
 head-on components produce stronger friction; repeated contacts accumulate loss.
 Vertical movement is preserved. Fully blocked head-on motion remains stopped.
+
+## Barrier contact in client-owned driving
+
+[Barrier scraping](barrier-contact-acceptance.md) uses normal-dependent tangential
+scrub, a small outward rebound and reduced normal-impact damage. Legal contact
+is accepted as wall movement rather than treated as a broken network stream.

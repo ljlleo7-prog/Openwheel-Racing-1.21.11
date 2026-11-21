@@ -18,6 +18,11 @@ public record CarLiveryTexture(String id) {
         id = sanitize(id);
     }
 
+    /** Picture atlases opt in explicitly; unversioned textures retain face-color sampling. */
+    public boolean isPicture() {
+        return id.startsWith("picture_v1_");
+    }
+
     public boolean isPresent() {
         return !id.isEmpty();
     }

@@ -148,7 +148,9 @@ public final class OWRCommands {
                         .then(Commands.argument("codes", StringArgumentType.greedyString()).executes(OWRCommands::setGrandPrixGrid))))
                 .then(Commands.literal("control")
                     .then(Commands.argument("gp", StringArgumentType.string())
-                        .then(Commands.argument("action", StringArgumentType.word()).executes(OWRCommands::controlGrandPrixWeekend))))
+                        .then(Commands.argument("action", StringArgumentType.word()).executes(OWRCommands::controlGrandPrixWeekend)
+                            .then(Commands.argument("restartGraceSeconds", IntegerArgumentType.integer(0, 3600))
+                                .executes(OWRCommands::controlGrandPrixWeekend)))))
                 .then(Commands.literal("status")
                     .then(Commands.argument("gp", StringArgumentType.string()).executes(OWRCommands::showGrandPrixStatus)))
                 .then(Commands.literal("register")
@@ -557,6 +559,16 @@ public final class OWRCommands {
                     registry.updateWeekend(gpName, value -> value.suspend(RaceSessionSuspensionReason.DIRECTOR, tick, actor, actorName));
                     LiveRaceTimingService.stop(context.getSource().getLevel(), "DIRECTOR");
                     GrandPrixWeekendService.resetCarTiming(context.getSource().getLevel());
+                }
+                case "restart" -> {
+                    if (OWRRaceControlState.get(context.getSource().getLevel()).getGlobalFlag() == RaceFlagMode.RED) {
+                        throw new IllegalStateException("Clear the red flag before preparing the restart");
+                    }
+                    int grace = 60;
+                    try { grace = IntegerArgumentType.getInteger(context, "restartGraceSeconds"); }
+                    catch (IllegalArgumentException ignored) { }
+                    long graceTicks = secondsToTicks(grace);
+                    registry.updateWeekend(gpName, value -> value.prepareRestart(graceTicks, tick, actor, actorName));
                 }
                 case "resume" -> {
                     if (OWRRaceControlState.get(context.getSource().getLevel()).getGlobalFlag() == RaceFlagMode.RED) {

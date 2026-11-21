@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:function",
+  "function": "openwheelracing:barrier_scraping",
+  "environment": "openwheelracing:lap_network",
+  "structure": "openwheelracing:car_recovery",
+  "max_ticks": 300,
+  "sky_access": true
+}

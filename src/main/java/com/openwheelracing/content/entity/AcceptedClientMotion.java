@@ -19,6 +19,7 @@ final class AcceptedClientMotion {
     private String decision = "not started";
     private long accepted, lastRejectedAt, lastSyncAt;
     private int rejectionStreak, lastSyncEpoch = -1;
+    private int lastPublishedStatus = VehicleRollbackNetwork.DRIVER_CONTROL;
     private net.minecraft.world.phys.Vec3 rejectedPosition;
 
     AcceptedClientMotion(OpenwheelCarEntity car, LongSupplier nanos) { this.car = car; this.nanos = nanos; }
@@ -31,7 +32,7 @@ final class AcceptedClientMotion {
 
     void offer(VehicleRollbackNetwork.Frame frame) {
         if (!(car.getControllingPassenger() instanceof ServerPlayer player)
-                || !TechnicalRulesNetwork.verified(player.getUUID()) || car.isRecoveryActive()) return;
+                || !TechnicalRulesNetwork.verified(player.getUUID()) || car.isDrivingSuspended()) return;
         if (driver != null && !driver.equals(player.getUUID())) reset();
         driver = player.getUUID();
         if (frame.epoch() != epoch) { synchronize(); return; }
@@ -50,7 +51,7 @@ final class AcceptedClientMotion {
     void drain() {
         if (!(car.getControllingPassenger() instanceof ServerPlayer player)
                 || !player.getUUID().equals(driver)) { reset(); return; }
-        if (!TechnicalRulesNetwork.verified(player.getUUID())) return;
+        if (!TechnicalRulesNetwork.verified(player.getUUID()) || car.isDrivingSuspended()) return;
         int work = 0;
         while (!queue.isEmpty() && work++ < AcceptedMotionClock.BURST_FRAMES && clock.ready(nanos.getAsLong())) {
             var frame = queue.removeFirst();
@@ -73,10 +74,20 @@ final class AcceptedClientMotion {
                     || motion.counters()[12] > OpenwheelCarEntity.ERS_ACTIVITY_NEGATIVE) {
                 TechnicalRulesNetwork.violation(player, "invalid engine telemetry"); return;
             }
-            if (!car.clientMotionPathClear(before, delta, frame.yaw())) { reject("blocked or unloaded movement"); return; }
+            if (motion.counters()[13] != car.getTyreCompound() || motion.counters()[14] != car.getTyreType().id()
+                    || motion.counters()[15] != (car.hasTyres() ? 1 : 0)) {
+                TechnicalRulesNetwork.violation(player, "tyre configuration differs from the server"); return;
+            }
+            if (motion.counters()[17] < 0 || motion.counters()[17] > 1
+                    || motion.counters()[16] < 0 || motion.counters()[16] > 1
+                    || Math.hypot(motion.state()[71], motion.state()[72]) > 6.251) {
+                TechnicalRulesNetwork.violation(player, "invalid car-contact telemetry"); return;
+            }
+            if (!car.clientMotionAreaLoaded(delta)) { reject("unloaded or out-of-border movement"); return; }
             var interval = clock.accept(frame.sequence(), car.level().getGameTime(), nanos.getAsLong());
-            car.applyAcceptedClientMotion(frame, interval.start(), interval.end());
+            boolean contact = car.applyAcceptedClientMotion(frame, interval.start(), interval.end());
             lastSequence = frame.sequence(); accepted++; decision = "accepted";
+            if (contact) { carContactBoundary(); return; }
         }
     }
 
@@ -89,9 +100,10 @@ final class AcceptedClientMotion {
         car.stopRejectedClientMotion();
         queue.clear(); epoch++; lastQueued = lastSequence;
         lastSyncEpoch = epoch; lastSyncAt = now;
+        lastPublishedStatus = rejectionStreak >= 2 ? VehicleRollbackNetwork.BLOCKED : VehicleRollbackNetwork.SYNC;
         if (car.getControllingPassenger() instanceof ServerPlayer player) {
             VehicleRollbackNetwork.send(player, new VehicleRollbackNetwork.Update(car.getId(), epoch, epoch,
-                lastSequence, rejectionStreak >= 2 ? VehicleRollbackNetwork.BLOCKED : VehicleRollbackNetwork.SYNC,
+                lastSequence, lastPublishedStatus,
                 0, car.captureRollbackMotion(), car.getUUID(), car.level().dimension().identifier().toString()));
         }
     }
@@ -102,12 +114,47 @@ final class AcceptedClientMotion {
         lastSyncEpoch = epoch; lastSyncAt = now;
         if (car.getControllingPassenger() instanceof ServerPlayer player) {
             VehicleRollbackNetwork.send(player, new VehicleRollbackNetwork.Update(car.getId(), epoch, epoch,
-                lastSequence, VehicleRollbackNetwork.SYNC, 0, car.captureRollbackMotion(),
+                lastSequence, lastPublishedStatus, 0, car.captureRollbackMotion(),
                 car.getUUID(), car.level().dimension().identifier().toString()));
         }
     }
 
-    void beginRecovery() { queue.clear(); epoch++; clock = new AcceptedMotionClock(); synchronize(); }
+    void carContactBoundary() {
+        queue.clear(); lastQueued = lastSequence; epoch++;
+        clock.resumeAfterHold();
+        decision = "car contact";
+        rejectionStreak = 0; rejectedPosition = null;
+        publish(car.isDrivingSuspended() ? VehicleRollbackNetwork.SERVER_CONTROL : VehicleRollbackNetwork.CAR_CONTACT);
+    }
+
+    void driverChanged() {
+        reset();
+        if (!(car.getControllingPassenger() instanceof ServerPlayer player)) return;
+        engaged = true; driver = player.getUUID(); lastSequence = lastQueued = 0;
+        epoch++;
+        publish(VehicleRollbackNetwork.DRIVER_CONTROL);
+        // If a mounting snapshot arrived before entity tracking, the first epoch mismatch may retry immediately.
+        lastSyncEpoch = -1;
+    }
+
+    void serverOperation(boolean release) {
+        engaged = true;
+        queue.clear(); lastQueued = lastSequence; epoch++;
+        rejectionStreak = 0; rejectedPosition = null;
+        car.stopRejectedClientMotion();
+        if (release) clock.resumeAfterHold();
+        publish(release ? VehicleRollbackNetwork.DRIVER_CONTROL : VehicleRollbackNetwork.SERVER_CONTROL);
+    }
+
+    private void publish(int status) {
+        lastPublishedStatus = status;
+        lastSyncEpoch = epoch; lastSyncAt = nanos.getAsLong();
+        if (car.getControllingPassenger() instanceof ServerPlayer player) {
+            VehicleRollbackNetwork.send(player, new VehicleRollbackNetwork.Update(car.getId(), epoch, epoch,
+                lastSequence, status, 0, car.captureRollbackMotion(), car.getUUID(),
+                car.level().dimension().identifier().toString()));
+        }
+    }
 
     void reset() {
         if (!active && driver == null && queue.isEmpty()) return;

@@ -63,3 +63,9 @@ For each value, define range, effect, UI label, and downside.
 - What must be implemented for setup tuning to become a real gameplay loop?
 
   The setup station has a dedicated layout rather than reusing the construction panel. Front wing, rear wing, anti-roll balance, final drive, and brake bias are readable sliders; power mode is visibly locked at 1 until fuel consumption provides a real tradeoff. One combined draft model predicts acceleration, top speed, aero grip, drag, and the resulting oversteer/understeer balance using a continuous blue-green-red scale. Aero balance compares front and rear wing, while the final handling balance also includes anti-roll and brake bias. A white marker shows the currently fitted value separately from the proposed slider value. Moving sliders is only a preview; the complete setup is applied after pressing Apply Setup. Tyre compound is not a free setup value: it comes from the fitted tyre item.
+
+## Physical tyre replacement
+
+Tyre replacement uses [independent jack and tyre states](physical-pit-service.md),
+not a compulsory four-stage procedure. Raising/lowering preserves fitted tyres;
+removal returns the actual set; installation requires an empty raised car.

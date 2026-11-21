@@ -7,7 +7,7 @@ plugins {
     id 'net.neoforged.moddev' version '2.0.142'
 }
 
-version = '1.21.1'
+version = '1.21.3'
 group = 'com.openwheelracing'
 
 // Mojang ships Java 21 to end users in 1.20.5+, so every Gradle Java task should use Java 21.
@@ -82,6 +82,30 @@ neoForge {
             programArguments.addAll '--tests', 'openwheelracing:client_authority'
         }
 
+        recoveryTestServer {
+            type = 'gameTestServer'
+            gameDirectory = layout.buildDirectory.dir('recovery-compatibility-gametest')
+            programArguments.addAll '--tests', 'openwheelracing:*recovery'
+        }
+
+        barrierScrapeTestServer {
+            type = 'gameTestServer'
+            gameDirectory = layout.buildDirectory.dir('barrier-scrape-gametest')
+            programArguments.addAll '--tests', 'openwheelracing:barrier_scraping'
+        }
+
+        carContactTestServer {
+            type = 'gameTestServer'
+            gameDirectory = layout.buildDirectory.dir('car-contact-gametest')
+            programArguments.addAll '--tests', 'openwheelracing:car_contacts'
+        }
+
+        sharedCarTestServer {
+            type = 'gameTestServer'
+            gameDirectory = layout.buildDirectory.dir('shared-car-gametest')
+            programArguments.addAll '--tests', 'openwheelracing:shared_car_authority'
+        }
+
         blockRollbackTestServer {
             type = 'gameTestServer'
             gameDirectory = layout.buildDirectory.dir('block-rollback-gametest')
@@ -121,6 +145,7 @@ repositories {
 
 dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testImplementation 'com.google.code.gson:gson:2.13.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -204,3 +229,14 @@ tasks.register('generatePerformanceIndex') {
     }
 }
 tasks.named('processResources') { dependsOn tasks.named('generatePerformanceIndex') }
+
+// Export the actual car renderer's geometry, UVs, and colors for the offline HTML editor.
+tasks.register('exportLiveryWorkbenchModel', JavaExec) {
+    group = 'openwheelracing'
+    description = 'Exports the exact runtime livery model for the browser workbench.'
+    dependsOn lapTimingTestClasses
+    classpath = sourceSets.lapTimingTest.runtimeClasspath
+    mainClass = 'com.openwheelracing.client.livery.LiveryWorkbenchExporter'
+    args layout.buildDirectory.file('livery/workbench-model.json').get().asFile.absolutePath
+    workingDir = projectDir
+}

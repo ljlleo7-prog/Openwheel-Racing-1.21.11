@@ -207,7 +207,7 @@ public final class OWRClientInputHandler {
     }
 
     private static void handleAutoShift(WheelInputSettings settings, OpenwheelCarEntity car, float throttle, float brake) {
-        if (!settings.autoShiftEnabled || !car.isAutomaticShiftingAllowed()) {
+        if (!settings.autoShiftEnabled || !car.isAutomaticShiftingAllowed() || car.isDrivingSuspended()) {
             autoShiftCooldownTicks = 0;
             return;
         }

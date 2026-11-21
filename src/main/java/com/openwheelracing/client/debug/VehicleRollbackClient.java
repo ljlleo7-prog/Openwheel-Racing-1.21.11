@@ -36,6 +36,9 @@ public final class VehicleRollbackClient {
             if (update.status() == VehicleRollbackNetwork.REWOUND) {
                 RewindNotification.show(Math.max(update.rewindTicks(), actualRewindTicks) / 20.0, false);
                 RewindNotification.displacement(previous.subtract(car.position()), car.getYRot());
+            } else if (update.status() == VehicleRollbackNetwork.SERVER_CONTROL
+                    || update.status() == VehicleRollbackNetwork.DRIVER_CONTROL) {
+                RewindNotification.clear();
             } else if (update.status() != VehicleRollbackNetwork.SYNC) {
                 RewindNotification.status(update.status());
             } else {

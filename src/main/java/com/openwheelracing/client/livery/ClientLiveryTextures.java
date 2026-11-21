@@ -3,6 +3,8 @@ package com.openwheelracing.client.livery;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.openwheelracing.OpenwheelRacing;
 import com.openwheelracing.client.render.ColoredObjModel;
+import com.openwheelracing.client.render.OpenwheelCarRenderer;
+import com.openwheelracing.content.car.CarLiveryColors;
 import com.openwheelracing.content.car.CarLiveryTexture;
 import java.io.IOException;
 import java.io.InputStream;
@@ -125,8 +127,29 @@ public final class ClientLiveryTextures {
         return image;
     }
 
+    /** Flatten the old face-sampled appearance before opting into picture UVs. */
+    public static NativeImage pictureBase(NativeImage legacy, CarLiveryColors colors) {
+        NativeImage result = new NativeImage(SIZE, SIZE, true);
+        result.fillRect(0, 0, SIZE, SIZE, colors.body() | 0xFF000000);
+        ColoredObjModel model = ColoredObjModel.load(Minecraft.getInstance().getResourceManager(),
+            Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "objmodels/f1_car_2026.obj"));
+        for (ColoredObjModel.Face face : model.faces) {
+            if (!face.hasLiveryRegion() || !LiveryUvMapping.isPaintableMaterial(face.materialRgb())) continue;
+            int color = OpenwheelCarRenderer.liveryColor(face, colors, legacy) | 0xFF000000;
+            rasterizeTriangle(result, color,
+                face.liveryPixelX(face.x0(), face.y0(), face.z0()), face.liveryPixelY(face.x0(), face.y0(), face.z0()),
+                face.liveryPixelX(face.x1(), face.y1(), face.z1()), face.liveryPixelY(face.x1(), face.y1(), face.z1()),
+                face.liveryPixelX(face.x2(), face.y2(), face.z2()), face.liveryPixelY(face.x2(), face.y2(), face.z2()));
+            if (face.vertexCount() == 4) rasterizeTriangle(result, color,
+                face.liveryPixelX(face.x0(), face.y0(), face.z0()), face.liveryPixelY(face.x0(), face.y0(), face.z0()),
+                face.liveryPixelX(face.x2(), face.y2(), face.z2()), face.liveryPixelY(face.x2(), face.y2(), face.z2()),
+                face.liveryPixelX(face.x3(), face.y3(), face.z3()), face.liveryPixelY(face.x3(), face.y3(), face.z3()));
+        }
+        return result;
+    }
+
     public static CarLiveryTexture saveNew(Minecraft minecraft, NativeImage image) throws IOException {
-        String id = "livery_" + System.currentTimeMillis();
+        String id = "livery_" + java.util.UUID.randomUUID().toString();
         save(minecraft, id, image);
         return new CarLiveryTexture(id);
     }
@@ -163,6 +186,9 @@ public final class ClientLiveryTextures {
 
     public static Identifier register(Minecraft minecraft, String id, NativeImage image) {
         String safe = CarLiveryTexture.sanitize(id);
+        if (new CarLiveryTexture(safe).isPicture()) {
+            normalizePicture(image);
+        }
         MISSING.remove(safe);
         Identifier location = Identifier.fromNamespaceAndPath(OpenwheelRacing.MODID, "dynamic/livery/" + safe);
         Identifier old = LOCATIONS.put(safe, location);
@@ -177,6 +203,16 @@ public final class ClientLiveryTextures {
         minecraft.getTextureManager().register(location, texture);
         texture.upload();
         return location;
+    }
+
+    /** Make the stored picture canvas agree with the opaque texture used in game. */
+    public static void normalizePicture(NativeImage image) {
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                image.setPixel(x, y, PictureLivery.composite(image.getPixel(x, y), 0xFFFFFFFF));
+            }
+        }
+        image.setPixel(0, 0, 0xFFFFFFFF);
     }
 
     private static NativeImage loadImage(Minecraft minecraft, String id) {

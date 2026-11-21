@@ -49,6 +49,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
 
     private static ColoredObjModel carModel;
     private static float[] frontWheelPivots;
+    private static float[][] pictureUvs;
     // Pre-baked color array per livery index — populated once per livery, reused every frame.
     private static final java.util.HashMap<String, int[]> BAKED_COLORS = new java.util.HashMap<>();
 
@@ -75,6 +76,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         state.frontWheelSteerDegrees = car.getFrontWheelSteerDegrees();
         state.lightCoords = 15728880;
         state.tyreCompound = car.getTyreCompound();
+        state.tyresFitted = car.hasTyres();
         state.liveryColors = car.getLiveryColors();
         state.liveryTexture = car.getLiveryTexture();
         state.jackLift = car.getJackLift(partialTick);
@@ -88,7 +90,8 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
 
         NativeImage liveryImage = state.liveryTexture.isPresent() ? ClientLiveryTextures.loadExisting(Minecraft.getInstance(), state.liveryTexture) : null;
         String liveryColorKey = liveryColorKey(state.liveryColors, state.liveryTexture);
-        int[] bakedColors = BAKED_COLORS.computeIfAbsent(liveryColorKey, ignored -> carModel.bakeColors(face -> liveryColor(face, state.liveryColors, liveryImage)));
+        int[] bakedColors = BAKED_COLORS.computeIfAbsent(liveryColorKey, ignored -> carModel.bakeColors(face -> state.liveryTexture.isPicture() && liveryImage != null && isLiveryPaintable(face)
+            ? 0xFFFFFFFF : liveryColor(face, state.liveryColors, state.liveryTexture.isPicture() ? null : liveryImage)));
 
         poseStack.pushPose();
         poseStack.translate(0.0f, state.jackLift, 0.0f);
@@ -99,8 +102,12 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         poseStack.translate(0.0f, -0.35f, 0.0f);
 
         int light = state.lightCoords;
+        boolean tyresFitted = state.tyresFitted;
         float frontWheelSteerDegrees = state.frontWheelSteerDegrees;
-        nodeCollector.submitCustomGeometry(poseStack, RT_CAR, (pose, consumer) -> drawModel(consumer, pose, carModel, bakedColors, light, frontWheelSteerDegrees));
+        boolean picture = state.liveryTexture.isPicture() && liveryImage != null;
+        RenderType renderType = picture
+            ? RenderTypes.entityCutoutNoCull(ClientLiveryTextures.textureLocation(state.liveryTexture).orElse(WHITE_TEX)) : RT_CAR;
+        nodeCollector.submitCustomGeometry(poseStack, renderType, (pose, consumer) -> drawModel(consumer, pose, carModel, bakedColors, light, frontWheelSteerDegrees, tyresFitted, picture));
 
         poseStack.popPose();
     }
@@ -109,7 +116,40 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         if (carModel == null) {
             carModel = ColoredObjModel.load(Minecraft.getInstance().getResourceManager(), CAR_OBJ);
             frontWheelPivots = bakeFrontWheelPivots(carModel);
+            pictureUvs = new float[carModel.faces.size()][];
+            for (int i = 0; i < carModel.faces.size(); i++) {
+                pictureUvs[i] = bakePictureUvs(carModel.faces.get(i));
+            }
         }
+    }
+
+    /** Shared by the renderer and offline HTML exporter; no second UV implementation. */
+    public static float[] bakePictureUvs(ColoredObjModel.Face face) {
+        float[] uv = new float[8];
+        if (isLiveryPaintable(face)) {
+            float[] xyz = {face.x0(), face.y0(), face.z0(), face.x1(), face.y1(), face.z1(),
+                face.x2(), face.y2(), face.z2(), face.x3(), face.y3(), face.z3()};
+            for (int v = 0; v < 4; v++) {
+                uv[v * 2] = (face.liveryPixelX(xyz[v * 3], xyz[v * 3 + 1], xyz[v * 3 + 2]) + 0.5f) / ClientLiveryTextures.SIZE;
+                uv[v * 2 + 1] = (face.liveryPixelY(xyz[v * 3], xyz[v * 3 + 1], xyz[v * 3 + 2]) + 0.5f) / ClientLiveryTextures.SIZE;
+            }
+        } else {
+            java.util.Arrays.fill(uv, 0.5f / ClientLiveryTextures.SIZE);
+        }
+        return uv;
+    }
+
+    public static float modelX(float x) { return x * MODEL_X_SCALE; }
+    public static float modelY(float y) { return (y - SOURCE_MIN_Y) * MODEL_Y_SCALE; }
+    public static float modelZ(float z) { return (z - MODEL_Z_CENTER) * MODEL_Z_SCALE; }
+
+    public static int[] legacySamplePixel(ColoredObjModel.Face face) {
+        float x = (face.x0() + face.x1() + face.x2()) / 3.0f;
+        float y = (face.y0() + face.y1() + face.y2()) / 3.0f;
+        float z = (face.z0() + face.z1() + face.z2()) / 3.0f;
+        int u = Math.max(0, Math.min(ClientLiveryTextures.SIZE - 1, Math.round(face.liveryPixelX(x, y, z))));
+        int v = Math.max(0, Math.min(ClientLiveryTextures.SIZE - 1, Math.round(face.liveryPixelY(x, y, z))));
+        return new int[] {u, v};
     }
 
     private static float[] bakeFrontWheelPivots(ColoredObjModel model) {
@@ -122,25 +162,27 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         return pivots;
     }
 
-    private static void drawModel(VertexConsumer consumer, PoseStack.Pose pose, ColoredObjModel model, int[] bakedColors, int light, float frontWheelSteerDegrees) {
+    private static void drawModel(VertexConsumer consumer, PoseStack.Pose pose, ColoredObjModel model, int[] bakedColors, int light, float frontWheelSteerDegrees, boolean tyresFitted, boolean picture) {
         float steerRadians = (float) Math.toRadians(-frontWheelSteerDegrees);
         float steerSin = (float) Math.sin(steerRadians);
         float steerCos = (float) Math.cos(steerRadians);
         List<ColoredObjModel.Face> faces = model.faces;
         for (int i = 0; i < faces.size(); i++) {
             ColoredObjModel.Face face = faces.get(i);
+            if (!tyresFitted && face.group().startsWith("Wheel_")) continue;
             int color = bakedColors[i];
             float pivotX = frontWheelPivots[i];
+            float[] uv = pictureUvs[i];
             if (Float.isNaN(pivotX)) {
-                vertex(consumer, pose, face.x0(), face.y0(), face.z0(), face.nx(), face.ny(), face.nz(), color, light);
-                vertex(consumer, pose, face.x1(), face.y1(), face.z1(), face.nx(), face.ny(), face.nz(), color, light);
-                vertex(consumer, pose, face.x2(), face.y2(), face.z2(), face.nx(), face.ny(), face.nz(), color, light);
-                vertex(consumer, pose, face.x3(), face.y3(), face.z3(), face.nx(), face.ny(), face.nz(), color, light);
+                vertex(consumer, pose, face.x0(), face.y0(), face.z0(), face.nx(), face.ny(), face.nz(), color, light, picture ? uv[0] : 0.0f, picture ? uv[1] : 0.0f);
+                vertex(consumer, pose, face.x1(), face.y1(), face.z1(), face.nx(), face.ny(), face.nz(), color, light, picture ? uv[2] : 0.0f, picture ? uv[3] : 0.0f);
+                vertex(consumer, pose, face.x2(), face.y2(), face.z2(), face.nx(), face.ny(), face.nz(), color, light, picture ? uv[4] : 0.0f, picture ? uv[5] : 0.0f);
+                vertex(consumer, pose, face.x3(), face.y3(), face.z3(), face.nx(), face.ny(), face.nz(), color, light, picture ? uv[6] : 0.0f, picture ? uv[7] : 0.0f);
             } else {
-                steeredVertex(consumer, pose, face.x0(), face.y0(), face.z0(), face.nx(), face.ny(), face.nz(), color, light, pivotX, steerSin, steerCos);
-                steeredVertex(consumer, pose, face.x1(), face.y1(), face.z1(), face.nx(), face.ny(), face.nz(), color, light, pivotX, steerSin, steerCos);
-                steeredVertex(consumer, pose, face.x2(), face.y2(), face.z2(), face.nx(), face.ny(), face.nz(), color, light, pivotX, steerSin, steerCos);
-                steeredVertex(consumer, pose, face.x3(), face.y3(), face.z3(), face.nx(), face.ny(), face.nz(), color, light, pivotX, steerSin, steerCos);
+                steeredVertex(consumer, pose, face.x0(), face.y0(), face.z0(), face.nx(), face.ny(), face.nz(), color, light, picture ? uv[0] : 0.0f, picture ? uv[1] : 0.0f, pivotX, steerSin, steerCos);
+                steeredVertex(consumer, pose, face.x1(), face.y1(), face.z1(), face.nx(), face.ny(), face.nz(), color, light, picture ? uv[2] : 0.0f, picture ? uv[3] : 0.0f, pivotX, steerSin, steerCos);
+                steeredVertex(consumer, pose, face.x2(), face.y2(), face.z2(), face.nx(), face.ny(), face.nz(), color, light, picture ? uv[4] : 0.0f, picture ? uv[5] : 0.0f, pivotX, steerSin, steerCos);
+                steeredVertex(consumer, pose, face.x3(), face.y3(), face.z3(), face.nx(), face.ny(), face.nz(), color, light, picture ? uv[6] : 0.0f, picture ? uv[7] : 0.0f, pivotX, steerSin, steerCos);
             }
         }
     }
@@ -149,7 +191,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         return colors.body() + ":" + colors.accent1() + ":" + colors.accent2() + ":" + texture.id();
     }
 
-    private static int liveryColor(ColoredObjModel.Face face, CarLiveryColors colors, NativeImage liveryImage) {
+    public static int liveryColor(ColoredObjModel.Face face, CarLiveryColors colors, NativeImage liveryImage) {
         int materialRgb = face.materialRgb();
         int r = (materialRgb >> 16) & 255;
         int g = (materialRgb >> 8) & 255;
@@ -200,17 +242,13 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         return (face.materialRgb() & 0x00FFFFFF) == 0x002A2E36;
     }
 
-    private static boolean isLiveryPaintable(ColoredObjModel.Face face) {
+    public static boolean isLiveryPaintable(ColoredObjModel.Face face) {
         return face.hasLiveryRegion() && LiveryUvMapping.isPaintableMaterial(face.materialRgb());
     }
 
     private static int sampleLivery(ColoredObjModel.Face face, NativeImage image) {
-        float x = (face.x0() + face.x1() + face.x2()) / 3.0f;
-        float y = (face.y0() + face.y1() + face.y2()) / 3.0f;
-        float z = (face.z0() + face.z1() + face.z2()) / 3.0f;
-        int u = Math.max(0, Math.min(image.getWidth() - 1, Math.round(face.liveryPixelX(x, y, z))));
-        int v = Math.max(0, Math.min(image.getHeight() - 1, Math.round(face.liveryPixelY(x, y, z))));
-        return image.getPixel(u, v);
+        int[] pixel = legacySamplePixel(face);
+        return image.getPixel(pixel[0], pixel[1]);
     }
 
     private static int fixedAeroDetailColor(int r, int g, int b, int brightness) {
@@ -242,20 +280,20 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         return baseColor;
     }
 
-    private static void steeredVertex(VertexConsumer consumer, PoseStack.Pose pose, float x, float y, float z, float normalX, float normalY, float normalZ, int color, int light, float pivotX, float steerSin, float steerCos) {
+    private static void steeredVertex(VertexConsumer consumer, PoseStack.Pose pose, float x, float y, float z, float normalX, float normalY, float normalZ, int color, int light, float u, float v, float pivotX, float steerSin, float steerCos) {
         float dx = x - pivotX;
         float dz = z - FRONT_WHEEL_PIVOT_Z;
         float steeredX = pivotX + dx * steerCos + dz * steerSin;
         float steeredZ = FRONT_WHEEL_PIVOT_Z - dx * steerSin + dz * steerCos;
         float steeredNormalX = normalX * steerCos + normalZ * steerSin;
         float steeredNormalZ = -normalX * steerSin + normalZ * steerCos;
-        vertex(consumer, pose, steeredX, y, steeredZ, steeredNormalX, normalY, steeredNormalZ, color, light);
+        vertex(consumer, pose, steeredX, y, steeredZ, steeredNormalX, normalY, steeredNormalZ, color, light, u, v);
     }
 
-    private static void vertex(VertexConsumer consumer, PoseStack.Pose pose, float x, float y, float z, float normalX, float normalY, float normalZ, int color, int light) {
-        consumer.addVertex(pose, x * MODEL_X_SCALE, (y - SOURCE_MIN_Y) * MODEL_Y_SCALE, (z - MODEL_Z_CENTER) * MODEL_Z_SCALE)
+    private static void vertex(VertexConsumer consumer, PoseStack.Pose pose, float x, float y, float z, float normalX, float normalY, float normalZ, int color, int light, float u, float v) {
+        consumer.addVertex(pose, modelX(x), modelY(y), modelZ(z))
             .setColor(color)
-            .setUv(0.0f, 0.0f)
+            .setUv(u, v)
             .setOverlay(OverlayTexture.NO_OVERLAY)
             .setLight(light)
             .setNormal(pose, normalX, normalY, normalZ);
@@ -270,6 +308,7 @@ public class OpenwheelCarRenderer extends EntityRenderer<OpenwheelCarEntity, Ope
         public float frontWheelSteerDegrees;
         public int lightCoords;
         public int tyreCompound;
+        public boolean tyresFitted = true;
         public float jackLift;
         public float bumpPitch;
         public CarLiveryColors liveryColors = CarLiveryColors.DEFAULT;

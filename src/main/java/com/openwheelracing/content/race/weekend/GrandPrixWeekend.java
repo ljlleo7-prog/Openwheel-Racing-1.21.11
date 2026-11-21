@@ -366,6 +366,23 @@ public final class GrandPrixWeekend {
         return changed;
     }
 
+    public boolean restarting() {
+        return requireActiveSession().restartGraceTicks >= 0L;
+    }
+
+    public void prepareRestart(long graceTicks, long tick, UUID actor, String actorName) {
+        Session session = requireActiveSession();
+        if (graceTicks < 0L || session.lifecycle.state() != RaceSessionState.SUSPENDED
+            || session.lifecycle.suspendedFrom() != RaceSessionState.RUNNING || !session.config.type().usesGrid()) {
+            throw new IllegalStateException("Restart requires a suspended grid race and nonnegative preparation time");
+        }
+        session.restartGraceTicks = graceTicks;
+        session.lifecycle.transitionTo(RaceSessionState.FORMATION_COUNTDOWN, tick);
+        session.countdownElapsedTicks = 0L;
+        session.countdownSinceTick = tick;
+        audit(tick, actor, actorName, "PREPARE_RESTART", Long.toString(graceTicks));
+    }
+
     public void resume(long tick, UUID actor, String actorName) {
         Session session = requireActiveSession();
         boolean resumesCountdown = session.lifecycle.state() == RaceSessionState.SUSPENDED
@@ -561,6 +578,7 @@ public final class GrandPrixWeekend {
         private SessionResult result;
         private List<UUID> grid;
         private long countdownElapsedTicks;
+        private long restartGraceTicks = -1L;
         private long raceCountdownTicks = RaceStartProcedure.RED_SEQUENCE_TICKS;
         private long countdownSinceTick = -1L;
 
@@ -581,6 +599,7 @@ public final class GrandPrixWeekend {
             Session session = new Session(snapshot.config(), RaceSessionLifecycle.recover(snapshot.lifecycle()), snapshot.result(), snapshot.grid(),
                 snapshot.countdownElapsedTicks());
             session.raceCountdownTicks = snapshot.raceCountdownTicks();
+            session.restartGraceTicks = snapshot.restartGraceTicks();
             return session;
         }
 
@@ -590,7 +609,7 @@ public final class GrandPrixWeekend {
         }
 
         private SessionSnapshot snapshot(long tick) {
-            return new SessionSnapshot(config, lifecycle.checkpoint(tick), result, grid, countdownElapsedAt(tick), raceCountdownTicks);
+            return new SessionSnapshot(config, lifecycle.checkpoint(tick), result, grid, countdownElapsedAt(tick), raceCountdownTicks, restartGraceTicks);
         }
 
         private long countdownElapsedAt(long tick) {
@@ -605,7 +624,8 @@ public final class GrandPrixWeekend {
 
         private long countdownDurationTicks() {
             RaceSessionState phase = lifecycle.state() == RaceSessionState.SUSPENDED ? lifecycle.suspendedFrom() : lifecycle.state();
-            return phase == RaceSessionState.COUNTDOWN ? raceCountdownTicks : config.countdownTicks();
+            return phase == RaceSessionState.COUNTDOWN ? raceCountdownTicks
+                : restartGraceTicks >= 0L ? restartGraceTicks : config.countdownTicks();
         }
 
         private long countdownRemainingTicks(long tick) {
@@ -744,7 +764,11 @@ public final class GrandPrixWeekend {
     }
 
     public record SessionSnapshot(SessionConfig config, RaceSessionLifecycle.Checkpoint lifecycle, SessionResult result,
-                                  List<UUID> grid, long countdownElapsedTicks, long raceCountdownTicks) {
+                                  List<UUID> grid, long countdownElapsedTicks, long raceCountdownTicks, long restartGraceTicks) {
+        public SessionSnapshot(SessionConfig config, RaceSessionLifecycle.Checkpoint lifecycle, SessionResult result,
+                               List<UUID> grid, long countdownElapsedTicks, long raceCountdownTicks) {
+            this(config, lifecycle, result, grid, countdownElapsedTicks, raceCountdownTicks, -1L);
+        }
         public SessionSnapshot {
             grid = List.copyOf(grid);
             countdownElapsedTicks = Math.max(0L, countdownElapsedTicks);

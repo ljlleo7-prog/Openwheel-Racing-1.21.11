@@ -203,8 +203,6 @@ public class OpenwheelCarEntity extends Entity {
     private int removedTyreType;
     private int removedTyreRemaining;
     private UUID pitCrewPlayerId;
-    private int queuedTyreAction;
-    private boolean tyrePhaseSetbackApplied;
     private static final int COMPLETED_LAP_LINGER_DURATION = 100;
     public static final int LAP_RESULT_NONE = 0;
     public static final int LAP_RESULT_SLOWER = 1;
@@ -514,6 +512,9 @@ public class OpenwheelCarEntity extends Entity {
     // Last driver input received from client; cleared each tick after use
     private float inputThrottle;
     private float inputBrake;
+    private final EffectiveControlTelemetry effectiveControlTelemetry = new EffectiveControlTelemetry();
+    private double effectiveThrottle;
+    private double effectiveBrake;
     private float inputSteering;
     private boolean inputUsesKeyboardSteeringTuning;
     private boolean inputProvidesSteeringAngle;
@@ -546,12 +547,23 @@ public class OpenwheelCarEntity extends Entity {
     private boolean hasAcceptedInputSequence;
     private long lastMovementWarningAt = -200L;
     private final java.util.HashMap<Integer, Long> lastEntityImpactById = new java.util.HashMap<>();
+    private CarContact pendingCarContact;
+    private Vec3 carContactIncoming = Vec3.ZERO;
+    private double carContactYawRate;
+    private Vec3 barrierRequestedMovement = Vec3.ZERO;
+    private float barrierMovementHeading;
+    private boolean reportedBarrierContact;
+
+    private boolean reportedCarContact;
+
     private boolean wasRiddenLastTick;
     private boolean destructionTriggered;
     private double steeringAngle;
     private double frontSteeringOffGripRelief;
     private static final EntityDataAccessor<Boolean> RECOVERING = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> AUTO_SHIFT_ALLOWED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> TYRES_FITTED = SynchedEntityData.defineId(OpenwheelCarEntity.class, EntityDataSerializers.BOOLEAN);
+    private boolean legacyRemovedTyreReturnPending;
     private UUID recoveryOwner;
     private boolean recoveryLowering;
     private float recoveryYaw;
@@ -745,6 +757,7 @@ public class OpenwheelCarEntity extends Entity {
     private boolean rollbackReplay;
     private int rollbackClientEpoch;
     private boolean rollbackClientBridge;
+    private boolean rollbackServerControlled;
     private final ClientMotionResumeGate clientMotionResumeGate = new ClientMotionResumeGate();
     private int rollbackClientFrame;
     private int rollbackClientCorrection;
@@ -784,8 +797,8 @@ public class OpenwheelCarEntity extends Entity {
 
     public record RollbackMotion(Vec3 position, Vec3 velocity, float yaw, boolean grounded, int tick,
                                  double[] state, int[] counters) {}
-    public static int rollbackStateSize() { return 71; }
-    public static int rollbackCounterSize() { return 13; }
+    public static int rollbackStateSize() { return VehicleRollbackNetwork.MOTION_STATE_SIZE; }
+    public static int rollbackCounterSize() { return VehicleRollbackNetwork.MOTION_COUNTER_SIZE; }
 
     RollbackMotion captureRollbackMotion() {
         return new RollbackMotion(position(), getDeltaMovement(), getYRot(), onGround(), tickCount,
@@ -807,9 +820,11 @@ public class OpenwheelCarEntity extends Entity {
                 debugFlLatForce, debugFrLatForce, debugRlLatForce, debugRrLatForce,
                 debugFlLongForce, debugFrLongForce, debugRlLongForce, debugRrLongForce,
                 debugDownforce, debugDriveForce, debugDragForce,
-                getTyreWearFlPercent(), getTyreWearFrPercent(), getTyreWearRlPercent(), getTyreWearRrPercent(), entityData.get(ERS_POWER_KW)},
+                getTyreWearFlPercent(), getTyreWearFrPercent(), getTyreWearRlPercent(), getTyreWearRrPercent(), entityData.get(ERS_POWER_KW), carContactIncoming.x, carContactIncoming.z, carContactYawRate,
+                barrierRequestedMovement.x, barrierRequestedMovement.y, barrierRequestedMovement.z, barrierMovementHeading,
+                effectiveThrottle, effectiveBrake},
             new int[] {clutchReleaseTicks, clutchReleaseRpm, ersLiftConfirmTicks, (wheelAngularSpeedsInitialized ? 1 : 0), (previousTyreForcesInitialized ? 1 : 0), (ersLiftAndCoastArmed ? 1 : 0), getGear(), getRpm(), isAbsEnabled() ? 1 : 0, isTractionControlEnabled() ? 1 : 0,
-                isDrsActive() ? 1 : 0, getErsMode(), entityData.get(ERS_ACTIVITY)});
+                isDrsActive() ? 1 : 0, getErsMode(), entityData.get(ERS_ACTIVITY), getTyreCompound(), getTyreType().id(), hasTyres() ? 1 : 0, reportedCarContact ? 1 : 0, reportedBarrierContact ? 1 : 0});
     }
 
     void restoreRollbackMotion(RollbackMotion m) {
@@ -892,7 +907,18 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(DRS_ACTIVE, m.counters()[10] != 0);
         entityData.set(ERS_MODE, m.counters()[11]);
         entityData.set(ERS_ACTIVITY, m.counters()[12]);
+        entityData.set(TYRE_COMPOUND, m.counters()[13]);
+        entityData.set(TYRE_TYPE, m.counters()[14]);
+        entityData.set(TYRES_FITTED, m.counters()[15] != 0);
         entityData.set(ERS_POWER_KW, (float) m.state()[70]);
+        carContactIncoming = new Vec3(m.state()[71], 0, m.state()[72]);
+        reportedCarContact = m.counters()[16] != 0;
+        carContactYawRate = m.state()[73];
+        barrierRequestedMovement = new Vec3(m.state()[74], m.state()[75], m.state()[76]);
+        barrierMovementHeading = (float) m.state()[77];
+        effectiveThrottle = m.state()[78];
+        effectiveBrake = m.state()[79];
+        reportedBarrierContact = m.counters()[17] != 0;
         horizontalCollision = false;
         verticalCollision = false;
         clearPreemptiveBarrierImpact();
@@ -951,16 +977,40 @@ public class OpenwheelCarEntity extends Entity {
         return acceptedClientMotion.engaged() ? acceptedClientMotion.diagnostics() : blockRollback.diagnostics();
     }
 
+    public boolean isDrivingSuspended() {
+        return isRecoveryActive() || isInPitStop() || !hasTyres() || level().isClientSide() && rollbackServerControlled;
+    }
+
+    private boolean usesAcceptedClientMotion() {
+        return acceptedClientMotion.engaged() || getControllingPassenger() instanceof ServerPlayer player
+            && com.openwheelracing.network.TechnicalRulesNetwork.hasSession(player.getUUID());
+    }
+
+    private void syncServerOperation(boolean release) {
+        if (!level().isClientSide() && usesAcceptedClientMotion()) acceptedClientMotion.serverOperation(release && !isInPitStop() && !isRecoveryActive() && hasTyres());
+    }
+
     public void acceptClientMotionFrame(VehicleRollbackNetwork.Frame frame) {
         acceptedClientMotion.offer(frame);
     }
 
     boolean clientMotionPathClear(Vec3 before, Vec3 delta, float heading) {
+        return clientMotionPathClear(before, delta, heading, null);
+    }
+
+    // Solid contact belongs to the driving client, including escape from an embedded pose.
+    // Replaying collision geometry here can repeatedly stop and pin that client inside a wall.
+    boolean clientMotionAreaLoaded(Vec3 delta) {
         AABB sweep = componentBoundingBox(this).expandTowards(delta).inflate(0.05);
-        if (!level().hasChunksAt(BlockPos.containing(sweep.minX, sweep.minY, sweep.minZ),
+        return level().hasChunksAt(BlockPos.containing(sweep.minX, sweep.minY, sweep.minZ),
                 BlockPos.containing(sweep.maxX, sweep.maxY, sweep.maxZ))
-                || !level().getWorldBorder().isWithinBounds(getBoundingBox().move(delta))) return false;
-        var barrier = firstBarrierContact(before, delta);
+            && level().getWorldBorder().isWithinBounds(getBoundingBox().move(delta));
+    }
+
+    boolean clientMotionPathClear(Vec3 before, Vec3 delta, float heading, @Nullable RollbackMotion report) {
+        if (!clientMotionAreaLoaded(delta)) return false;
+        if (report != null && report.counters()[17] != 0 && acceptsBarrierSlide(before, delta, report)) return true;
+        var barrier = firstBarrierContact(before, delta, heading);
         if (barrier != null && barrier.time() < 1.0 - 1.0E-4) return false;
         Vec3 allowed = Entity.collideBoundingBox(this, delta, getBoundingBox(), level(), java.util.List.of());
         if (allowed.distanceToSqr(delta) < 1.0E-6) return true;
@@ -970,7 +1020,68 @@ public class OpenwheelCarEntity extends Entity {
             && !emptyShapeBlockIntersectsMovement(before, followed);
     }
 
+    private boolean acceptsBarrierSlide(Vec3 before, Vec3 actual, RollbackMotion report) {
+        Vec3 requested = new Vec3(report.state()[74], report.state()[75], report.state()[76]);
+        if (requested.horizontalDistance() > MAX_REASONABLE_MOVEMENT_BLOCKS_PER_TICK + 1e-6 || Math.abs(requested.y) > 8) return false;
+        var contact = firstBarrierContact(before, requested, (float) report.state()[77]);
+        if (contact == null) return false;
+        double travel = Math.max(0, contact.time() - 1e-4);
+        Vec3 toContact = barrierToContact(before, requested.scale(travel));
+        Vec3 slide = barrierSlide(requested.scale(1 - travel), contact.normal());
+        AABB atContact = getBoundingBox().move(before.subtract(position())).move(toContact);
+        Vec3 allowed = readOnlyStepMovement(slide, atContact);
+        Vec3 expected = toContact.add(allowed);
+        // The driving solver may snap down from a kerb after sliding; include that same bounded floor check.
+        if (requested.y < -.02 && Math.abs(allowed.y - slide.y) < 1e-9 && expected.y >= -maxUpStep()) {
+            double distance = maxUpStep() + .05;
+            double snap = Entity.collideBoundingBox(this, new Vec3(0, -distance, 0),
+                getBoundingBox().move(before.subtract(position())).move(expected), level(), java.util.List.of()).y;
+            if (snap < -.02 && snap > -distance + 1e-9) expected = expected.add(0, snap, 0);
+        }
+        // Match the actual clip-then-slide path, not a chord through the barrier or the previous heading.
+        return expected.distanceToSqr(actual) <= 1e-6;
+    }
+
+    /** Read-only counterpart of vanilla step selection, used only for a reported barrier contact. */
+    private Vec3 readOnlyStepMovement(Vec3 requested, AABB start) {
+        Vec3 clipped = Entity.collideBoundingBox(this, requested, start, level(), java.util.List.of());
+        boolean floor = requested.y < 0 && requested.y != clipped.y;
+        if (!(floor || onGround()) || requested.x == clipped.x && requested.z == clipped.z) return clipped;
+        AABB base = floor ? start.move(0, clipped.y, 0) : start;
+        AABB sweep = base.expandTowards(requested.x, maxUpStep(), requested.z);
+        if (!floor) sweep = sweep.expandTowards(0, -1e-5, 0);
+        var heights = new java.util.TreeSet<Float>();
+        for (var shape : level().getBlockCollisions(this, sweep)) {
+            for (double y : shape.getCoords(Direction.Axis.Y)) {
+                float height = (float) (y - base.minY);
+                if (height >= 0 && height <= maxUpStep() && height != (float) clipped.y) heights.add(height);
+            }
+        }
+        for (float height : heights) {
+            Vec3 stepped = Entity.collideBoundingBox(this, new Vec3(requested.x, height, requested.z),
+                base, level(), java.util.List.of());
+            if (stepped.horizontalDistanceSqr() > clipped.horizontalDistanceSqr())
+                return stepped.subtract(0, start.minY - base.minY, 0);
+        }
+        return clipped;
+    }
+
+    private Vec3 barrierToContact(Vec3 before, Vec3 requested) {
+        if (requested.y == 0) return requested;
+        AABB start = getBoundingBox().move(before.subtract(position()));
+        double vertical = Entity.collideBoundingBox(this, new Vec3(0, requested.y, 0), start, level(),
+            java.util.List.of()).y;
+        return new Vec3(requested.x, vertical, requested.z);
+    }
+
+    private static Vec3 barrierSlide(Vec3 remaining, Vec3 normal) {
+        Vec3 tangent = remaining.subtract(normal.scale(remaining.dot(normal)));
+        double retention = VehiclePhysics.blockSlideRetention(remaining.horizontalDistance(), tangent.horizontalDistance());
+        return new Vec3(tangent.x * retention, tangent.y, tangent.z * retention);
+    }
+
     void stopRejectedClientMotion() {
+        effectiveThrottle = effectiveBrake = 0.0;
         setDeltaMovement(Vec3.ZERO);
         yawRate = 0;
         resetTyreRelaxation();
@@ -978,7 +1089,7 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(SPEED, 0.0f);
     }
 
-    void applyAcceptedClientMotion(VehicleRollbackNetwork.Frame frame, double start, double end) {
+    boolean applyAcceptedClientMotion(VehicleRollbackNetwork.Frame frame, double start, double end) {
         Vec3 before = position();
         double incomingSpeed = getDeltaMovement().horizontalDistance();
         int authorizedGear = getGear();
@@ -998,17 +1109,33 @@ public class OpenwheelCarEntity extends Entity {
         inputUsesKeyboardSteeringTuning = frame.keyboard();
         horizontalCollision = frame.collision();
         previousHorizontalSpeed = incomingSpeed;
+        Vec3 incoming = reportedCarContact ? carContactIncoming : getDeltaMovement();
+        Vec3 proposed = position().subtract(before);
+        CarContact vehicleContact = firstCarContact(before, proposed, incoming, reportedCarContact ? .03 : .015);
+        if (vehicleContact != null) {
+            double travel = Math.max(0, vehicleContact.time() - 1.0E-4);
+            setPos(before.add(proposed.scale(travel)));
+            resolveCarContact(vehicleContact, incoming, true);
+        }
         acceptedMotionStart = start; acceptedMotionEnd = end;
         try {
             processRaceTimingMovement(before, position().subtract(before));
             tickDrivingTelemetry();
         } finally { acceptedMotionStart = acceptedMotionEnd = Double.NaN; }
         if (frame.collision()) {
-            Vec3 reported = getDeltaMovement();
-            applyBlockImpactNow(); // Damage/feedback remains server-owned; never feed a second solver back to the driver.
-            setDeltaMovement(reported);
+            preemptiveBarrierNormal = Vec3.ZERO;
+            if (reportedBarrierContact) {
+                var barrier = firstBarrierContact(before, barrierRequestedMovement, barrierMovementHeading);
+                if (barrier != null) {
+                    preemptiveBarrierNormal = barrier.normal(); preemptiveBarrierLever = barrier.lever();
+                    preemptiveBarrierVelocity = barrierRequestedMovement;
+                    previousHorizontalSpeed = barrierRequestedMovement.horizontalDistance();
+                }
+            }
+            applyBlockImpactNow(false); // Accepted client motion already includes its rebound.
         }
         syncTyreTemperature();
+        return vehicleContact != null;
     }
 
     RollbackCheckpoint replayedCheckpoint(OpenwheelCarEntity replay, RollbackCheckpoint base, double distance) {
@@ -1088,6 +1215,12 @@ public class OpenwheelCarEntity extends Entity {
         rollbackClientIncident = update.incidentId();
         restoreRollbackMotion(update.motion());
         if (update.status() == VehicleRollbackNetwork.BLOCKED) clientMotionResumeGate.block();
+        if (update.status() == VehicleRollbackNetwork.SERVER_CONTROL) rollbackServerControlled = true;
+        if (update.status() == VehicleRollbackNetwork.DRIVER_CONTROL
+                || update.status() == VehicleRollbackNetwork.CAR_CONTACT) {
+            rollbackServerControlled = false;
+            clientMotionResumeGate.reset();
+        }
         alignRollbackRider(previousYaw);
         java.util.Arrays.fill(clientPredictionHistory, null);
         clientPredictionHistoryCount = 0;
@@ -1228,6 +1361,20 @@ public class OpenwheelCarEntity extends Entity {
         return simulated == null ? lastAcceptedInputSequence : simulated.inputSequence();
     }
 
+    /** Tick-averaged drive authority remaining after stability/traction limiting. */
+    public float getTelemetryThrottleInput() {
+        if (isDrivingSuspended()) return 0.0f;
+        if (getControllingPassenger() == null && !autonomousControlEnabled) return 0.0f;
+        return (float) effectiveThrottle;
+    }
+
+    /** Tick-averaged equivalent brake input after ABS; not hydraulic pressure in bar. */
+    public float getTelemetryBrakeInput() {
+        if (isDrivingSuspended()) return 0.0f;
+        if (getControllingPassenger() == null && !autonomousControlEnabled) return 0.0f;
+        return (float) effectiveBrake;
+    }
+
     public void setBasicAiIdentity(BasicAiDriverIdentity identity) {
         basicAiIdentity = identity;
         if (identity == null) {
@@ -1357,6 +1504,7 @@ public class OpenwheelCarEntity extends Entity {
 
     OpenwheelCarEntity(EntityType<? extends OpenwheelCarEntity> entityType, Level level, java.util.function.LongSupplier clock) {
         super(entityType, level);
+        remotePoseClock = clock;
         acceptedClientMotion = new AcceptedClientMotion(this, clock);
         blocksBuilding = false;
     }
@@ -1455,6 +1603,7 @@ public class OpenwheelCarEntity extends Entity {
         builder.define(BOP_WEIGHT_MULTIPLIER, 1.0f);
         builder.define(BOP_POWER_MULTIPLIER, 1.0f);
         builder.define(AUTO_SHIFT_ALLOWED, false);
+        builder.define(TYRES_FITTED, true);
     }
 
     @Override
@@ -2202,6 +2351,9 @@ public class OpenwheelCarEntity extends Entity {
         return entityData.get(CHECKPOINT_ARMED);
     }
 
+    public boolean hasTyres() { return entityData.get(TYRES_FITTED); }
+    public void setTyresFitted(boolean fitted) { entityData.set(TYRES_FITTED, fitted); }
+
     public boolean isInPitStop() {
         return entityData.get(PIT_STOP_TICKS) > 0 || getTyreServicePhase() != TYRE_PHASE_NONE;
     }
@@ -2225,20 +2377,20 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public Component getPitServiceStage() {
-        if (!isTyreChangeInProgress()) return Component.literal("Servicing car");
-        return Component.literal(switch (getTyreServicePhase()) {
-            case TYRE_PHASE_JACKING_UP -> "Jacking car up";
-            case TYRE_PHASE_READY_REMOVE -> "Jacked — empty hand to remove tyres";
-            case TYRE_PHASE_REMOVING -> "Unscrewing tyres";
-            case TYRE_PHASE_READY_INSTALL -> "Tyres off — fit new tyres";
-            case TYRE_PHASE_INSTALLING -> "Installing new tyres";
-            case TYRE_PHASE_READY_LOWER -> "Tyres fitted — lower with jack";
-            case TYRE_PHASE_LOWERING -> "Lowering car";
-            default -> "Servicing car";
-        });
+        String state = switch (getTyreServicePhase()) {
+            case TYRE_PHASE_JACKING_UP -> "raising";
+            case TYRE_PHASE_READY_REMOVE, TYRE_PHASE_READY_LOWER -> "raised_fitted";
+            case TYRE_PHASE_REMOVING -> "removing";
+            case TYRE_PHASE_READY_INSTALL -> "raised_tyreless";
+            case TYRE_PHASE_INSTALLING -> "installing";
+            case TYRE_PHASE_LOWERING -> "lowering";
+            default -> "servicing";
+        };
+        return Component.translatable("message.openwheelracing.pit." + state);
     }
 
     public boolean tryStartPitStop(Player player) {
+        if (getControllingPassenger() != player || isRecoveryActive() || !hasTyres()) return false;
         if (!isOnPitStopMark()) {
             messageDriver(Component.literal("Pit stop only available on the pit stop mark"));
             return false;
@@ -2259,6 +2411,7 @@ public class OpenwheelCarEntity extends Entity {
         player.getInventory().clearOrCountMatchingItems(item -> item.is(OWRItems.RUBBER.get()), PIT_RUBBER_COST, player.inventoryMenu.getCraftSlots());
         entityData.set(PIT_STOP_TICKS, PIT_STOP_DURATION);
         entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
+        syncServerOperation(false);
         messageDriver(Component.literal("Pit stop: servicing..."));
         return true;
     }
@@ -2284,59 +2437,44 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private boolean handleTyreServiceInteraction(Player player, ItemStack heldStack) {
-        if (pitCrewPlayer() == null && getPitStopTicks() == 0) {
-            pitCrewPlayerId = player.getUUID();
-            messagePitCrew(player, Component.literal("You take over the tyre service"));
-        }
+        // Only an in-flight action owns the technician lease; idle raised cars may be shared by a crew.
+        if (getPitStopTicks() == 0) pitCrewPlayerId = player.getUUID();
         if (!player.getUUID().equals(pitCrewPlayerId)) {
             messagePitCrew(player, Component.literal("Another technician is servicing this car"));
             return true;
         }
         int phase = getTyreServicePhase();
-        int requestedAction = heldStack.isEmpty() ? TYRE_ACTION_REMOVE
-            : heldStack.is(OWRItems.TIRES.get()) ? TYRE_ACTION_INSTALL
-            : heldStack.is(OWRItems.JACK.get()) ? TYRE_ACTION_LOWER : TYRE_ACTION_NONE;
-        int expectedAction = switch (phase) {
-            case TYRE_PHASE_JACKING_UP, TYRE_PHASE_READY_REMOVE -> TYRE_ACTION_REMOVE;
-            case TYRE_PHASE_REMOVING, TYRE_PHASE_READY_INSTALL -> TYRE_ACTION_INSTALL;
-            case TYRE_PHASE_INSTALLING, TYRE_PHASE_READY_LOWER -> TYRE_ACTION_LOWER;
-            default -> TYRE_ACTION_NONE;
-        };
-        if (requestedAction != expectedAction) {
-            messagePitCrew(player, getPitServiceStage());
-            return true;
-        }
+        boolean jack = heldStack.is(OWRItems.JACK.get());
         if (getPitStopTicks() > 0) {
-            handlePrematureTyreAction(player, requestedAction, heldStack);
+            if (jack) {
+                if (phase == TYRE_PHASE_JACKING_UP || phase == TYRE_PHASE_LOWERING) {
+                    int duration = Math.max(1, getPitServiceDuration());
+                    int reverseTicks = Math.max(0, duration - getPitStopTicks());
+                    entityData.set(TYRE_SERVICE_PHASE,
+                        phase == TYRE_PHASE_JACKING_UP ? TYRE_PHASE_LOWERING : TYRE_PHASE_JACKING_UP);
+                    entityData.set(PIT_STOP_TICKS, reverseTicks);
+                    if (reverseTicks == 0) completeTyrePhase();
+                    else syncServerOperation(false);
+                } else {
+                    refundReservedTyres(player);
+                    startTyrePhase(player, TYRE_PHASE_LOWERING, heldStack);
+                }
+            } else messagePitCrew(player, getPitServiceStage());
             return true;
         }
-        startRequestedTyreAction(player, requestedAction, heldStack);
+        if (jack) startRequestedTyreAction(player, TYRE_ACTION_LOWER, heldStack);
+        else if (heldStack.isEmpty() && hasTyres()) startRequestedTyreAction(player, TYRE_ACTION_REMOVE, heldStack);
+        else if (heldStack.is(OWRItems.TIRES.get()) && !hasTyres()) startRequestedTyreAction(player, TYRE_ACTION_INSTALL, heldStack);
+        else messagePitCrew(player, Component.translatable(hasTyres()
+            ? "message.openwheelracing.pit.remove_first" : "message.openwheelracing.pit.fit_tyres"));
         return true;
     }
 
-    private void handlePrematureTyreAction(Player player, int action, ItemStack heldStack) {
-        int ticks = getPitStopTicks();
-        if (ticks <= PitTyreServiceTiming.INPUT_BUFFER_TICKS) {
-            if (queuedTyreAction == TYRE_ACTION_NONE) {
-                if (action == TYRE_ACTION_INSTALL && !reserveNewTyres(player, heldStack)) return;
-                queuedTyreAction = action;
-                messagePitCrew(player, Component.literal("Next operation queued"));
-            }
-            return;
-        }
-        if (!tyrePhaseSetbackApplied) {
-            int duration = getPitServiceDuration();
-            int adjustedTicks = PitTyreServiceTiming.applyEarlySetback(ticks, duration);
-            entityData.set(PIT_STOP_TICKS, adjustedTicks);
-            if (getTyreServicePhase() == TYRE_PHASE_JACKING_UP) {
-                player.getCooldowns().addCooldown(new ItemStack(OWRItems.JACK.get()), adjustedTicks);
-            } else if (getTyreServicePhase() == TYRE_PHASE_INSTALLING) {
-                player.getCooldowns().addCooldown(new ItemStack(OWRItems.TIRES.get()), adjustedTicks);
-            }
-            tyrePhaseSetbackApplied = true;
-            level().playSound(null, getX(), getY(), getZ(), SoundEvents.METAL_HIT, SoundSource.PLAYERS, 0.55f, 1.35f);
-            messagePitCrew(player, Component.literal("Too early — operation interrupted"));
-        }
+    private void refundReservedTyres(Player player) {
+        if (!newTyresReserved) return;
+        giveOrDropTyres(player, TyreItem.create(pendingTyreCompound,
+            com.openwheelracing.content.car.TyreType.fromId(pendingTyreType), 1, pendingTyreRemaining));
+        newTyresReserved = false;
     }
 
     private void startRequestedTyreAction(Player player, int action, ItemStack heldStack) {
@@ -2371,11 +2509,10 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(TYRE_SERVICE_PHASE, phase);
         entityData.set(TYRE_SERVICE_DURATION, duration);
         entityData.set(PIT_STOP_TICKS, duration);
-        tyrePhaseSetbackApplied = false;
-        queuedTyreAction = TYRE_ACTION_NONE;
         if (!cooldownStack.isEmpty()) player.getCooldowns().addCooldown(cooldownStack, duration);
         level().playSound(null, getX(), getY(), getZ(), SoundEvents.METAL_PRESSURE_PLATE_CLICK_ON, SoundSource.PLAYERS, 0.55f, 0.9f + random.nextFloat() * 0.2f);
         messagePitCrew(player, getPitServiceStage());
+        syncServerOperation(false);
     }
 
     public void crossStartFinishLine(BlockPos pos, Direction markerFacing) {
@@ -2768,6 +2905,30 @@ public class OpenwheelCarEntity extends Entity {
             return;
         }
 
+        if (!level().isClientSide() && newTyresReserved && getTyreServicePhase() != TYRE_PHASE_INSTALLING) {
+            ServerPlayer crew = pitCrewPlayer();
+            if (crew != null) refundReservedTyres(crew);
+            else if (level() instanceof ServerLevel server) {
+                spawnAtLocation(server, TyreItem.create(pendingTyreCompound,
+                    com.openwheelracing.content.car.TyreType.fromId(pendingTyreType), 1, pendingTyreRemaining));
+                newTyresReserved = false;
+            }
+        }
+        if (!level().isClientSide() && legacyRemovedTyreReturnPending) {
+            legacyRemovedTyreReturnPending = false;
+            ItemStack oldTyres = TyreItem.create(removedTyreCompound,
+                com.openwheelracing.content.car.TyreType.fromId(removedTyreType), 1, removedTyreRemaining);
+            ServerPlayer crew = pitCrewPlayer();
+            if (crew != null) giveOrDropTyres(crew, oldTyres);
+            else if (level() instanceof ServerLevel server) spawnAtLocation(server, oldTyres);
+        }
+        if (!level().isClientSide() && (isInPitStop() || !hasTyres())) {
+            stopRejectedClientMotion();
+            tickPitStop(); tickLapTimer(); tickLiveLapDelta(); tickCompletedLapLinger();
+            tickDrivingTelemetry(); tickEngineDamageEffects(); tickWarnings();
+            return;
+        }
+
         if (!level().isClientSide()) {
             tickTerrainSounds();
             syncBoPFromBoundDriver();
@@ -2817,15 +2978,14 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     public void beginRecovery(Player player) {
-        if (entityData.get(RECOVERING) || autonomousControlEnabled || isTyreChangeInProgress()
-            || isPassenger() || player.isPassenger() || player.isSpectator()
+        if (isRemoved() || entityData.get(RECOVERING) || autonomousControlEnabled || isInPitStop()
+            || CarDraggerItem.heldCar(player) != null || player.level() != level() || isPassenger() || player.isPassenger() || player.isSpectator()
             || distanceToSqr(player) > 36.0 || !player.hasLineOfSight(this)
             || getDeltaMovement().length() > 0.15) {
             player.displayClientMessage(Component.translatable("message.openwheelracing.car_dragger.unavailable"), true);
             return;
         }
-        if (acceptedClientMotion.engaged()) acceptedClientMotion.beginRecovery();
-        else blockRollback.cancelForRecovery();
+        if (!usesAcceptedClientMotion()) blockRollback.cancelForRecovery();
         if (isRemoved()) return;
         recoveryOwner = player.getUUID();
         recoveryLowering = false;
@@ -2833,6 +2993,7 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(RECOVERING, true);
         invalidateLap("marshal recovery");
         resetRecoveryMotion();
+        syncServerOperation(false);
         player.displayClientMessage(Component.translatable("message.openwheelracing.car_dragger.attached"), true);
     }
 
@@ -2958,8 +3119,9 @@ public class OpenwheelCarEntity extends Entity {
             entityData.set(RECOVERING, false);
             setOnGround(true);
         }
-        // Send authoritative snapshots to the seated driver's prediction path as well as normal tracking.
-        if (getControllingPassenger() instanceof ServerPlayer driver) OWRNetwork.sendDriveInputAck(driver, this);
+        // Framed owners receive a fresh epoch with each carried pose, including the final grounded pose.
+        if (usesAcceptedClientMotion()) syncServerOperation(!isRecoveryActive());
+        else if (getControllingPassenger() instanceof ServerPlayer driver) OWRNetwork.sendDriveInputAck(driver, this);
         if (!recoveryLowering && marshal != null && level() instanceof ServerLevel server && tickCount % 4 == 0) {
             Vec3 start = marshal.getEyePosition();
             Vec3 end = position().add(0, 0.8, 0);
@@ -3012,6 +3174,7 @@ public class OpenwheelCarEntity extends Entity {
 
     @Override
     public InteractionResult interact(Player player, InteractionHand hand) {
+        if (isRemoved()) return InteractionResult.PASS;
         ItemStack heldStack = player.getItemInHand(hand);
         if (heldStack.is(OWRItems.CAR_DRAGGER.get())) {
             if (!level().isClientSide()) CarDraggerItem.control(player, this);
@@ -3019,20 +3182,10 @@ public class OpenwheelCarEntity extends Entity {
         }
         if (entityData.get(RECOVERING)) return InteractionResult.CONSUME;
         if (isTyreChangeInProgress()) {
-            if (player.isShiftKeyDown() && heldStack.isEmpty()) {
-                if (!level().isClientSide()) {
-                    emergencyReleaseTyreService(player);
-                    if (getPassengers().isEmpty()) {
-                        ItemStack item = createPickupItem();
-                        if (!player.addItem(item)) player.drop(item, false);
-                        discard();
-                    }
-                }
-                return InteractionResult.SUCCESS;
-            }
             if (!level().isClientSide()) handleTyreServiceInteraction(player, heldStack);
             return InteractionResult.SUCCESS;
         }
+        if (isInPitStop()) return InteractionResult.CONSUME;
         if (heldStack.is(OWRItems.JACK.get())) {
             if (!level().isClientSide()) tryStartTyreService(player, heldStack);
             return InteractionResult.CONSUME;
@@ -3078,6 +3231,7 @@ public class OpenwheelCarEntity extends Entity {
     protected ItemStack createPickupItem() {
         ItemStack item = PrototypeCarItem.create(setup, getComponentDamage(), getTyreWearPercent(), getLivery(), getErsMode(), Math.round(getErsEnergyPercent()));
         item.set(com.openwheelracing.registry.OWRDataComponents.TYRE_TYPE.get(), getTyreType().id());
+        item.set(com.openwheelracing.registry.OWRDataComponents.TYRES_FITTED.get(), hasTyres());
         PrototypeCarItem.setLiveryColors(item, getLiveryColors());
         PrototypeCarItem.setLiveryTexture(item, getLiveryTexture());
         return item;
@@ -3088,7 +3242,28 @@ public class OpenwheelCarEntity extends Entity {
         if (passenger instanceof ServerPlayer player
                 && com.openwheelracing.network.TechnicalRulesNetwork.hasSession(player.getUUID())
                 && !com.openwheelracing.network.TechnicalRulesNetwork.verified(player.getUUID())) return false;
-        return !entityData.get(RECOVERING) && !autonomousControlEnabled && getPassengers().isEmpty() && passenger instanceof Player;
+        return !isDrivingSuspended() && !autonomousControlEnabled && getPassengers().isEmpty() && passenger instanceof Player;
+    }
+
+    @Override
+    protected void addPassenger(Entity passenger) {
+        super.addPassenger(passenger);
+        if (!level().isClientSide() && passenger instanceof ServerPlayer player
+                && com.openwheelracing.network.TechnicalRulesNetwork.hasSession(player.getUUID())) {
+            // Establish the seat on the owning client before its initial epoch/configuration snapshot.
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetPassengersPacket(this));
+            acceptedClientMotion.driverChanged();
+        }
+    }
+
+    @Override
+    protected void removePassenger(Entity passenger) {
+        if (!level().isClientSide() && passenger == getControllingPassenger()) {
+            invalidateLap("driver left car");
+            flushDrivingTelemetry();
+        }
+        super.removePassenger(passenger);
+        if (!level().isClientSide() && acceptedClientMotion.engaged()) acceptedClientMotion.reset();
     }
 
     @Override
@@ -3193,6 +3368,11 @@ public class OpenwheelCarEntity extends Entity {
         tyrePatching = input.getDoubleOr("TyrePatching", 0.0);
         int savedServicePhase = Math.max(TYRE_PHASE_NONE, Math.min(TYRE_PHASE_LOWERING, input.getIntOr("TyreServicePhase", TYRE_PHASE_NONE)));
         entityData.set(TYRE_SERVICE_PHASE, savedServicePhase);
+        boolean oldFormat = input.read("TyresFitted", com.mojang.serialization.Codec.BOOL).isEmpty();
+        setTyresFitted(input.getBooleanOr("TyresFitted", savedServicePhase != TYRE_PHASE_READY_INSTALL
+            && savedServicePhase != TYRE_PHASE_INSTALLING));
+        legacyRemovedTyreReturnPending = input.getBooleanOr("LegacyRemovedTyreReturnPending", false)
+            || oldFormat && savedServicePhase >= TYRE_PHASE_READY_INSTALL;
         entityData.set(PIT_SERVICE_KIND, savedServicePhase == TYRE_PHASE_NONE ? PIT_SERVICE_GENERAL : PIT_SERVICE_TYRES);
         entityData.set(TYRE_SERVICE_DURATION, input.getIntOr("TyreServiceDuration", 0));
         entityData.set(PIT_STOP_TICKS, input.getIntOr("TyreServiceTicks", 0));
@@ -3203,7 +3383,6 @@ public class OpenwheelCarEntity extends Entity {
         removedTyreCompound = input.getIntOr("RemovedTyreCompound", 0);
         removedTyreType = input.getIntOr("RemovedTyreType", 0);
         removedTyreRemaining = input.getIntOr("RemovedTyreRemaining", 0);
-        queuedTyreAction = input.getIntOr("QueuedTyreAction", TYRE_ACTION_NONE);
         String savedCrew = input.getStringOr("PitCrewPlayer", "");
         try { pitCrewPlayerId = savedCrew.isEmpty() ? null : UUID.fromString(savedCrew); } catch (IllegalArgumentException ignored) { pitCrewPlayerId = null; }
         syncTyreTemperature();
@@ -3322,6 +3501,8 @@ public class OpenwheelCarEntity extends Entity {
         output.putDouble("TyreGraining", tyreGraining);
         output.putDouble("TyrePatching", tyrePatching);
         output.putInt("TyreServicePhase", getTyreServicePhase());
+        output.putBoolean("TyresFitted", hasTyres());
+        output.putBoolean("LegacyRemovedTyreReturnPending", legacyRemovedTyreReturnPending);
         output.putInt("TyreServiceDuration", getPitServiceDuration());
         output.putInt("TyreServiceTicks", getPitStopTicks());
         output.putInt("PendingTyreCompound", pendingTyreCompound);
@@ -3331,7 +3512,6 @@ public class OpenwheelCarEntity extends Entity {
         output.putInt("RemovedTyreCompound", removedTyreCompound);
         output.putInt("RemovedTyreType", removedTyreType);
         output.putInt("RemovedTyreRemaining", removedTyreRemaining);
-        output.putInt("QueuedTyreAction", queuedTyreAction);
         if (pitCrewPlayerId != null) output.putString("PitCrewPlayer", pitCrewPlayerId.toString());
         output.putInt("Livery", getLivery());
         CarLiveryColors liveryColors = getLiveryColors();
@@ -3440,29 +3620,32 @@ public class OpenwheelCarEntity extends Entity {
             setComponentDamage(CarComponentDamage.NONE);
             setTyreWearPercent(0.0f);
             resetTyreThermalState();
+            syncServerOperation(true);
             messageDriver(Component.literal("Pit stop complete — car serviced"));
         }
     }
 
     private void completeTyrePhase() {
         int completed = getTyreServicePhase();
-        int readyPhase = switch (completed) {
-            case TYRE_PHASE_JACKING_UP -> TYRE_PHASE_READY_REMOVE;
-            case TYRE_PHASE_REMOVING -> TYRE_PHASE_READY_INSTALL;
-            case TYRE_PHASE_INSTALLING -> TYRE_PHASE_READY_LOWER;
-            case TYRE_PHASE_LOWERING -> TYRE_PHASE_NONE;
-            default -> completed;
-        };
-        if (completed == TYRE_PHASE_INSTALLING) {
-            com.openwheelracing.content.car.TyreType type = com.openwheelracing.content.car.TyreType.fromId(pendingTyreType);
-            applyTyres(pendingTyreCompound, type);
-            setTyreWearPercentAndSync(100.0f - pendingTyreRemaining);
+        if (completed == TYRE_PHASE_REMOVING && hasTyres()) {
+            setTyresFitted(false);
+            ItemStack removed = TyreItem.create(removedTyreCompound,
+                com.openwheelracing.content.car.TyreType.fromId(removedTyreType), 1, removedTyreRemaining);
+            ServerPlayer crew = pitCrewPlayer();
+            if (crew != null) giveOrDropTyres(crew, removed);
+            else if (level() instanceof ServerLevel server) spawnAtLocation(server, removed);
         }
+        if (completed == TYRE_PHASE_INSTALLING && newTyresReserved) {
+            applyTyres(pendingTyreCompound, com.openwheelracing.content.car.TyreType.fromId(pendingTyreType));
+            setTyreWearPercentAndSync(100.0f - pendingTyreRemaining);
+            setTyresFitted(true);
+            newTyresReserved = false;
+        }
+        int readyPhase = completed == TYRE_PHASE_LOWERING ? TYRE_PHASE_NONE
+            : hasTyres() ? TYRE_PHASE_READY_REMOVE : TYRE_PHASE_READY_INSTALL;
         entityData.set(TYRE_SERVICE_PHASE, readyPhase);
         entityData.set(TYRE_SERVICE_DURATION, 0);
         level().playSound(null, getX(), getY(), getZ(), SoundEvents.METAL_PRESSURE_PLATE_CLICK_OFF, SoundSource.PLAYERS, 0.55f, 1.2f);
-        int queued = queuedTyreAction;
-        queuedTyreAction = TYRE_ACTION_NONE;
         if (completed == TYRE_PHASE_LOWERING) {
             finishTyreService();
             return;
@@ -3470,58 +3653,23 @@ public class OpenwheelCarEntity extends Entity {
         ServerPlayer crew = pitCrewPlayer();
         if (crew != null) {
             messagePitCrew(crew, getPitServiceStage());
-            if (queued != TYRE_ACTION_NONE) startRequestedTyreAction(crew, queued, heldStackForAction(crew, queued));
         }
         messageDriver(getPitServiceStage());
-    }
-
-    private ItemStack heldStackForAction(Player player, int action) {
-        for (InteractionHand hand : InteractionHand.values()) {
-            ItemStack stack = player.getItemInHand(hand);
-            if (action == TYRE_ACTION_INSTALL && stack.is(OWRItems.TIRES.get())
-                || action == TYRE_ACTION_LOWER && stack.is(OWRItems.JACK.get())) return stack;
-        }
-        return ItemStack.EMPTY;
+        syncServerOperation(false);
     }
 
     private void finishTyreService() {
-        ItemStack removed = TyreItem.create(removedTyreCompound, com.openwheelracing.content.car.TyreType.fromId(removedTyreType), 1, removedTyreRemaining);
-        ServerPlayer crew = pitCrewPlayer();
-        if ((crew == null || !crew.addItem(removed)) && level() instanceof ServerLevel serverLevel) spawnAtLocation(serverLevel, removed);
-        Component complete = Component.literal("Tyre change complete");
+        Component complete = Component.translatable(hasTyres()
+            ? "message.openwheelracing.pit.lowered" : "message.openwheelracing.pit.lowered_tyreless");
         messageDriver(complete);
+        ServerPlayer crew = pitCrewPlayer();
         if (crew != null) messagePitCrew(crew, complete);
         entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
         entityData.set(TYRE_SERVICE_PHASE, TYRE_PHASE_NONE);
         entityData.set(PIT_STOP_TICKS, 0);
         pitCrewPlayerId = null;
-        queuedTyreAction = TYRE_ACTION_NONE;
         newTyresReserved = false;
-    }
-
-    private void emergencyReleaseTyreService(Player player) {
-        int phase = getTyreServicePhase();
-        boolean installationCompleted = phase == TYRE_PHASE_READY_LOWER || phase == TYRE_PHASE_LOWERING;
-        int tyreReturn = PitTyreServiceTiming.cancellationReturn(installationCompleted, newTyresReserved);
-        if (tyreReturn == PitTyreServiceTiming.RETURN_RESERVED_NEW) {
-            giveOrDropTyres(player, TyreItem.create(pendingTyreCompound,
-                com.openwheelracing.content.car.TyreType.fromId(pendingTyreType), 1, pendingTyreRemaining));
-        } else if (tyreReturn == PitTyreServiceTiming.RETURN_REMOVED_OLD) {
-            giveOrDropTyres(player, TyreItem.create(removedTyreCompound,
-                com.openwheelracing.content.car.TyreType.fromId(removedTyreType), 1, removedTyreRemaining));
-        }
-        entityData.set(PIT_SERVICE_KIND, PIT_SERVICE_GENERAL);
-        entityData.set(TYRE_SERVICE_PHASE, TYRE_PHASE_NONE);
-        entityData.set(TYRE_SERVICE_DURATION, 0);
-        entityData.set(PIT_STOP_TICKS, 0);
-        pitCrewPlayerId = null;
-        queuedTyreAction = TYRE_ACTION_NONE;
-        tyrePhaseSetbackApplied = false;
-        newTyresReserved = false;
-        level().playSound(null, getX(), getY(), getZ(), SoundEvents.METAL_PRESSURE_PLATE_CLICK_OFF, SoundSource.PLAYERS, 0.7f, 0.75f);
-        Component released = Component.literal("Emergency jack release — tyre service cancelled");
-        player.displayClientMessage(released, true);
-        messageDriver(released);
+        syncServerOperation(true);
     }
 
     private void giveOrDropTyres(Player player, ItemStack tyres) {
@@ -3529,7 +3677,10 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private ServerPlayer pitCrewPlayer() {
-        return pitCrewPlayerId == null || level().getServer() == null ? null : level().getServer().getPlayerList().getPlayer(pitCrewPlayerId);
+        if (pitCrewPlayerId == null || level().getServer() == null) return null;
+        ServerPlayer crew = level().getPlayerByUUID(pitCrewPlayerId) instanceof ServerPlayer player ? player : null;
+        return crew != null && crew.isAlive() && !crew.isSpectator() && crew.level() == level()
+            && crew.distanceToSqr(this) <= 36 ? crew : null;
     }
 
     private void startDrivingLapAttempt(Vec3 beforeMove, Vec3 movement) {
@@ -3567,7 +3718,8 @@ public class OpenwheelCarEntity extends Entity {
 
     private void flushDrivingTelemetry() {
         if (level() instanceof ServerLevel serverLevel) {
-            drivingTelemetryRecorder.flush(level().getGameTime(),
+            drivingTelemetryRecorder.flush(acceptedClientMotion.active()
+                    ? (long) Math.floor(acceptedClientMotion.time()) : level().getGameTime(),
                 segment -> LapTelemetryStore.saveDriving(serverLevel.getServer(), getUUID(), segment));
         }
     }
@@ -4321,7 +4473,7 @@ public class OpenwheelCarEntity extends Entity {
 
     public void tickLocalClientMovement(int sequence, float throttle, float brake, float steering, boolean keyboardSteering) {
         Entity passenger = getControllingPassenger();
-        if (entityData.get(RECOVERING)) {
+        if (isDrivingSuspended()) {
             java.util.Arrays.fill(clientPredictionHistory, null);
             clientPredictionHistoryCount = 0;
             return;
@@ -4527,6 +4679,7 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private void tickPassiveMovement(boolean debugMovement) {
+        effectiveThrottle = effectiveBrake = 0.0;
         Vec3 requestedMovement = getDeltaMovement();
         SurfaceProfile surface = getCurrentSurface();
         double drag = onGround() ? Math.min(PASSIVE_GROUND_DRAG, surface.drag) : PASSIVE_AIR_DRAG;
@@ -4574,6 +4727,13 @@ public class OpenwheelCarEntity extends Entity {
     private void tickMovement(double throttle, double brake, double steering, boolean keyboardSteering,
                               boolean steeringAngleProvided, boolean debugMovement) {
 
+        effectiveControlTelemetry.reset();
+        effectiveThrottle = effectiveBrake = 0.0;
+
+        pendingCarContact = null;
+        reportedCarContact = false;
+        carContactIncoming = Vec3.ZERO;
+        carContactYawRate = 0;
         VehicleProfile profile = vehicleProfile();
         boolean dynamicPhysics = VehiclePhysicsPresetState.current(level()).isDynamic();
         double carMassKg = profile.massKg() * entityData.get(BOP_WEIGHT_MULTIPLIER);
@@ -4866,6 +5026,7 @@ public class OpenwheelCarEntity extends Entity {
             if (subSpeed > 3.0 && subForwardRollingFraction < 0.45 && !clutchReleasing) {
                 subDriveForceRequest *= VehiclePhysics.offAxisDriveAuthority(velocityLong, subSpeed);
             }
+            double driveBeforeLaunchLimit = Math.abs(subDriveForceRequest);
             if (keyboardSteering && (launchClutch || clutchReleasing) && isTractionControlEnabled()) {
                 double subStaticRearTraction = asphaltMuLongitudinal * surface.grip * subStaticRearLoad;
                 double tractionLimit = subStaticRearTraction * (clutchReleasing ? CLUTCH_RELEASE_TRACTION_LIMIT : 1.05);
@@ -4889,6 +5050,7 @@ public class OpenwheelCarEntity extends Entity {
                 pendingErsDriveForce = Math.min(0.0, pendingErsDriveForce);
             }
             double forcePowerSpeed = Math.max(MIN_POWER_SPEED, Math.abs(velocityLong));
+            double requestedPropulsionForTelemetry = driveBeforeLaunchLimit + Math.max(0.0, pendingErsDriveForce);
             VehiclePhysics.ErsWheelPower wheelPower = VehiclePhysics.ersWheelPower(
                 Math.max(0.0, subDriveForceRequest * driveDirection * forcePowerSpeed),
                 pendingErsDriveForce * forcePowerSpeed);
@@ -5025,6 +5187,14 @@ public class OpenwheelCarEntity extends Entity {
                     rrLongRequest = driveRear + (rrLongRequest - driveRear) * brakeScale;
                 }
             }
+            // Compare the same blended brake component before/after ABS, but scale
+            // only the pedal input so engine braking and regeneration alone read zero.
+            double requestedBrakingForTelemetry = Math.abs(rawFlLongRequest) + Math.abs(rawFrLongRequest)
+                + Math.abs(rawRlLongRequest - driveRear) + Math.abs(rawRrLongRequest - driveRear);
+            double deliveredBrakingForTelemetry = Math.abs(flLongRequest) + Math.abs(frLongRequest)
+                + Math.abs(rlLongRequest - driveRear) + Math.abs(rrLongRequest - driveRear);
+            double rlBeforeTractionLimit = rlLongRequest;
+            double rrBeforeTractionLimit = rrLongRequest;
             double rearLatUse = Math.max(Math.abs(relaxedRlLatForce) / Math.max(1.0, rlLatLimit), Math.abs(relaxedRrLatForce) / Math.max(1.0, rrLatLimit));
             double speedAdjustedTractionEnvelope = VehiclePhysics.lowSpeedTractionEnvelope(
                 subSpeed, tractionControlEnvelope);
@@ -5051,6 +5221,11 @@ public class OpenwheelCarEntity extends Entity {
                 rrLongRequest = VehiclePhysics.tractionControlledDriveRequest(
                     rrLongRequest, rrLongLimit * configuredTractionTarget, speedAdjustedTractionStrength, dynamicPhysics);
             }
+            double tractionReduction = Math.max(0.0, rlBeforeTractionLimit - rlLongRequest)
+                + Math.max(0.0, rrBeforeTractionLimit - rrLongRequest);
+            effectiveControlTelemetry.sample(throttle, brake, requestedPropulsionForTelemetry,
+                Math.max(0.0, Math.abs(subPropulsionDriveForce) - tractionReduction),
+                requestedBrakingForTelemetry, deliveredBrakingForTelemetry);
             WheelForces flForces = calculateWheelForces(
                 -halfTrackWidth, frontAxleDistance, steeringAngle - FRONT_TOE_OUT,
                 velocityLong, velocityLat, yawRate,
@@ -5224,6 +5399,8 @@ public class OpenwheelCarEntity extends Entity {
             finalRearSaturation = Math.max(rlDemand, rrDemand);
         }
 
+        effectiveThrottle = effectiveControlTelemetry.throttle();
+        effectiveBrake = effectiveControlTelemetry.brake();
         reconcilePowerLimitedErsEnergy(requestedIceDriveEnergyJoules, requestedPositiveErsEnergyJoules, requestedNegativeErsEnergyJoules, actualPositiveDriveEnergyJoules, PHYSICS_DT);
 
         double newKineticEnergy = 0.5 * carMassKg * (velocityLong * velocityLong + velocityLat * velocityLat) + 0.5 * yawInertia * yawRate * yawRate;
@@ -5378,6 +5555,13 @@ public class OpenwheelCarEntity extends Entity {
             logMovementWarning("movement/collision discrepancy", beforeMove, delta, unclampedActualMovement, throttle, brake, steering, surface);
         }
         setDeltaMovement(new Vec3(actualMovement.x, carriedVerticalMovement, actualMovement.z));
+        if (level().isClientSide() && preemptiveBarrierNormal.lengthSqr() > 0) {
+            setDeltaMovement(bounceFromBarrier(preemptiveBarrierVelocity, preemptiveBarrierNormal,
+                barrierApproachFactor(preemptiveBarrierNormal, preemptiveBarrierVelocity)));
+        }
+        if (pendingCarContact != null) {
+            resolveCarContact(pendingCarContact, carContactIncoming, !level().isClientSide() && !rollbackReplay);
+        }
         if (!rollbackReplay) {
             handleEntityImpacts(beforeMove, actualMovement);
             processRaceTimingMovement(beforeMove, actualMovement);
@@ -5400,6 +5584,8 @@ public class OpenwheelCarEntity extends Entity {
         entityData.set(TYRE_SCRUB_SPEED_FR, dynamicPhysics ? (float) finalFrScrubSpeed : 0.0f);
         entityData.set(TYRE_SCRUB_SPEED_RL, dynamicPhysics ? (float) finalRlScrubSpeed : 0.0f);
         entityData.set(TYRE_SCRUB_SPEED_RR, dynamicPhysics ? (float) finalRrScrubSpeed : 0.0f);
+        if (pendingCarContact != null || level().isClientSide() && reportedBarrierContact) entityData.set(SPEED,
+            (float) (getDeltaMovement().horizontalDistance() * VehiclePhysics.KMH_PER_BLOCK_PER_TICK));
         previousHorizontalSpeed = horizontalSpeed;
     }
 
@@ -5656,19 +5842,31 @@ public class OpenwheelCarEntity extends Entity {
         Vec3 beforeMove = position();
         preemptiveBarrierNormal = Vec3.ZERO;
         preemptiveBarrierVelocity = Vec3.ZERO;
+        reportedBarrierContact = false; barrierRequestedMovement = Vec3.ZERO;
         BarrierContact barrierContact = firstBarrierContact(beforeMove, requestedMovement);
+        CarContact vehicleContact = firstCarContact(beforeMove, requestedMovement, requestedMovement, .015);
+        if (vehicleContact != null && (barrierContact == null || vehicleContact.time() < barrierContact.time())) {
+            pendingCarContact = vehicleContact;
+            carContactIncoming = requestedMovement;
+            carContactYawRate = yawRate;
+            reportedCarContact = true;
+            requestedMovement = requestedMovement.scale(Math.max(0, vehicleContact.time() - 1.0E-4));
+            barrierContact = null;
+        }
         if (barrierContact != null) {
+            reportedBarrierContact = true;
+            barrierRequestedMovement = requestedMovement;
+            barrierMovementHeading = getYRot();
             preemptiveBarrierNormal = barrierContact.normal();
             preemptiveBarrierLever = barrierContact.lever();
             preemptiveBarrierVelocity = new Vec3(requestedMovement.x, 0.0, requestedMovement.z);
             horizontalCollision = true;
             double travel = Math.max(0.0, barrierContact.time() - 1.0E-4);
-            Vec3 movementToContact = requestedMovement.scale(travel);
+            Vec3 movementToContact = barrierToContact(beforeMove, requestedMovement.scale(travel));
             setPos(beforeMove.x + movementToContact.x, beforeMove.y + movementToContact.y, beforeMove.z + movementToContact.z);
             // Resolve the remaining tick along the wall instead of visibly stopping at contact.
             Vec3 remaining = requestedMovement.scale(1.0 - travel);
-            double normalSpeed = remaining.dot(barrierContact.normal());
-            Vec3 slide = remaining.subtract(barrierContact.normal().scale(normalSpeed)).scale(0.98);
+            Vec3 slide = barrierSlide(remaining, barrierContact.normal());
             move(MoverType.SELF, slide);
             horizontalCollision = true;
             return position().subtract(beforeMove);
@@ -5692,10 +5890,14 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private BarrierContact firstBarrierContact(Vec3 beforeMove, Vec3 movement) {
+        return firstBarrierContact(beforeMove, movement, getYRot());
+    }
+
+    private BarrierContact firstBarrierContact(Vec3 beforeMove, Vec3 movement, float heading) {
         if (movement.horizontalDistanceSqr() < 1.0E-12) {
             return null;
         }
-        AABB currentBounds = componentBoundingBox(this).move(beforeMove.subtract(position()));
+        AABB currentBounds = componentBoundingBox(this, heading).move(beforeMove.subtract(position()));
         AABB sweptBounds = currentBounds.minmax(currentBounds.move(movement));
         int x0 = (int) Math.floor(sweptBounds.minX);
         int x1 = (int) Math.floor(sweptBounds.maxX - 1.0E-6);
@@ -5723,12 +5925,12 @@ public class OpenwheelCarEntity extends Entity {
                         1.0, 0.0, 0.0, 1.0,
                         barrierBox.getXsize() * 0.5, barrierBox.getZsize() * 0.5);
                     for (CarComponentDefinition definition : COMPONENT_DEFINITIONS) {
-                        AABB componentBox = definition.worldBox(this).move(beforeMove.subtract(position()));
+                        AABB componentBox = definition.worldBox(this, heading).move(beforeMove.subtract(position()));
                         AABB sweptComponentBox = componentBox.minmax(componentBox.move(movement));
                         if (sweptComponentBox.maxY <= barrierBox.minY || sweptComponentBox.minY >= barrierBox.maxY) {
                             continue;
                         }
-                        ModularCollisionGeometry.Rectangle component = definition.worldRectangle(this);
+                        ModularCollisionGeometry.Rectangle component = definition.worldRectangle(this, heading);
                         component = new ModularCollisionGeometry.Rectangle(
                             component.centerX() + beforeMove.x - getX(), component.centerZ() + beforeMove.z - getZ(),
                             component.rightX(), component.rightZ(), component.forwardX(), component.forwardZ(),
@@ -5738,8 +5940,9 @@ public class OpenwheelCarEntity extends Entity {
                         if (contact == null || best != null && contact.time() >= best.time() - 1.0E-7) {
                             continue;
                         }
-                        Vec3 normal = new Vec3(contact.normalX(), 0.0, contact.normalZ());
-                        if (movement.x * normal.x + movement.z * normal.z < -1.0E-8) {
+                        Vec3 normal = exposedBarrierNormal(pos, barrierBox, component, movement,
+                            new Vec3(contact.normalX(), 0, contact.normalZ()));
+                        if (normal != null) {
                             // Midpoint of the contacting support face, expressed relative to the car.
                             double rightDot = component.rightX() * normal.x + component.rightZ() * normal.z;
                             double forwardDot = component.forwardX() * normal.x + component.forwardZ() * normal.z;
@@ -5754,6 +5957,23 @@ public class OpenwheelCarEntity extends Entity {
                     }
                 }
             }
+        }
+        return best;
+    }
+
+    private Vec3 exposedBarrierNormal(BlockPos pos, AABB box, ModularCollisionGeometry.Rectangle component,
+            Vec3 movement, Vec3 hint) {
+        Vec3 best = null;
+        double bestScore = -Double.MAX_VALUE;
+        for (Direction face : Direction.Plane.HORIZONTAL) {
+            // Adjacent barrier blocks are one wall: their shared faces cannot stop tangential scraping.
+            if (level().getBlockState(pos.relative(face)).is(OWRBlocks.BARRIER.get())) continue;
+            Vec3 normal = new Vec3(face.getStepX(), 0, face.getStepZ());
+            double side = (component.centerX() - (box.minX + box.maxX) * .5) * normal.x
+                + (component.centerZ() - (box.minZ + box.maxZ) * .5) * normal.z;
+            if (side < -1e-8 || movement.dot(normal) >= -1e-8) continue;
+            double score = normal.dot(hint);
+            if (score > bestScore) { best = normal; bestScore = score; }
         }
         return best;
     }
@@ -5976,7 +6196,9 @@ public class OpenwheelCarEntity extends Entity {
         applyBlockImpactNow();
     }
 
-    void applyBlockImpactNow() {
+    void applyBlockImpactNow() { applyBlockImpactNow(true); }
+
+    private void applyBlockImpactNow(boolean respond) {
         if (horizontalCollision && previousHorizontalSpeed > 0.08) {
             boolean preemptiveBarrierImpact = preemptiveBarrierNormal.lengthSqr() > 0.0;
             Vec3 barrierNormal = preemptiveBarrierImpact ? preemptiveBarrierNormal : nearbyBarrierNormal();
@@ -5993,14 +6215,16 @@ public class OpenwheelCarEntity extends Entity {
                 return;
             }
 
-            float severity = (float) ((previousHorizontalSpeed - 0.28) * (barrierImpact ? 14.0 * approachFactor : 40.0));
+            float severity = barrierImpact
+                ? (float) VehiclePhysics.barrierDamageSeverity(Math.max(0, -impactVelocity.dot(barrierNormal)))
+                : (float) ((previousHorizontalSpeed - 0.28) * 40.0);
             Vec3 impactDirection = barrierImpact ? barrierNormal.scale(-1.0) : impactVelocity;
             CarDamageComponent component = classifyBlockImpactComponent(impactDirection, impactVelocity);
             addComponentDamage(component, severity);
             playImpactFeedback(Math.max(severity, soundSeverity));
-            if (barrierImpact) {
+            if (respond && barrierImpact) {
                 setDeltaMovement(bounceFromBarrier(impactVelocity, barrierNormal, approachFactor));
-            } else {
+            } else if (respond) {
                 // Movement resolution has already clipped the blocked component.
                 // Apply only light scrub friction to the surviving horizontal slide.
                 Vec3 slide = getDeltaMovement();
@@ -6017,6 +6241,105 @@ public class OpenwheelCarEntity extends Entity {
     private void clearPreemptiveBarrierImpact() {
         preemptiveBarrierNormal = Vec3.ZERO;
         preemptiveBarrierVelocity = Vec3.ZERO;
+    }
+
+    private record CarContact(OpenwheelCarEntity other, double time, double closingSpeed, Vec3 normal,
+            Vec3 lever, CarDamageComponent ownComponent, CarDamageComponent otherComponent) {}
+
+    /** Broad-phase entity query followed by swept oriented component rectangles; no world mutation. */
+    private final RemoteCarPose remoteContactPose = new RemoteCarPose();
+    private final java.util.function.LongSupplier remotePoseClock;
+
+    public RemoteCarPose.Pose remoteContactPose() {
+        return remoteContactPose.sample(remotePoseClock.getAsLong(), getX(), getY(), getZ(), getYRot());
+    }
+
+    public void clearRemoteContactPose() { remoteContactPose.clear(); }
+
+    private CarContact firstCarContact(Vec3 before, Vec3 movement, Vec3 incoming, double skin) {
+        AABB start = componentBoundingBox(this).move(before.subtract(position()));
+        AABB search = start.minmax(start.move(movement)).inflate(COMPONENT_BODY_HALF_LENGTH + .05, .05,
+            COMPONENT_BODY_HALF_LENGTH + .05);
+        // A visible remote component can lag its logical entity by at most MAX_OFFSET.
+        // Include that displacement in broad phase, including overpass/height transitions.
+        boolean presented = level().isClientSide();
+        if (presented) search = search.inflate(RemoteCarPose.MAX_OFFSET);
+        CarContact best = null;
+        for (Entity entity : level().getEntities(this, search, e -> e instanceof OpenwheelCarEntity
+                && e.isAlive() && !e.isRemoved() && !e.getUUID().equals(getUUID()))) {
+            OpenwheelCarEntity other = (OpenwheelCarEntity) entity;
+            if (other.isRecoveryActive()) continue;
+            var pose = presented ? other.remoteContactPose()
+                : new RemoteCarPose.Pose(other.getX(), other.getY(), other.getZ(), other.getYRot());
+            Vec3 poseOffset = new Vec3(pose.x() - other.getX(), pose.y() - other.getY(), pose.z() - other.getZ());
+            Vec3 otherVelocity = other.isDrivingSuspended() ? Vec3.ZERO : other.getDeltaMovement();
+            Vec3 relative = incoming.subtract(otherVelocity);
+            for (CarComponentDefinition own : damageableComponentDefinitions()) {
+                AABB ownBox = own.worldBox(this).move(before.subtract(position())).expandTowards(movement).inflate(skin, 0, skin);
+                var current = own.worldRectangle(this);
+                var moving = new ModularCollisionGeometry.Rectangle(current.centerX() + before.x - getX(),
+                    current.centerZ() + before.z - getZ(), current.rightX(), current.rightZ(),
+                    current.forwardX(), current.forwardZ(), current.halfWidth() + skin, current.halfLength() + skin);
+                for (CarComponentDefinition part : other.damageableComponentDefinitions()) {
+                    AABB otherBox = part.worldBox(other, pose.yaw()).move(poseOffset);
+                    if (!ownBox.intersects(otherBox)) continue;
+                    var rectangle = part.worldRectangle(other, pose.yaw());
+                    var stationary = new ModularCollisionGeometry.Rectangle(
+                        rectangle.centerX() + poseOffset.x, rectangle.centerZ() + poseOffset.z,
+                        rectangle.rightX(), rectangle.rightZ(), rectangle.forwardX(), rectangle.forwardZ(),
+                        rectangle.halfWidth(), rectangle.halfLength());
+                    var contact = ModularCollisionGeometry.firstContact(moving, movement.x, movement.z, stationary);
+                    if (contact == null || best != null && contact.time() >= best.time() - 1e-7) continue;
+                    Vec3 normal = new Vec3(-contact.normalX(), 0, -contact.normalZ());
+                    double dx = stationary.centerX() - moving.centerX(), dz = stationary.centerZ() - moving.centerZ();
+                    double rx = Math.clamp(dx * moving.rightX() + dz * moving.rightZ(), -moving.halfWidth(), moving.halfWidth());
+                    double fz = Math.clamp(dx * moving.forwardX() + dz * moving.forwardZ(), -moving.halfLength(), moving.halfLength());
+                    Vec3 lever = new Vec3(moving.centerX() + rx * moving.rightX() + fz * moving.forwardX() - before.x,
+                        0, moving.centerZ() + rx * moving.rightZ() + fz * moving.forwardZ() - before.z);
+                    double closing = relative.dot(normal);
+                    if (closing <= 1e-6) continue; // Rolling together or separating is not an impact.
+                    best = new CarContact(other, contact.time(), closing, normal, lever, own.component, part.component);
+                }
+            }
+        }
+        return best;
+    }
+
+    private void resolveCarContact(CarContact contact, Vec3 incoming, boolean authoritative) {
+        OpenwheelCarEntity other = contact.other();
+        boolean fixed = other.isDrivingSuspended();
+        Vec3 otherVelocity = fixed ? Vec3.ZERO : other.getDeltaMovement();
+        double ownMass = vehicleProfile().massKg() * entityData.get(BOP_WEIGHT_MULTIPLIER);
+        double otherMass = fixed ? 1e12 : other.vehicleProfile().massKg() * other.entityData.get(BOP_WEIGHT_MULTIPLIER);
+        var response = VehiclePhysics.resolvePlanarCollision(incoming.x, incoming.z, ownMass,
+            otherVelocity.x, otherVelocity.z, otherMass, contact.normal().x, contact.normal().z, .28);
+        Vec3 resolved = clampHorizontalMovement(
+            new Vec3(response.firstVelocityX(), getDeltaMovement().y, response.firstVelocityZ()),
+            MAX_REASONABLE_MOVEMENT_BLOCKS_PER_TICK);
+        setDeltaMovement(resolved);
+        entityData.set(SPEED, (float) (resolved.horizontalDistance() * VehiclePhysics.KMH_PER_BLOCK_PER_TICK));
+        resetTyreRelaxation(); wheelAngularSpeedsInitialized = false;
+        captureHandlingEvent(authoritative ? "car_contact_confirmed" : "car_contact_predicted");
+        if (!authoritative) return; // Local prediction never mutates a remote car.
+        if (!fixed) {
+            other.setDeltaMovement(other.clampHorizontalMovement(
+                new Vec3(response.secondVelocityX(), otherVelocity.y, response.secondVelocityZ()),
+                MAX_REASONABLE_MOVEMENT_BLOCKS_PER_TICK));
+            other.entityData.set(SPEED, (float) (other.getDeltaMovement().horizontalDistance() * VehiclePhysics.KMH_PER_BLOCK_PER_TICK));
+            other.resetTyreRelaxation(); other.wheelAngularSpeedsInitialized = false;
+        }
+        lapProfileCollector.recordImpact(); other.lapProfileCollector.recordImpact();
+        long now = level().getGameTime();
+        Long previous = lastEntityImpactById.get(other.getId());
+        if (previous == null || now - previous >= ENTITY_IMPACT_COOLDOWN_TICKS) {
+            lastEntityImpactById.put(other.getId(), now); other.lastEntityImpactById.put(getId(), now);
+            double closing = contact.closingSpeed();
+            float severity = (float) Math.max(0, (closing - ENTITY_IMPACT_SOFT_SPEED) * ENTITY_IMPACT_OTHER_CAR_DAMAGE);
+            addComponentDamage(contact.ownComponent(), severity); other.addComponentDamage(contact.otherComponent(), severity);
+            playCollisionSound((float) Math.max(.6, closing * 18), true);
+        }
+        if (other.usesAcceptedClientMotion()) other.acceptedClientMotion.carContactBoundary();
+        destroyIfChassisFailed(); other.destroyIfChassisFailed();
     }
 
     private void handleEntityImpacts(Vec3 beforeMove, Vec3 actualMovement) {
@@ -6037,6 +6360,7 @@ public class OpenwheelCarEntity extends Entity {
         }
 
         for (Entity target : level().getEntities(this, entitySearchBox, this::canImpactEntity)) {
+            if (target instanceof OpenwheelCarEntity) continue; // Swept car contacts have their own shared response.
             Long lastImpactAt = lastEntityImpactById.get(target.getId());
             if (lastImpactAt != null && time - lastImpactAt < ENTITY_IMPACT_COOLDOWN_TICKS) {
                 continue;
@@ -6121,10 +6445,14 @@ public class OpenwheelCarEntity extends Entity {
         return current.minmax(current.move(-movement.x, -movement.y, -movement.z));
     }
 
-    private static AABB componentBoundingBox(OpenwheelCarEntity car) {
-        AABB result = COMPONENT_DEFINITIONS_WITH_ENGINE[0].worldBox(car);
+    static AABB componentBoundingBox(OpenwheelCarEntity car) {
+        return componentBoundingBox(car, car.getYRot());
+    }
+
+    private static AABB componentBoundingBox(OpenwheelCarEntity car, float heading) {
+        AABB result = COMPONENT_DEFINITIONS_WITH_ENGINE[0].worldBox(car, heading);
         for (int i = 1; i < COMPONENT_DEFINITIONS_WITH_ENGINE.length; i++) {
-            result = result.minmax(COMPONENT_DEFINITIONS_WITH_ENGINE[i].worldBox(car));
+            result = result.minmax(COMPONENT_DEFINITIONS_WITH_ENGINE[i].worldBox(car, heading));
         }
         return result;
     }
@@ -6237,7 +6565,7 @@ public class OpenwheelCarEntity extends Entity {
                 BlockPos linePosition = line == null ? blockPosition() : BlockPos.containing(
                     (line.left().x() + line.right().x()) * 0.5, (line.left().y() + line.right().y()) * 0.5,
                     (line.left().z() + line.right().z()) * 0.5);
-                int elapsed = Math.max(1, elapsedMillisAt(level().getGameTime()));
+                int elapsed = Math.max(1, elapsedMillisNow());
                 recordInvalidTelemetry(serverLevel, lapTelemetryRecorder.driverId(), lapTelemetryRecorder.driverName(), linePosition, elapsed, reason);
             }
             lapStartedAt = -1.0;
@@ -6254,7 +6582,8 @@ public class OpenwheelCarEntity extends Entity {
 
     private void recordInvalidTelemetry(ServerLevel serverLevel, java.util.UUID driverId, String driverName,
                                         BlockPos startFinishPos, int lapMillis, String reason) {
-        recordInvalidTelemetry(serverLevel, driverId, driverName, startFinishPos, lapMillis, reason, serverLevel.getGameTime());
+        recordInvalidTelemetry(serverLevel, driverId, driverName, startFinishPos, lapMillis, reason,
+            acceptedClientMotion.active() ? acceptedClientMotion.time() : serverLevel.getGameTime());
     }
 
     private void recordInvalidTelemetry(ServerLevel serverLevel, java.util.UUID driverId, String driverName,
@@ -6363,23 +6692,13 @@ public class OpenwheelCarEntity extends Entity {
         if (intoBarrier >= 0.0) {
             return velocity;
         }
-        Vec3 lever = preemptiveBarrierNormal.lengthSqr() > 0.0 ? preemptiveBarrierLever : Vec3.ZERO;
-        double mass = vehicleProfile().massKg();
-        double inertia = vehicleProfile().yawInertia();
-        // Positive Minecraft yaw rotates +Z toward -X.
-        double arm = lever.z * barrierNormal.x - lever.x * barrierNormal.z;
-        double contactSpeed = intoBarrier * 20.0 + yawRate * arm;
-        if (contactSpeed >= 0.0) return velocity;
-        double impulse = -(contactSpeed + Math.min(2.0, -contactSpeed * 0.15))
-            / (1.0 / mass + arm * arm / inertia);
-        Vec3 tangentDirection = new Vec3(-barrierNormal.z, 0.0, barrierNormal.x);
-        double tangentArm = lever.z * tangentDirection.x - lever.x * tangentDirection.z;
-        double tangentSpeed = horizontalVelocity.dot(tangentDirection) * 20.0 + yawRate * tangentArm;
-        double frictionImpulse = -tangentSpeed / (1.0 / mass + tangentArm * tangentArm / inertia);
-        frictionImpulse = Math.max(-0.02 * impulse, Math.min(0.02 * impulse, frictionImpulse));
-        Vec3 delta = barrierNormal.scale(impulse / mass / 20.0)
-            .add(tangentDirection.scale(frictionImpulse / mass / 20.0));
-        yawRate += (arm * impulse + tangentArm * frictionImpulse) / inertia;
+        // Collision impulses are translational only; steering/tyre yaw is not changed by impact.
+        double contactSpeed = intoBarrier * 20.0;
+        double deltaNormal = -(contactSpeed - Math.min(2.4, -contactSpeed * .18)) / 20.0;
+        Vec3 tangentDirection = new Vec3(-barrierNormal.z, 0, barrierNormal.x);
+        double tangentSpeed = horizontalVelocity.dot(tangentDirection);
+        double deltaTangent = Math.clamp(-tangentSpeed, -.02 * deltaNormal, .02 * deltaNormal);
+        Vec3 delta = barrierNormal.scale(deltaNormal).add(tangentDirection.scale(deltaTangent));
         Vec3 resolved = horizontalVelocity.add(delta);
         return new Vec3(resolved.x, Math.min(0.0, velocity.y), resolved.z);
     }
@@ -6668,7 +6987,7 @@ public class OpenwheelCarEntity extends Entity {
     }
 
     private void harvestErsFromBraking(double previousSpeedBlocksPerTick, double currentSpeedBlocksPerTick, double brake, SurfaceProfile surface) {
-        if (brake <= 0.0 || !onGround() || !surface.countsAsTrack || horizontalCollision) {
+        if (brake <= 0.0 || !onGround() || !surface.countsAsTrack || horizontalCollision || pendingCarContact != null) {
             return;
         }
         if (getGear() <= NEUTRAL_GEAR || previousSpeedBlocksPerTick <= currentSpeedBlocksPerTick || previousSpeedBlocksPerTick < 0.04) {
@@ -7252,9 +7571,11 @@ public class OpenwheelCarEntity extends Entity {
             this.halfLength = halfLength;
         }
 
-        private AABB worldBox(OpenwheelCarEntity car) {
-            Vec3 center = worldCenter(car);
-            Vec3 forward = Vec3.directionFromRotation(0.0f, car.getYRot());
+        private AABB worldBox(OpenwheelCarEntity car) { return worldBox(car, car.getYRot()); }
+
+        private AABB worldBox(OpenwheelCarEntity car, float heading) {
+            Vec3 center = worldCenter(car, heading);
+            Vec3 forward = Vec3.directionFromRotation(0.0f, heading);
             Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
             double worldHalfX = Math.abs(right.x) * halfWidth + Math.abs(forward.x) * halfLength;
             double worldHalfZ = Math.abs(right.z) * halfWidth + Math.abs(forward.z) * halfLength;
@@ -7262,15 +7583,19 @@ public class OpenwheelCarEntity extends Entity {
                 center.x + worldHalfX, center.y + COMPONENT_BOX_HALF_HEIGHT, center.z + worldHalfZ);
         }
 
-        private Vec3 worldCenter(OpenwheelCarEntity car) {
-            Vec3 forward = Vec3.directionFromRotation(0.0f, car.getYRot());
+        private Vec3 worldCenter(OpenwheelCarEntity car) { return worldCenter(car, car.getYRot()); }
+
+        private Vec3 worldCenter(OpenwheelCarEntity car, float heading) {
+            Vec3 forward = Vec3.directionFromRotation(0.0f, heading);
             Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
             return car.position().add(right.scale(localX)).add(forward.scale(localZ)).add(0.0, COMPONENT_BOX_CENTER_Y, 0.0);
         }
 
-        private ModularCollisionGeometry.Rectangle worldRectangle(OpenwheelCarEntity car) {
-            Vec3 center = worldCenter(car);
-            Vec3 forward = Vec3.directionFromRotation(0.0f, car.getYRot());
+        private ModularCollisionGeometry.Rectangle worldRectangle(OpenwheelCarEntity car) { return worldRectangle(car, car.getYRot()); }
+
+        private ModularCollisionGeometry.Rectangle worldRectangle(OpenwheelCarEntity car, float heading) {
+            Vec3 center = worldCenter(car, heading);
+            Vec3 forward = Vec3.directionFromRotation(0.0f, heading);
             Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
             return new ModularCollisionGeometry.Rectangle(center.x, center.z,
                 right.x, right.z, forward.x, forward.z, halfWidth, halfLength);

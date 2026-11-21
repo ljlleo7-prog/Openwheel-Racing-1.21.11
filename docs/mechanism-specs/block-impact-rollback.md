@@ -1,4 +1,4 @@
-> Historical server-physics path: protocol 27 human driving now uses
+> Historical server-physics path: protocol 32 human driving now uses
 > [accepted client motion](client-authoritative-motion.md). Legacy rollback tests remain regression coverage.
 
 # Disputed block-impact rollback

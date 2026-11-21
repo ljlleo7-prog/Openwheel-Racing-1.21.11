@@ -10,6 +10,11 @@ import com.openwheelracing.content.car.CarLiveryTexture;
 import com.openwheelracing.content.item.PrototypeCarItem;
 import com.openwheelracing.network.OWRNetwork;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Files;
+import com.openwheelracing.client.livery.PictureLivery;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.util.tinyfd.TinyFileDialogs;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,11 +46,14 @@ public class LiveryEditorScreen extends Screen {
 
     private NativeImage liveryImage;
     private CarLiveryTexture texture;
+    private boolean pictureMode;
+    private NativeImage importedPicture;
+    private String importedName = "";
 
     private LiveryPreviewRenderer.Preview preview;
     private List<TextureAnnotation> annotations = List.of();
-    private final ArrayDeque<NativeImage> undoStack = new ArrayDeque<>();
-    private final ArrayDeque<NativeImage> redoStack = new ArrayDeque<>();
+    private final ArrayDeque<HistoryEntry> undoStack = new ArrayDeque<>();
+    private final ArrayDeque<HistoryEntry> redoStack = new ArrayDeque<>();
     private int textureZoomIndex = FIT_TEXTURE_ZOOM_INDEX;
     private int textureViewU;
     private int textureViewV;
@@ -94,8 +102,9 @@ public class LiveryEditorScreen extends Screen {
         controlsY = previewY + viewSize + 28;
         clampTextureView();
 
-        texture = PrototypeCarItem.getLiveryTexture(stack);
         if (liveryImage == null) {
+            texture = PrototypeCarItem.getLiveryTexture(stack);
+            pictureMode = texture.isPicture();
             NativeImage loaded = ClientLiveryTextures.loadOrCreate(Minecraft.getInstance(), texture, PrototypeCarItem.getLiveryColors(stack).body());
             liveryImage = texture != null && texture.isPresent() ? copyImage(loaded) : loaded;
             annotations = buildAnnotations();
@@ -108,24 +117,35 @@ public class LiveryEditorScreen extends Screen {
         }
 
         clearWidgets();
-        addRenderableWidget(new RgbSlider(controlsX, controlsY + 16, 128, 18, 0));
-        addRenderableWidget(new RgbSlider(controlsX, controlsY + 40, 128, 18, 1));
-        addRenderableWidget(new RgbSlider(controlsX, controlsY + 64, 128, 18, 2));
-        addRenderableWidget(new BrushSlider(controlsX + 150, controlsY + 16, 128, 18));
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.livery.import"), button -> choosePicture(false))
+            .bounds(controlsX + 216, controlsY + 16, 88, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.livery.paste_path"), button -> importClipboardPath())
+            .bounds(controlsX + 308, controlsY + 16, 96, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.openwheelracing.livery.import_atlas"), button -> choosePicture(true))
+            .bounds(controlsX + 308, controlsY + 40, 96, 20).build());
+        addRenderableWidget(new RgbSlider(controlsX, controlsY + 16, 104, 18, 0));
+        addRenderableWidget(new RgbSlider(controlsX, controlsY + 40, 104, 18, 1));
+        addRenderableWidget(new RgbSlider(controlsX, controlsY + 64, 104, 18, 2));
+        addRenderableWidget(new BrushSlider(controlsX + 116, controlsY + 16, 88, 18));
         addRenderableWidget(Button.builder(Component.literal("Save"), button -> save())
-            .bounds(controlsX + 150, controlsY + 46, 60, 20).build());
+            .bounds(controlsX + 116, controlsY + 40, 42, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Back"), button -> closeToParent())
-            .bounds(controlsX + 218, controlsY + 46, 60, 20).build());
+            .bounds(controlsX + 162, controlsY + 40, 42, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Reset"), button -> reset())
-            .bounds(controlsX + 150, controlsY + 72, 60, 20).build());
+            .bounds(controlsX + 116, controlsY + 72, 44, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Zoom -"), button -> zoomTexture(-1, textureX + viewSize / 2.0, textureY + viewSize / 2.0))
-            .bounds(controlsX + 218, controlsY + 72, 58, 20).build());
+            .bounds(controlsX + 164, controlsY + 72, 44, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Zoom +"), button -> zoomTexture(1, textureX + viewSize / 2.0, textureY + viewSize / 2.0))
-            .bounds(controlsX + 284, controlsY + 72, 58, 20).build());
+            .bounds(controlsX + 212, controlsY + 72, 44, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Undo"), button -> undo())
-            .bounds(controlsX + 350, controlsY + 72, 52, 20).build());
+            .bounds(controlsX + 260, controlsY + 72, 44, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Redo"), button -> redo())
-            .bounds(controlsX + 410, controlsY + 72, 52, 20).build());
+            .bounds(controlsX + 308, controlsY + 72, 44, 20).build());
+    }
+
+    @Override
+    public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        // This editor can open in a frame where the assembly screen already blurred.
     }
 
     @Override
@@ -154,25 +174,35 @@ public class LiveryEditorScreen extends Screen {
         drawAnnotations(graphics);
 
         if (insideTexture(mouseX, mouseY)) {
-            drawBrushCursor(graphics, mouseX, mouseY);
+            if (importedPicture == null) drawBrushCursor(graphics, mouseX, mouseY);
+            else drawPicturePlacement(graphics, mouseX, mouseY);
             drawTextureCoordinate(graphics, mouseX, mouseY);
         }
 
         graphics.drawString(font, "Brush color", controlsX, controlsY + 2, 0xFFB9C2CC, false);
         int color = brushColor();
-        graphics.fill(controlsX + 292, controlsY + 16, controlsX + 334, controlsY + 58, color);
-        graphics.renderOutline(controlsX + 292, controlsY + 16, 42, 42, 0xFF8792A2);
-        graphics.drawString(font, CarLiveryColors.colorName(color), controlsX + 286, controlsY + 64, 0xFFB9C2CC, false);
-        graphics.drawString(font, "Brush r=" + brushRadius + " px", controlsX + 150, controlsY + 2, 0xFFE8EDF2, false);
+        graphics.fill(controlsX + 216, controlsY + 40, controlsX + 234, controlsY + 58, color);
+        graphics.renderOutline(controlsX + 216, controlsY + 40, 18, 18, 0xFF8792A2);
+        graphics.drawString(font, CarLiveryColors.colorName(color), controlsX + 240, controlsY + 46, 0xFFB9C2CC, false);
+        graphics.drawString(font, "Brush r=" + brushRadius + " px", controlsX + 116, controlsY + 2, 0xFFE8EDF2, false);
         graphics.drawString(font, "Yaw " + Math.round(yaw) + "°", previewX, previewY + viewSize + 8, 0xFF8792A2, false);
-        graphics.drawString(font, status, textureX, textureY + viewSize + 8, 0xFF8792A2, false);
+        graphics.drawString(font, font.plainSubstrByWidth(status, viewSize * 2 + 24), previewX, previewY + viewSize + 20, 0xFF8792A2, false);
 
         super.render(graphics, mouseX, mouseY, partialTick);
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (importedPicture != null && insidePreview(event.x(), event.y()) && event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT && preview != null) {
+            int px = (int) event.x() - previewX, py = (int) event.y() - previewY;
+            pastePictureAtUv(preview.hitU(px, py), preview.hitV(px, py));
+            return true;
+        }
         if (insideTexture(event.x(), event.y()) && event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            if (importedPicture != null) {
+                pastePictureAt(event.x(), event.y());
+                return true;
+            }
             paintingTexture = true;
             beginHistoryEdit();
             paintTextureAt(event.x(), event.y());
@@ -222,8 +252,18 @@ public class LiveryEditorScreen extends Screen {
     @Override
     public boolean keyPressed(KeyEvent event) {
         int keyCode = event.key();
-        boolean control = (event.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0;
+        boolean control = (event.modifiers() & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SUPER)) != 0;
         boolean shift = (event.modifiers() & GLFW.GLFW_MOD_SHIFT) != 0;
+        if (control && keyCode == GLFW.GLFW_KEY_V) {
+            importClipboardPath();
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE && importedPicture != null) {
+            importedPicture.close();
+            importedPicture = null;
+            status = Component.translatable("screen.openwheelracing.livery.cancelled").getString();
+            return true;
+        }
         if (control && keyCode == GLFW.GLFW_KEY_Z && !shift) {
             undo();
             return true;
@@ -268,6 +308,8 @@ public class LiveryEditorScreen extends Screen {
             preview.image().close();
             preview = null;
         }
+        if (importedPicture != null) { importedPicture.close(); importedPicture = null; }
+        if (liveryImage != null) { liveryImage.close(); liveryImage = null; }
         clearHistory(undoStack);
         clearHistory(redoStack);
     }
@@ -306,7 +348,7 @@ public class LiveryEditorScreen extends Screen {
     private void drawTextureCoordinate(GuiGraphics graphics, int mouseX, int mouseY) {
         int u = textureUCoordinate(mouseX);
         int v = textureVCoordinate(mouseY);
-        graphics.drawString(font, "u " + u + "  v " + v, textureX, textureY + viewSize + 20, 0xFFB9C2CC, false);
+        graphics.drawString(font, "u " + u + "  v " + v, textureX, textureY + viewSize + 8, 0xFFB9C2CC, false);
     }
 
     private void drawBrushCursor(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -323,6 +365,20 @@ public class LiveryEditorScreen extends Screen {
         int x = texturePixelScreenX(centerU) - diameter / 2;
         int y = texturePixelScreenY(centerV) - diameter / 2;
         graphics.renderOutline(x, y, diameter, diameter, brushColor());
+    }
+
+    private void drawPicturePlacement(GuiGraphics graphics, int mouseX, int mouseY) {
+        int u = textureUCoordinate(mouseX), v = textureVCoordinate(mouseY);
+        for (TextureAnnotation panel : annotations) {
+            if (u < panel.x() || v < panel.y() || u >= panel.x() + panel.width() || v >= panel.y() + panel.height()) continue;
+            var placement = PictureLivery.fit(importedPicture.getWidth(), importedPicture.getHeight(), panel.x(), panel.y(), panel.width(), panel.height());
+            int left = Math.max(textureX, texturePixelScreenX(placement.x()));
+            int top = Math.max(textureY, texturePixelScreenY(placement.y()));
+            int right = Math.min(textureX + viewSize, texturePixelScreenX(placement.x() + placement.width()));
+            int bottom = Math.min(textureY + viewSize, texturePixelScreenY(placement.y() + placement.height()));
+            if (right > left && bottom > top) graphics.renderOutline(left, top, right - left, bottom - top, 0xFFFFFFFF);
+            return;
+        }
     }
 
     private void paintTextureAt(double screenX, double screenY) {
@@ -486,12 +542,111 @@ public class LiveryEditorScreen extends Screen {
         if (preview != null) {
             preview.image().close();
         }
-        preview = LiveryPreviewRenderer.render(liveryImage, PrototypeCarItem.getLiveryColors(stack), yaw, viewSize, viewSize);
+        preview = LiveryPreviewRenderer.render(liveryImage, PrototypeCarItem.getLiveryColors(stack), yaw, viewSize, viewSize, pictureMode);
+    }
+
+    private void choosePicture(boolean asAtlas) {
+        try (MemoryStack memory = MemoryStack.stackPush()) {
+            if (asAtlas && importedPicture != null) {
+                importedPicture.close();
+                importedPicture = null;
+            }
+            String selected = TinyFileDialogs.tinyfd_openFileDialog("Import livery picture", "",
+                memory.pointers(memory.UTF8("*.png")), "PNG image", false);
+            if (selected != null) {
+                importPicture(Path.of(selected));
+                if (asAtlas && importedPicture != null) {
+                    if (importedPicture.getWidth() != ClientLiveryTextures.SIZE || importedPicture.getHeight() != ClientLiveryTextures.SIZE) {
+                        status = Component.translatable("screen.openwheelracing.livery.atlas_size").getString();
+                        importedPicture.close();
+                        importedPicture = null;
+                        return;
+                    }
+                    ClientLiveryTextures.normalizePicture(importedPicture);
+                    beginHistoryEdit();
+                    replaceLiveryImage(importedPicture);
+                    importedPicture = null;
+                    pictureMode = true;
+                    liveryImage.setPixel(0, 0, 0xFFFFFFFF);
+                    status = Component.translatable("screen.openwheelracing.livery.atlas_loaded").getString();
+                }
+            }
+        }
+    }
+
+    private void importClipboardPath() {
+        try {
+            String value = Minecraft.getInstance().keyboardHandler.getClipboard().strip();
+            if (value.startsWith("\"") && value.endsWith("\"")) value = value.substring(1, value.length() - 1);
+            importPicture(value.startsWith("file:") ? Path.of(java.net.URI.create(value)) : Path.of(value));
+        } catch (RuntimeException e) {
+            status = Component.translatable("screen.openwheelracing.livery.invalid_path").getString();
+        }
+    }
+
+    @Override
+    public void onFilesDrop(List<Path> paths) {
+        if (!paths.isEmpty()) importPicture(paths.getFirst());
+    }
+
+    private void importPicture(Path path) {
+        try {
+            if (Files.size(path) > 16 * 1024 * 1024) throw new IOException("PNG exceeds 16 MiB");
+            // Read dimensions before allocating native memory or decompressing pixels.
+            byte[] bytes = Files.readAllBytes(path);
+            java.nio.ByteBuffer header = java.nio.ByteBuffer.wrap(bytes);
+            if (bytes.length < 24 || header.getLong(0) != 0x89504E470D0A1A0AL
+                || header.getInt(12) != 0x49484452) throw new IOException("Expected a PNG image");
+            int w = header.getInt(16), h = header.getInt(20);
+            if (w <= 0 || h <= 0 || w > 4096 || h > 4096) throw new IOException("Maximum picture size is 4096 x 4096");
+            NativeImage loaded = NativeImage.read(bytes);
+            if (importedPicture != null) importedPicture.close();
+            importedPicture = loaded;
+            importedName = path.getFileName().toString();
+            status = Component.translatable("screen.openwheelracing.livery.place", importedName).getString();
+        } catch (IOException | RuntimeException e) {
+            status = Component.translatable("screen.openwheelracing.livery.failed", e.getMessage()).getString();
+        }
+    }
+
+    private void pastePictureAt(double x, double y) {
+        pastePictureAtUv(textureUCoordinate(x), textureVCoordinate(y));
+    }
+
+    private void pastePictureAtUv(int u, int v) {
+        for (TextureAnnotation panel : annotations) {
+            if (u < panel.x() || v < panel.y() || u >= panel.x() + panel.width() || v >= panel.y() + panel.height()) continue;
+            beginHistoryEdit();
+            if (!pictureMode) {
+                replaceLiveryImage(ClientLiveryTextures.pictureBase(liveryImage, PrototypeCarItem.getLiveryColors(stack)));
+                pictureMode = true;
+            }
+            PictureLivery.Placement placement = PictureLivery.fit(importedPicture.getWidth(), importedPicture.getHeight(),
+                panel.x(), panel.y(), panel.width(), panel.height());
+            for (int py = 0; py < placement.height(); py++) {
+                for (int px = 0; px < placement.width(); px++) {
+                    int tx = placement.x() + px, ty = placement.y() + py;
+                    int color = importedPicture.getPixel(px * importedPicture.getWidth() / placement.width(),
+                        py * importedPicture.getHeight() / placement.height());
+                    liveryImage.setPixel(tx, ty, PictureLivery.composite(color, liveryImage.getPixel(tx, ty)));
+                }
+            }
+            previewDirty = true;
+            textureDirty = true;
+            status = Component.translatable("screen.openwheelracing.livery.placed", importedName, panel.name()).getString();
+            return;
+        }
+        status = Component.translatable("screen.openwheelracing.livery.select_panel").getString();
     }
 
     private void save() {
         try {
-            if (texture == null || !texture.isPresent()) {
+            if (pictureMode) {
+                // An immutable id avoids altering other cars sharing an older texture.
+                texture = new CarLiveryTexture("picture_v1_" + java.util.UUID.randomUUID());
+                liveryImage.setPixel(0, 0, 0xFFFFFFFF);
+                ClientLiveryTextures.save(Minecraft.getInstance(), texture.id(), liveryImage);
+            } else if (texture == null || !texture.isPresent() || texture.isPicture()) {
                 texture = ClientLiveryTextures.saveNew(Minecraft.getInstance(), liveryImage);
             } else {
                 ClientLiveryTextures.save(Minecraft.getInstance(), texture.id(), liveryImage);
@@ -509,16 +664,17 @@ public class LiveryEditorScreen extends Screen {
     private void reset() {
         beginHistoryEdit();
         ClientLiveryTextures.fillTemplate(liveryImage, PrototypeCarItem.getLiveryColors(stack).body());
+        if (pictureMode) replaceLiveryImage(ClientLiveryTextures.pictureBase(liveryImage, PrototypeCarItem.getLiveryColors(stack)));
         previewDirty = true;
         textureDirty = true;
         status = "Template reset";
     }
 
     private void beginHistoryEdit() {
-        undoStack.addLast(copyImage(liveryImage));
+        undoStack.addLast(new HistoryEntry(copyImage(liveryImage), pictureMode));
         while (undoStack.size() > MAX_HISTORY) {
-            NativeImage removed = undoStack.removeFirst();
-            removed.close();
+            HistoryEntry removed = undoStack.removeFirst();
+            removed.image().close();
         }
         clearHistory(redoStack);
     }
@@ -528,8 +684,8 @@ public class LiveryEditorScreen extends Screen {
             status = "Nothing to undo";
             return;
         }
-        redoStack.addLast(copyImage(liveryImage));
-        replaceLiveryImage(undoStack.removeLast());
+        redoStack.addLast(new HistoryEntry(copyImage(liveryImage), pictureMode));
+        restoreHistory(undoStack.removeLast());
         status = "Undo";
     }
 
@@ -538,9 +694,16 @@ public class LiveryEditorScreen extends Screen {
             status = "Nothing to redo";
             return;
         }
-        undoStack.addLast(copyImage(liveryImage));
-        replaceLiveryImage(redoStack.removeLast());
+        undoStack.addLast(new HistoryEntry(copyImage(liveryImage), pictureMode));
+        restoreHistory(redoStack.removeLast());
         status = "Redo";
+    }
+
+    private record HistoryEntry(NativeImage image, boolean picture) {}
+
+    private void restoreHistory(HistoryEntry entry) {
+        pictureMode = entry.picture();
+        replaceLiveryImage(entry.image());
     }
 
     private void replaceLiveryImage(NativeImage image) {
@@ -551,9 +714,9 @@ public class LiveryEditorScreen extends Screen {
         textureDirty = true;
     }
 
-    private void clearHistory(ArrayDeque<NativeImage> stack) {
+    private void clearHistory(ArrayDeque<HistoryEntry> stack) {
         while (!stack.isEmpty()) {
-            stack.removeLast().close();
+            stack.removeLast().image().close();
         }
     }
 

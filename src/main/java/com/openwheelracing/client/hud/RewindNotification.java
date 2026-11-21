@@ -74,6 +74,7 @@ public final class RewindNotification {
             case com.openwheelracing.network.VehicleRollbackNetwork.UNVERIFIED -> "unverified";
             case com.openwheelracing.network.VehicleRollbackNetwork.SYNC -> "resynced";
             case com.openwheelracing.network.VehicleRollbackNetwork.BLOCKED -> "blocked";
+            case com.openwheelracing.network.VehicleRollbackNetwork.CAR_CONTACT -> "car_contact";
             default -> preview ? "preview" : "title";
         };
         Component title = Component.translatable("hud.openwheelracing.rewind." + key);

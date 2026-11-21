@@ -41,4 +41,12 @@ class AcceptedMotionClockTest {
         assertEquals(289, clock.accept(3, 301, 10_050_000_000L).end());
         assertEquals(301, clock.now(10_050_000_000L, 0));
     }
+    @Test
+    void serverServiceTimeCannotBeDiscardedAsPacketJitter() {
+        var clock = new AcceptedMotionClock();
+        clock.accept(1, 100, 0);
+        clock.resumeAfterHold();
+        assertEquals(300, clock.accept(2, 300, 10_000_000_000L).end());
+        assertEquals(301, clock.accept(3, 301, 10_050_000_000L).end());
+    }
 }

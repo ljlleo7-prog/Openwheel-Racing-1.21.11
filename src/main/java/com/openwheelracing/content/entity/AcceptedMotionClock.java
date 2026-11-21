@@ -5,7 +5,8 @@ final class AcceptedMotionClock {
     static final long STEP_NANOS = 50_000_000L;
     static final int BURST_FRAMES = 12;
     record Interval(double start, double end) {}
-    private boolean initialized;
+    private boolean initialized, resuming;
+    void resumeAfterHold() { resuming = true; }
     private int firstSequence, lastSequence;
     private double firstTime, timeOffset, tokens = BURST_FRAMES;
     private long lastBudget, anchoredAt;
@@ -27,6 +28,10 @@ final class AcceptedMotionClock {
         tokens--;
         lastSequence = sequence;
         double sequenceEnd = firstTime + (sequence - firstSequence);
+        if (resuming) {
+            timeOffset = Math.max(timeOffset, firstTime + Math.max(0, now - anchoredAt) / (double) STEP_NANOS - sequenceEnd);
+            resuming = false;
+        }
         // Bounded jitter grace must not let a frozen/slowed client stop the race clock.
         double earliest = firstTime + Math.max(0, now - anchoredAt) / (double) STEP_NANOS - BURST_FRAMES;
         timeOffset = Math.max(timeOffset, earliest - sequenceEnd);

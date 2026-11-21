@@ -53,7 +53,7 @@ public final class GrandPrixWeekendService {
             }
             GrandPrixWeekend.SessionView session = active.get();
             if (session.state().isActive() && OWRRaceControlState.get(level).getGlobalFlag() == com.openwheelracing.content.race.RaceFlagMode.RED) {
-                weekend.suspend(RaceSessionSuspensionReason.DIRECTOR, tick, null, "RED_FLAG");
+                weekend.suspend(RaceSessionSuspensionReason.RED_FLAG, tick, null, "RED_FLAG");
                 LiveRaceTimingService.stop(level, "RED_FLAG");
                 resetCarTiming(level);
                 registry.markDirty();
@@ -181,6 +181,11 @@ public final class GrandPrixWeekendService {
         Set<UUID> eligible = weekend.entries().stream()
             .filter(entry -> entry.status() == GrandPrixWeekend.EntryStatus.ENTERED)
             .map(GrandPrixWeekend.Entry::driverId).collect(Collectors.toUnmodifiableSet());
+        if (!formation && weekend.restarting()) {
+            boolean resumed = LiveRaceTimingService.resume(level);
+            if (resumed) resetCarTiming(level);
+            return new LiveRaceTimingService.StartResult(resumed, resumed ? "Restart timing resumed" : "No suspended timing to resume");
+        }
         OWRLapRecords.get(level).activateSession(session.config().sessionId(), session.config().name());
         int laps = !formation && session.config().format() == GrandPrixWeekend.SessionFormat.LAP_COUNT_RACE
             ? session.config().lapLimit() : 0;

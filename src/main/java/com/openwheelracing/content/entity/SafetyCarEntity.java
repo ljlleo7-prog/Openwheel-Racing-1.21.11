@@ -106,6 +106,10 @@ public class SafetyCarEntity extends OpenwheelCarEntity {
 
     @Override
     protected ItemStack createPickupItem() {
-        return SafetyCarItem.create(getDamagePercent(), getTyreWearPercent());
+        ItemStack item = SafetyCarItem.create(getDamagePercent(), getTyreWearPercent());
+        item.set(com.openwheelracing.registry.OWRDataComponents.TYRES_FITTED.get(), hasTyres());
+        item.set(com.openwheelracing.registry.OWRDataComponents.TYRE_TYPE.get(), getTyreType().id());
+        item.set(com.openwheelracing.registry.OWRDataComponents.TYRE_COMPOUND.get(), getTyreCompound());
+        return item;
     }
 }

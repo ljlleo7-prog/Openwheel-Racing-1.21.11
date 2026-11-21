@@ -52,6 +52,7 @@ public final class PerformanceRules {
         if (state.length >= 70) {
             for (int i = 66; i < 70; i++) if (state[i] < 0 || state[i] > 100) return false;
         }
+        if (state.length >= 80 && (state[78] < 0 || state[78] > 1 || state[79] < 0 || state[79] > 1)) return false;
         return true;
     }
 }

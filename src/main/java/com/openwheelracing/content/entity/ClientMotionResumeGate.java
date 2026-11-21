@@ -4,6 +4,7 @@ package com.openwheelracing.content.entity;
 final class ClientMotionResumeGate {
     private boolean waiting;
     void block() { waiting = true; }
+    void reset() { waiting = false; }
     boolean hold(float throttle, float brake) {
         if (waiting && throttle <= 0.05f && brake <= 0.05f) waiting = false;
         return waiting;

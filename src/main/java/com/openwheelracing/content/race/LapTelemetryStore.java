@@ -103,8 +103,12 @@ public final class LapTelemetryStore {
     }
 
     private static List<Path> findCandidates(Path directory, OWRLapRecords.LapRecord lap) throws IOException {
-        String suffix = "-" + lap.id() + ".csv";
-        String safeDimension = lap.dimensionId().replaceAll("[^a-zA-Z0-9._-]", "_");
+        return findCandidates(directory, lap.id(), lap.dimensionId());
+    }
+
+    private static List<Path> findCandidates(Path directory, long lapId, String dimension) throws IOException {
+        String suffix = "-" + lapId + ".csv";
+        String safeDimension = dimension.replaceAll("[^a-zA-Z0-9._-]", "_");
         LinkedHashSet<Path> candidates = new LinkedHashSet<>();
         for (Path root : List.of(directory, directory.getParent())) {
             if (!Files.isDirectory(root)) continue;
@@ -129,9 +133,10 @@ public final class LapTelemetryStore {
 
     private static void write(Path directory, LapTelemetryRecorder.Snapshot data, String fileName, String captureHeader) {
         Path file = directory.resolve(fileName);
+        Path pending = directory.resolve(fileName + ".tmp");
         try {
             Files.createDirectories(directory);
-            try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
+            try (BufferedWriter writer = Files.newBufferedWriter(pending, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
                 if (captureHeader != null) {
                     writer.write(captureHeader);
@@ -149,12 +154,34 @@ public final class LapTelemetryStore {
                     writer.newLine();
                 }
             }
+            try {
+                Files.move(pending, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(pending, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException exception) {
             LOGGER.error("Could not save lap telemetry for lap {}", data.lapId(), exception);
         }
     }
 
     private static Optional<LapTelemetryData> read(Path file, OWRLapRecords.LapRecord lap) throws IOException {
+        return read(file, lap.id(), lap.driverName(), lap.lapMillis());
+    }
+
+    /** Blocking disk-only read for an external I/O worker; never accesses/schedules the game server. */
+    public static Optional<LapTelemetryData> readStored(Path worldRoot, long lapId, java.util.UUID driverId,
+                                                       String dimension, String driverName, int lapMillis) throws IOException {
+        Path directory = worldRoot.resolve("openwheelracing").resolve("lap-telemetry");
+        String name = fileName(lapId, driverId, dimension);
+        var result = read(directory.resolve(name), lapId, driverName, lapMillis);
+        if (result.isEmpty()) result = read(directory.getParent().resolve(name), lapId, driverName, lapMillis);
+        // A web request must never use a same-numbered lap from another dimension/driver.
+        // Canonical and exact-name legacy paths are sufficient and avoid directory scans.
+        return result;
+    }
+
+    private static Optional<LapTelemetryData> read(Path file, long lapId, String driverName, int lapMillis) throws IOException {
         if (!Files.isRegularFile(file) || Files.size(file) > 256 * 1024L) return Optional.empty();
         double routeLength = 0.0;
         int capacity = LapTelemetryData.MAX_SAMPLES;
@@ -193,7 +220,7 @@ public final class LapTelemetryStore {
             }
         }
         if (count < 2 || !(routeLength > 0.0) || !Double.isFinite(routeLength)) return Optional.empty();
-        return Optional.of(new LapTelemetryData(lap.id(), lap.driverName(), lap.lapMillis(), routeLength,
+        return Optional.of(new LapTelemetryData(lapId, driverName, lapMillis, routeLength,
             java.util.Arrays.copyOf(elapsed, count), java.util.Arrays.copyOf(route, count),
             java.util.Arrays.copyOf(covered, count), java.util.Arrays.copyOf(speed, count),
             java.util.Arrays.copyOf(x, count), java.util.Arrays.copyOf(y, count), java.util.Arrays.copyOf(z, count),

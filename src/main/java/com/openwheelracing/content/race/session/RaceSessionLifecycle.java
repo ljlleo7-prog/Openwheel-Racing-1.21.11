@@ -159,7 +159,7 @@ public final class RaceSessionLifecycle {
             case AWAITING_START -> to == RaceSessionState.COUNTDOWN || to == RaceSessionState.ABANDONED;
             case COUNTDOWN -> to == RaceSessionState.RUNNING || to == RaceSessionState.STAGING || to == RaceSessionState.ABANDONED;
             case RUNNING -> to == RaceSessionState.FINISHING || to == RaceSessionState.ABANDONED;
-            case SUSPENDED -> to == RaceSessionState.FINISHING || to == RaceSessionState.ABANDONED;
+            case SUSPENDED -> to == RaceSessionState.FORMATION_COUNTDOWN || to == RaceSessionState.FINISHING || to == RaceSessionState.ABANDONED;
             case FINISHING -> to == RaceSessionState.PROVISIONAL || to == RaceSessionState.ABANDONED;
             case PROVISIONAL -> to == RaceSessionState.OFFICIAL || to == RaceSessionState.FINISHING || to == RaceSessionState.ABANDONED;
             case OFFICIAL, ABANDONED -> false;

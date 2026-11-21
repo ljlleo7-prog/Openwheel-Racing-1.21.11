@@ -100,6 +100,8 @@ public final class LiveRaceTimingService {
         if (runtime == null || runtime.active) {
             return false;
         }
+        runtime.localized.clear();
+        runtime.engine.resumeAt(runtime.collectObservations(level));
         runtime.active = true;
         runtime.suspensionReason = "";
         runtime.forceBroadcast = true;

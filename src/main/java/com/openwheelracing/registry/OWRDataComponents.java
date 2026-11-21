@@ -36,6 +36,10 @@ public final class OWRDataComponents {
             .build()
     );
 
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<Boolean>> TYRES_FITTED = DATA_COMPONENTS.register("tyres_fitted",
+        () -> DataComponentType.<Boolean>builder().persistent(Codec.BOOL)
+            .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.BOOL).build());
+
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<Integer>> TYRE_WEAR = DATA_COMPONENTS.register("tyre_wear",
         () -> DataComponentType.<Integer>builder()
             .persistent(Codec.intRange(0, 100))

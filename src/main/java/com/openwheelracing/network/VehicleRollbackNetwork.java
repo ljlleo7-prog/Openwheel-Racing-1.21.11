@@ -14,7 +14,9 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 /** Simulation frames are distinct from the legacy, idle-suppressed input sequence. */
 public final class VehicleRollbackNetwork {
-    public static final int CHECKING = 0, REWOUND = 1, CONFIRMED = 2, UNVERIFIED = 3, SYNC = 4, RECONCILE = 5, BLOCKED = 6;
+    public static final int MOTION_STATE_SIZE = 80;
+    public static final int MOTION_COUNTER_SIZE = 18;
+    public static final int CHECKING = 0, REWOUND = 1, CONFIRMED = 2, UNVERIFIED = 3, SYNC = 4, RECONCILE = 5, BLOCKED = 6, SERVER_CONTROL = 7, DRIVER_CONTROL = 8, CAR_CONTACT = 9;
     private VehicleRollbackNetwork() {}
 
     public static void register(PayloadRegistrar registrar) {
@@ -112,11 +114,11 @@ public final class VehicleRollbackNetwork {
         Vec3 position = readVector(b), velocity = readVector(b); float yaw = b.readFloat();
         boolean ground = b.readBoolean(); int tick = b.readInt();
         int length = b.readVarInt();
-        if (length != OpenwheelCarEntity.rollbackStateSize()) throw new IllegalArgumentException("Invalid rewind state");
+        if (length != MOTION_STATE_SIZE) throw new IllegalArgumentException("Invalid rewind state");
         double[] state = new double[length];
         for (int i = 0; i < length; i++) state[i] = b.readDouble();
         int count = b.readVarInt();
-        if (count != OpenwheelCarEntity.rollbackCounterSize()) throw new IllegalArgumentException("Invalid rewind counters");
+        if (count != MOTION_COUNTER_SIZE) throw new IllegalArgumentException("Invalid rewind counters");
         int[] counters = new int[count];
         for (int i = 0; i < count; i++) counters[i] = b.readInt();
         return new OpenwheelCarEntity.RollbackMotion(position, velocity, yaw, ground, tick, state, counters);
